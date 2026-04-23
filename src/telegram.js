@@ -76,6 +76,13 @@ async function handleMessage(msg) {
   try {
     if (String(msg.chat.id) !== String(GROUP_ID)) return;
     const topicId = msg.message_thread_id;
+
+    // Delete service messages about topic renaming (generated when bot renames topics)
+    if (msg.forum_topic_edited && topicId) {
+      try { await bot.deleteMessage(GROUP_ID, msg.message_id); } catch {}
+      return;
+    }
+
     if (!topicId || (msg.from && msg.from.is_bot)) return;
 
     const ticket = db.getTicketByTopicId.get(topicId);
@@ -247,6 +254,19 @@ async function notifyTicketReopened(ticket) {
   } catch (e) { console.error('[TG] notifyTicketReopened:', e.message); }
 }
 
+async function autoCloseTicket(ticket) {
+  if (!bot || !GROUP_ID || !ticket.telegram_topic_id) return;
+  const tid = ticket.telegram_topic_id;
+  try {
+    await setTopicStatus(tid, ticket, E_CLOSED);
+    await safeSend(GROUP_ID,
+      '⏱ Тикет закрыт автоматически — нет активности 1 час\n/reopen — переоткрыть',
+      { message_thread_id: tid }
+    );
+    await bot.closeForumTopic(GROUP_ID, tid).catch(() => {});
+  } catch (e) { console.error('[TG] autoCloseTicket:', e.message); }
+}
+
 async function cleanupOldTopics() {
   if (!bot || !GROUP_ID) return;
   try {
@@ -266,4 +286,4 @@ async function cleanupOldTopics() {
   } catch (e) { console.error('[TG] cleanup:', e.message); }
 }
 
-module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened };
+module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened, autoCloseTicket };
