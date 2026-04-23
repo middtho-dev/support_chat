@@ -290,6 +290,16 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
   -webkit-appearance:none;transition:all .18s;
 }
 .reopenbtn:active{background:rgba(59,130,246,.22)}
+.newbtn{
+  padding:6px 14px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:8px;color:var(--t2);
+  font-size:12.5px;font-weight:600;font-family:inherit;
+  cursor:pointer;white-space:nowrap;flex-shrink:0;
+  -webkit-appearance:none;transition:all .18s;
+}
+.newbtn:active{background:rgba(255,255,255,.12)}
 
 /* INPUT */
 .iarea{
@@ -450,7 +460,10 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 
   <div class="cbar" id="cbar" style="display:none">
     <span class="cbar-t">🔒 Обращение закрыто</span>
-    <button class="reopenbtn" id="reopenbtn">Переоткрыть</button>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button class="reopenbtn" id="reopenbtn">Переоткрыть</button>
+      <button class="newbtn" id="newbtn">Новый чат</button>
+    </div>
   </div>
 
   <div class="epick" id="ep" style="display:none"></div>

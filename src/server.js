@@ -238,6 +238,45 @@ io.on('connection', (socket) => {
   });
 });
 
+// ─── INACTIVITY AUTO-CLOSE ──────────────────────────────────────────────────
+
+const staleTicketsQuery = db.db.prepare(`
+  SELECT t.* FROM tickets t
+  LEFT JOIN (
+    SELECT ticket_id, MAX(created_at) AS last_msg FROM messages GROUP BY ticket_id
+  ) m ON m.ticket_id = t.id
+  WHERE t.status = 'open'
+  AND COALESCE(m.last_msg, t.created_at) < datetime('now', '-1 hour')
+`);
+
+async function inactivityCheck() {
+  try {
+    const stale = staleTicketsQuery.all();
+    for (const ticket of stale) {
+      db.closeTicket.run(ticket.id);
+
+      const msgId = uuidv4();
+      const created_at = new Date().toISOString();
+      const content = 'Обращение закрыто автоматически — нет активности в течение 1 часа.';
+      db.saveMessage.run(msgId, ticket.id, 'system', 'Система', content, 'text', null, null, null, null);
+
+      io.to(`ticket:${ticket.id}`).emit('message', {
+        id: msgId, ticket_id: ticket.id,
+        sender: 'system', sender_name: 'Система',
+        content, message_type: 'text',
+        file_url: null, file_name: null, file_mime: null,
+        created_at
+      });
+      io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'inactivity' });
+
+      telegram.autoCloseTicket(ticket).catch(() => {});
+      console.log(`[Auto] Closed inactive ticket ${ticket.id.slice(0, 8)}`);
+    }
+  } catch (e) { console.error('[Auto] inactivityCheck:', e.message); }
+}
+
+setInterval(inactivityCheck, 60 * 1000);
+
 // Health check
 app.get('/health', (req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
 

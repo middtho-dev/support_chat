@@ -19,12 +19,12 @@ const fp=$('fp'),fpth=$('fpth'),fprm=$('fprm');
 const ia=$('ia'),cbar=$('cbar'),hcl=$('hcl');
 const ebt=$('ebt'),ep=$('ep');
 const tst=$('tst'),sdwn=$('sdwn');
-const reopenbtn=$('reopenbtn');
+const reopenbtn=$('reopenbtn'),newbtn=$('newbtn');
 
 /* ── SOCKET ── */
 const socket=io({autoConnect:false});
 socket.on('message',msg=>{const b=isBot();renderMsg(msg);if(b)scrollBot();else{S.unread++;updSDB()}});
-socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':'Обращение закрыто')});
+socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто')});
 socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';showToast('Обращение переоткрыто')});
 socket.on('connect',()=>{if(S.tid)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token})});
 
@@ -103,6 +103,17 @@ reopenbtn.addEventListener('click',async()=>{
   }catch{showToast('Ошибка — попробуйте снова')}
 });
 
+/* ── NEW CHAT ── */
+newbtn.addEventListener('click',()=>{
+  clearS();
+  socket.disconnect();
+  S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;
+  ml.innerHTML='';
+  cbar.style.display='none';ia.style.display='';hcl.style.display='';
+  ni.value='';sb.disabled=true;
+  showLogin();
+});
+
 /* ── RENDER ── */
 function renderMsgs(msgs){ml.innerHTML='';S.lastDate=null;if(!msgs.length){renderEmpty();return}msgs.forEach(renderMsg)}
 function renderEmpty(){const d=document.createElement('div');d.className='emp';d.innerHTML=`<svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M29 6C16.3 6 6 15.3 6 27c0 6.3 2.9 12 7.6 16L12 52l9.5-2.8A23.5 23.5 0 0029 52c12.7 0 23-9.3 23-21S41.7 6 29 6Z"/><circle cx="20" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="29" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="38" cy="28" r="2" fill="currentColor" stroke="none"/></svg><p>Напишите ваш первый вопрос — ответим быстро</p>`;ml.appendChild(d)}
@@ -110,6 +121,7 @@ function renderSys(txt){ml.querySelector('.emp')?.remove();const d=document.crea
 
 function renderMsg(msg){
   ml.querySelector('.emp')?.remove();
+  if(msg.sender==='system'){renderSys(msg.content||'');return;}
   const dt=new Date(msg.created_at),ds=fmtDate(dt);
   if(ds!==S.lastDate){S.lastDate=ds;const s=document.createElement('div');s.className='dsp';s.innerHTML=`<span>${ds}</span>`;ml.appendChild(s)}
   const isO=msg.sender==='user';
