@@ -76,8 +76,7 @@ sb.addEventListener('click',async()=>{
     if(!r.ok)throw 0;
     const{sessionToken,ticketId,userName}=await r.json();
     S.token=sessionToken;S.tid=ticketId;S.uname=userName;
-    saveS();showChat();socket.connect();
-    setTimeout(()=>renderSys('Добро пожаловать! Опишите вашу проблему — ответим как можно скорее.'),300);
+    saveS();showChat();renderMsgs([]);socket.connect();
   }catch{showToast('Ошибка подключения');sb.disabled=false;sl.textContent='Начать чат'}
 });
 
