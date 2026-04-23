@@ -53,8 +53,8 @@ async function init(){
         if(ticket.status==='closed'){S.closed=true;markClosed();}
         return;
       }
-    }catch{}
-    clearS();
+      clearS(); // server rejected (ticket gone) — clear stored session
+    }catch{showLogin();return;} // network error — keep session for next load
   }
   showLogin();
 }
@@ -87,7 +87,7 @@ function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on')}
 hcl.addEventListener('click',()=>{
   if(S.closed)return;
   dlg('Закрыть обращение?','После закрытия вы не сможете писать. Можно переоткрыть в любое время.',async()=>{
-    await fetch(`/api/tickets/${S.tid}/close`,{method:'POST'});
+    await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
     markClosed();clearS();
   });
 });
@@ -96,7 +96,7 @@ function markClosed(){S.closed=true;ia.style.display='none';cbar.style.display='
 /* ── REOPEN ── */
 reopenbtn.addEventListener('click',async()=>{
   try{
-    const r=await fetch(`/api/tickets/${S.tid}/reopen`,{method:'POST'});
+    const r=await fetch(`/api/tickets/${S.tid}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
     if(!r.ok)throw 0;
     S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';
     saveS();socket.connect();showToast('Обращение переоткрыто');

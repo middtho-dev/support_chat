@@ -6,8 +6,6 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
-const cookieParser = require('cookie-parser');
-
 const db = require('./database');
 const telegram = require('./telegram');
 
@@ -53,7 +51,6 @@ const upload = multer({
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ─── REST API ────────────────────────────────────────────────────────────────
@@ -68,7 +65,7 @@ app.post('/api/session/start', (req, res) => {
   const ticketId = uuidv4();
 
   db.createTicket.run(ticketId, name, sessionToken);
-  telegram.createTopic(ticketId, name).catch(() => {});
+  telegram.createTopic(ticketId, name).catch(e => console.error('[TG] createTopic:', e?.message));
 
   res.json({ sessionToken, ticketId, userName: name });
 });
@@ -112,22 +109,26 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 });
 
 app.post('/api/tickets/:ticketId/close', (req, res) => {
+  const { sessionToken } = req.body;
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Not found' });
+  if (!sessionToken || ticket.session_token !== sessionToken) return res.status(403).json({ error: 'Forbidden' });
 
   db.closeTicket.run(ticket.id);
-  telegram.notifyTicketClosed(ticket).catch(() => {});
+  telegram.notifyTicketClosed(ticket).catch(e => console.error('[TG] notifyTicketClosed:', e?.message));
   io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'user' });
 
   res.json({ ok: true });
 });
 
 app.post('/api/tickets/:ticketId/reopen', (req, res) => {
+  const { sessionToken } = req.body;
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Not found' });
+  if (!sessionToken || ticket.session_token !== sessionToken) return res.status(403).json({ error: 'Forbidden' });
 
   db.reopenTicket.run(ticket.id);
-  telegram.notifyTicketReopened(ticket).catch(() => {});
+  telegram.notifyTicketReopened(ticket).catch(e => console.error('[TG] notifyTicketReopened:', e?.message));
   io.to(`ticket:${ticket.id}`).emit('ticket_reopened');
 
   res.json({ ok: true });
@@ -224,7 +225,7 @@ io.on('connection', (socket) => {
       };
 
       io.to(`ticket:${ticketId}`).emit('message', message);
-      telegram.forwardMessage(ticket, message).catch(() => {});
+      telegram.forwardMessage(ticket, message).catch(e => console.error('[TG] forwardMessage:', e?.message));
 
       if (ack) ack({ ok: true, id: msgId });
     } catch (err) {

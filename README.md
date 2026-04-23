@@ -1,95 +1,60 @@
 # Support Chat
 
-Чат поддержки с интеграцией Telegram. Клиенты пишут через веб-интерфейс, операторы отвечают в Telegram-группе.
+Веб-чат поддержки с интеграцией Telegram. Клиенты пишут через браузер, операторы отвечают в Telegram-группе.
 
 ## Возможности
 
 - Реальный обмен сообщениями (Socket.IO)
 - Загрузка файлов: фото, видео, аудио, документы до 50 МБ
-- Автоматические приветственные сообщения при старте чата
 - Telegram: каждое обращение — отдельная тема в группе
-- Статусы тикетов: 🟢 открыт · 🟡 ожидает ответа · 🔴 закрыт
-- HTTPS через Let's Encrypt (Caddy, бесплатно)
-- Сессии сохраняются в браузере
+- Автозакрытие тикета после 1 часа неактивности
+- HTTPS через Let's Encrypt (Caddy)
 
 ---
 
-## Установка с нуля
+## Быстрый старт
+
+**Требования:** VPS с Ubuntu/Debian, домен с A-записью на IP, порты 80 и 443 открыты.
 
 ### 1. Подготовка Telegram
 
 1. Создайте бота через [@BotFather](https://t.me/BotFather) → `/newbot` → скопируйте токен
 2. Создайте супергруппу → **Настройки → Темы → Включить**
-3. Добавьте бота в группу как **администратора** (права: управление группой, темами, публикация)
+3. Добавьте бота в группу как **администратора** (управление группой, темами, публикация)
 4. Узнайте ID группы через [@userinfobot](https://t.me/userinfobot) — вид: `-1001234567890`
 
-### 2. Развёртывание на сервере
-
-Требования: VPS с Ubuntu/Debian, домен с A-записью на IP сервера, открытые порты 80 и 443.
+### 2. Установка
 
 ```bash
-# Скопируйте папку на сервер
 scp -r support_chat root@<IP>:/root/
-
-# Подключитесь и запустите установщик
 ssh root@<IP>
 cd /root/support_chat
 bash setup.sh
 ```
 
-Установщик интерактивно спросит домен, токен и Group ID, после чего:
-- установит Docker и Caddy
-- создаст `.env` с настройками
-- настроит HTTPS (Let's Encrypt)
-- запустит приложение в Docker
-- настроит firewall (порты 22, 80, 443)
-
-После завершения сайт доступен на `https://ваш-домен`.
-
----
-
-## Обновление
-
-```bash
-cd /root/support_chat
-sudo bash update.sh
-```
-
-Скрипт пересоберёт Docker-образ и перезапустит контейнер. Данные (база, файлы) и настройки Caddy не затрагиваются.
-
-**Вручную (то же самое):**
-
-```bash
-cd /root/support_chat
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-```
+Скрипт спросит домен, токен и Group ID, затем установит Docker и Caddy, настроит HTTPS и запустит приложение.
 
 ---
 
 ## Управление
 
 ```bash
-# Логи приложения в реальном времени
+# Обновление после изменений кода
+sudo bash update.sh
+
+# Логи
 docker logs support-chat -f
 
-# Перезапуск без пересборки образа
+# Перезапуск
 docker compose restart
 
-# Полная остановка
+# Остановка
 docker compose down
-
-# Логи Caddy (HTTPS, SSL)
-journalctl -u caddy -f
-
-# Перезапуск Caddy
-systemctl restart caddy
 ```
 
 ---
 
-## Команды в Telegram
+## Команды Telegram
 
 Внутри темы тикета:
 
@@ -102,22 +67,20 @@ systemctl restart caddy
 
 ## Переменные окружения
 
-Файл `.env` создаётся автоматически при `setup.sh`. При необходимости можно редактировать вручную и после этого выполнить `sudo bash update.sh`.
+Создаются автоматически при `setup.sh`. Редактировать в `.env`, после — `sudo bash update.sh`.
 
 | Переменная | Описание | По умолчанию |
 |------------|----------|--------------|
-| `TELEGRAM_BOT_TOKEN` | Токен бота от @BotFather | — |
-| `TELEGRAM_GROUP_ID` | ID Telegram-группы (отрицательное число) | — |
+| `TELEGRAM_BOT_TOKEN` | Токен бота | — |
+| `TELEGRAM_GROUP_ID` | ID группы (отрицательное) | — |
 | `PORT` | Порт приложения | `3001` |
-| `DB_PATH` | Путь к SQLite базе данных | `/app/data/support.db` |
-| `UPLOADS_DIR` | Папка для загружаемых файлов | `/app/public/uploads` |
+| `DB_PATH` | Путь к SQLite базе | `/app/data/support.db` |
+| `UPLOADS_DIR` | Папка загрузок | `/app/public/uploads` |
 | `CORS_ORIGIN` | Разрешённый origin для Socket.IO | `*` |
 
 ---
 
 ## Резервные копии
-
-Данные хранятся в Docker volumes (`support-data`, `support-uploads`).
 
 ```bash
 # База данных
@@ -129,21 +92,19 @@ docker cp support-chat:/app/public/uploads ./backup_uploads_$(date +%Y%m%d)
 
 ---
 
-## Структура проекта
+## Структура
 
 ```
 support_chat/
 ├── src/
-│   ├── server.js        # Express + Socket.IO сервер
-│   ├── database.js      # SQLite схема и подготовленные запросы
-│   └── telegram.js      # Telegram Bot интеграция
+│   ├── server.js      # Express + Socket.IO
+│   ├── database.js    # SQLite
+│   └── telegram.js    # Telegram Bot
 ├── public/
-│   ├── index.html       # HTML-шаблон с инлайн-CSS
-│   ├── js/app.js        # Клиентский JavaScript
-│   └── logo.png         # Логотип
+│   ├── index.html
+│   └── js/app.js
 ├── Dockerfile
 ├── docker-compose.yml
-├── setup.sh             # Установка с нуля
-├── update.sh            # Быстрое обновление
-└── .env                 # Конфигурация (создаётся setup.sh)
+├── setup.sh
+└── update.sh
 ```
