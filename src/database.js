@@ -84,6 +84,10 @@ module.exports = {
     SELECT * FROM tickets WHERE status = 'open' ORDER BY updated_at DESC
   `),
 
+  reopenTicket: db.prepare(`
+    UPDATE tickets SET status='open', closed_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?
+  `),
+
   // Messages
   saveMessage: db.prepare(`
     INSERT INTO messages (id, ticket_id, sender, sender_name, content, message_type, file_url, file_name, file_mime, telegram_message_id)

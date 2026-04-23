@@ -5,11 +5,18 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
+      - NODE_ENV=production
       - PORT=3001
       - DB_PATH=/app/data/support.db
       - UPLOADS_DIR=/app/public/uploads
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_GROUP_ID=${TELEGRAM_GROUP_ID}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:$$PORT/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     volumes:
       - support-data:/app/data
       - support-uploads:/app/public/uploads
