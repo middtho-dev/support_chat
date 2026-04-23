@@ -1,0 +1,19 @@
+services:
+  support-chat:
+    build: .
+    container_name: support-chat
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=3001
+      - DB_PATH=/app/data/support.db
+      - UPLOADS_DIR=/app/public/uploads
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_GROUP_ID=${TELEGRAM_GROUP_ID}
+    volumes:
+      - support-data:/app/data
+      - support-uploads:/app/public/uploads
+
+volumes:
+  support-data:
+  support-uploads:

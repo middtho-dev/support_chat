@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d0d0d">
+<title>Поддержка — KV9RU</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:      #0d0d0d;
+  --bg2:     #141414;
+  --bg3:     #1c1c1c;
+  --bg4:     #242424;
+  --out:     #0c3547;
+  --out2:    #0e4560;
+  --in:      #181818;
+  --blue:    #0ea5e9;
+  --blue2:   #0284c7;
+  --blue3:   #0369a1;
+  --t1:      #f0f0f0;
+  --t2:      #6b7280;
+  --t3:      #374151;
+  --link:    #60a5fa;
+  --green:   #22c55e;
+  --red:     #ef4444;
+  --bdr:     rgba(255,255,255,.06);
+}
+html{height:100%;overflow:hidden;overscroll-behavior:none}
+body{
+  height:100%;overflow:hidden;overscroll-behavior:none;
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  background:var(--bg);color:var(--t1);
+  -webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;
+}
+input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
+
+#app{
+  display:flex;flex-direction:column;
+  height:100vh;height:100dvh;
+  max-width:800px;margin:0 auto;
+  background:var(--bg);
+  overflow:hidden;
+  border-left:1px solid var(--bdr);
+  border-right:1px solid var(--bdr);
+}
+@media(max-width:800px){#app{border:none}}
+
+.scr{display:none;flex-direction:column;flex:1;overflow:hidden;min-height:0}
+.scr.on{display:flex}
+
+/* ═══ LOGIN ═══ */
+#ls{
+  justify-content:center;align-items:center;
+  padding:32px 24px;
+  background:var(--bg);
+}
+
+.lcard{
+  width:100%;max-width:340px;
+  display:flex;flex-direction:column;align-items:center;
+  animation:rise .4s cubic-bezier(.34,1.4,.64,1) both;
+}
+@keyframes rise{from{opacity:0;transform:translateY(28px) scale(.96)}to{opacity:1;transform:none}}
+
+/* Логотип KV9 */
+.llogo{
+  width:72px;height:72px;border-radius:16px;
+  background:linear-gradient(135deg,#1e3a5f 0%,#1d4ed8 100%);
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:24px;
+  box-shadow:0 0 0 1px rgba(59,130,246,.3),0 8px 32px rgba(29,78,216,.3);
+  font-size:22px;font-weight:800;color:#fff;letter-spacing:-1px;
+  font-family:'Inter',sans-serif;
+}
+
+.ltit{
+  font-size:22px;font-weight:700;color:#fff;
+  margin-bottom:8px;text-align:center;letter-spacing:-.3px;
+}
+.lsub{
+  font-size:14px;color:var(--t2);
+  text-align:center;line-height:1.6;
+  margin-bottom:32px;max-width:240px;
+}
+
+.linp{
+  width:100%;padding:13px 16px;
+  background:var(--bg2);
+  border:1px solid var(--bg4);
+  border-radius:10px;
+  font-size:16px;font-family:inherit;color:var(--t1);
+  outline:none;margin-bottom:12px;
+  -webkit-appearance:none;
+  transition:border-color .2s,box-shadow .2s;
+}
+.linp:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.linp::placeholder{color:var(--t3)}
+
+.lbtn{
+  width:100%;padding:13px;
+  background:var(--blue);color:#fff;
+  border:none;border-radius:10px;
+  font-size:15px;font-weight:600;font-family:inherit;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+  -webkit-appearance:none;
+  box-shadow:0 4px 16px rgba(59,130,246,.25);
+  transition:background .15s,transform .1s,opacity .2s;
+}
+.lbtn:active:not(:disabled){transform:scale(.97);background:var(--blue2)}
+.lbtn:disabled{opacity:.35;cursor:default;box-shadow:none}
+
+/* ═══ CHAT ═══ */
+#cs{background:var(--bg)}
+
+/* Тонкий паттерн */
+#cs::before{
+  content:'';position:absolute;
+  top:52px;left:0;right:0;bottom:0;
+  background-image:radial-gradient(rgba(255,255,255,.018) 1px,transparent 1px);
+  background-size:28px 28px;
+  pointer-events:none;z-index:0;
+}
+
+/* HEADER */
+.hdr{
+  height:52px;flex-shrink:0;
+  background:var(--bg2);
+  border-bottom:1px solid var(--bdr);
+  display:flex;align-items:center;
+  padding:0 8px 0 14px;gap:10px;
+  z-index:10;position:relative;
+}
+
+.hlogo{
+  width:34px;height:34px;border-radius:8px;
+  background:linear-gradient(135deg,#1e3a5f,#1d4ed8);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+  font-size:11px;font-weight:800;color:#fff;letter-spacing:-.5px;
+}
+
+.hin{flex:1;min-width:0}
+.hname{font-size:14px;font-weight:600;color:var(--t1);letter-spacing:-.1px}
+.hst{display:flex;align-items:center;gap:4px;margin-top:1px}
+.hdot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;animation:blink 2.5s ease infinite}
+@keyframes blink{0%,100%{opacity:1}60%{opacity:.3}}
+.hstxt{font-size:11.5px;color:var(--t2)}
+
+.hbtn{
+  display:flex;align-items:center;gap:4px;
+  padding:6px 10px;
+  border:1px solid rgba(255,255,255,.08);border-radius:8px;
+  background:transparent;color:var(--t2);
+  font-size:12px;font-family:inherit;font-weight:500;
+  cursor:pointer;white-space:nowrap;flex-shrink:0;
+  -webkit-appearance:none;transition:all .18s;
+}
+.hbtn:active{border-color:var(--red);color:var(--red);background:rgba(239,68,68,.08)}
+@media(max-width:380px){.hbtxt{display:none}.hbtn{padding:7px 8px}}
+
+/* MESSAGES */
+.mwrap{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior-y:contain;
+  position:relative;z-index:1;
+  min-height:0;
+}
+.mwrap::-webkit-scrollbar{width:3px}
+.mwrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,.06);border-radius:3px}
+
+.mlist{
+  display:flex;flex-direction:column;
+  gap:2px;padding:10px 12px 8px;
+  min-height:100%;justify-content:flex-end;
+}
+
+.dsp{display:flex;justify-content:center;margin:8px 0 4px}
+.dsp span{
+  background:rgba(255,255,255,.05);
+  color:var(--t2);font-size:11.5px;font-weight:500;
+  padding:3px 12px;border-radius:10px;
+}
+
+/* Пузыри */
+.msg{display:flex;flex-direction:column;max-width:72%;animation:mpop .16s ease both}
+@keyframes mpop{from{opacity:0;transform:scale(.96) translateY(5px)}to{opacity:1;transform:none}}
+.msg.o{align-self:flex-end}
+.msg.i{align-self:flex-start}
+
+.bub{
+  padding:8px 11px 5px;
+  border-radius:14px;
+  word-break:break-word;line-height:1.47;position:relative;
+}
+.msg.o .bub{
+  background:linear-gradient(135deg,#1e3a5f,#1a4070);
+  border-bottom-right-radius:4px;
+}
+.msg.i .bub{
+  background:var(--in);
+  border:1px solid rgba(255,255,255,.06);
+  border-bottom-left-radius:4px;
+}
+/* Хвостики */
+.msg.o .bub::after{
+  content:'';position:absolute;bottom:0;right:-6px;
+  border:7px solid transparent;
+  border-left-color:#1a4070;
+  border-bottom:0;border-right:0;
+}
+.msg.i .bub::after{
+  content:'';position:absolute;bottom:0;left:-6px;
+  border:7px solid transparent;
+  border-right-color:var(--in);
+  border-bottom:0;border-left:0;
+}
+.msg.o+.msg.o .bub{border-bottom-right-radius:14px}
+.msg.o+.msg.o .bub::after,.msg.i+.msg.i .bub::after{display:none}
+.msg.i+.msg.i .bub{border-bottom-left-radius:14px}
+
+.bsnm{font-size:12px;font-weight:600;color:var(--blue);margin-bottom:3px;opacity:.9}
+.btxt{font-size:14.5px;color:var(--t1)}
+.btxt a{color:var(--link)}
+
+.bmeta{
+  display:flex;align-items:center;justify-content:flex-end;
+  gap:3px;margin-top:3px;
+  float:right;clear:right;margin-left:8px;margin-bottom:-2px;
+}
+.btime{font-size:10.5px;color:var(--t2)}
+.msg.o .btime{color:rgba(147,197,253,.5)}
+
+.mimg{max-width:220px;max-height:250px;border-radius:10px;cursor:zoom-in;display:block;object-fit:cover}
+.mvid{max-width:220px;border-radius:10px;display:block}
+.maud{width:190px;margin:3px 0;filter:invert(.85) hue-rotate(180deg)}
+.mfile{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;min-width:160px}
+.fic{width:36px;height:36px;border-radius:50%;background:rgba(59,130,246,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--blue)}
+.fnm{font-size:13px;font-weight:500;color:var(--t1);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.sysmsg{display:flex;justify-content:center;margin:6px 0}
+.sysmsg span{background:rgba(255,255,255,.04);color:var(--t2);font-size:11.5px;padding:4px 12px;border-radius:10px}
+
+.emp{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:14px;color:var(--t2);text-align:center}
+.emp svg{opacity:.15}
+.emp p{font-size:14px;max-width:200px;line-height:1.6}
+
+/* Кнопка вниз */
+.sdwn{
+  position:absolute;right:12px;bottom:12px;
+  width:34px;height:34px;border-radius:50%;
+  background:var(--bg3);border:1px solid var(--bdr);
+  color:var(--t2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 12px rgba(0,0,0,.4);
+  opacity:0;transform:scale(.8);
+  transition:opacity .2s,transform .2s;
+  pointer-events:none;z-index:5;
+}
+.sdwn.on{opacity:1;transform:scale(1);pointer-events:auto}
+.ubadge{
+  position:absolute;top:-5px;right:-4px;
+  background:var(--blue);color:#fff;
+  font-size:10px;font-weight:700;
+  min-width:17px;height:17px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;padding:0 3px;
+}
+
+/* Закрыт */
+.cbar{
+  flex-shrink:0;background:rgba(239,68,68,.05);
+  border-top:1px solid rgba(239,68,68,.15);
+  padding:0 14px;min-height:50px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.cbar-t{font-size:13px;font-weight:500;color:#f87171;display:flex;align-items:center;gap:6px}
+.reopenbtn{
+  padding:6px 14px;
+  background:rgba(59,130,246,.12);
+  border:1px solid rgba(59,130,246,.25);
+  border-radius:8px;color:var(--blue);
+  font-size:12.5px;font-weight:600;font-family:inherit;
+  cursor:pointer;white-space:nowrap;flex-shrink:0;
+  -webkit-appearance:none;transition:all .18s;
+}
+.reopenbtn:active{background:rgba(59,130,246,.22)}
+
+/* INPUT */
+.iarea{
+  flex-shrink:0;
+  background:var(--bg2);
+  border-top:1px solid var(--bdr);
+  padding:8px 10px;
+  padding-bottom:calc(8px + env(safe-area-inset-bottom,0px));
+}
+
+.fprev{margin-bottom:7px}
+.fpi{
+  display:flex;align-items:center;gap:8px;
+  background:var(--bg3);
+  border-left:2px solid var(--blue);
+  border-radius:8px;padding:7px 10px;
+}
+.fpth{flex:1;min-width:0}
+.fpth img{max-height:52px;max-width:80px;border-radius:6px;object-fit:cover;display:block}
+.fpnm{font-size:12px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fprm{width:20px;height:20px;border-radius:50%;border:none;background:rgba(255,255,255,.08);color:var(--t2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;-webkit-appearance:none}
+
+.irow{display:flex;align-items:flex-end;gap:6px}
+
+.icn{
+  width:42px;height:42px;border-radius:50%;border:none;
+  background:transparent;color:var(--t2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;-webkit-appearance:none;transition:color .15s,background .15s;
+}
+.icn:active{color:var(--blue);background:var(--bg3)}
+
+.sndbtn{
+  width:42px;height:42px;border-radius:50%;border:none;
+  background:var(--blue);color:#fff;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;-webkit-appearance:none;
+  box-shadow:0 2px 10px rgba(59,130,246,.3);
+  transition:background .15s,transform .1s;
+}
+.sndbtn:disabled{background:var(--bg3);color:var(--t3);box-shadow:none}
+.sndbtn:not(:disabled):active{transform:scale(.88)}
+
+.tbox{
+  flex:1;background:var(--bg3);border-radius:20px;
+  padding:10px 14px;min-height:42px;
+  display:flex;align-items:center;
+  border:1px solid transparent;transition:border-color .2s;
+}
+.tbox:focus-within{border-color:rgba(59,130,246,.2)}
+
+#ti{
+  width:100%;border:none;background:transparent;
+  font-family:inherit;font-size:16px;color:var(--t1);
+  resize:none;outline:none;line-height:1.45;
+  max-height:108px;overflow-y:auto;display:block;
+  -webkit-appearance:none;
+}
+#ti::placeholder{color:var(--t3)}
+
+/* Emoji picker */
+.epick{
+  background:var(--bg2);
+  border-top:1px solid var(--bdr);
+  padding:10px 8px 8px;
+}
+.ecats{display:flex;gap:2px;overflow-x:auto;padding-bottom:7px;margin-bottom:7px;border-bottom:1px solid var(--bg3);scrollbar-width:none}
+.ecats::-webkit-scrollbar{display:none}
+.ecat{font-size:19px;padding:5px 7px;min-width:34px;border:none;background:transparent;cursor:pointer;border-radius:7px;flex-shrink:0;-webkit-appearance:none;transition:background .1s}
+.ecat.on{background:var(--bg3)}
+.egrid{display:grid;grid-template-columns:repeat(auto-fill,36px);gap:2px;max-height:180px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bg3) transparent}
+.egrid::-webkit-scrollbar{width:3px}
+.egrid::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px}
+.eitm{width:36px;height:36px;font-size:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:7px;border:none;background:transparent;-webkit-appearance:none;transition:background .1s}
+.eitm:active{background:var(--bg3)}
+
+/* Modal */
+.mov{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;animation:fin .15s ease}
+@keyframes fin{from{opacity:0}to{opacity:1}}
+.mbox{
+  background:var(--bg2);
+  border:1px solid var(--bdr);
+  border-radius:14px;padding:22px;
+  max-width:280px;width:calc(100% - 40px);
+  box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+.mbox h3{font-size:15px;font-weight:700;color:var(--t1);margin-bottom:8px}
+.mbox p{font-size:13px;color:var(--t2);line-height:1.5;margin-bottom:18px}
+.mbtns{display:flex;gap:8px;justify-content:flex-end}
+.mbc{padding:8px 14px;border-radius:8px;font-size:13px;font-family:inherit;font-weight:600;cursor:pointer;border:none;background:var(--bg3);color:var(--t1);-webkit-appearance:none}
+.mbo{padding:8px 14px;border-radius:8px;font-size:13px;font-family:inherit;font-weight:600;cursor:pointer;border:none;background:var(--red);color:#fff;-webkit-appearance:none}
+
+/* Toast */
+.tst{
+  position:fixed;bottom:80px;left:50%;
+  transform:translateX(-50%) translateY(10px);
+  background:rgba(20,20,20,.95);backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--t1);padding:9px 16px;border-radius:20px;font-size:13px;
+  pointer-events:none;opacity:0;
+  transition:opacity .2s,transform .2s;
+  z-index:9999;white-space:nowrap;
+}
+.tst.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Lightbox */
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:2000;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+.lb img,.lb video{max-width:96vw;max-height:92vh;border-radius:8px;object-fit:contain}
+
+/* Spinner */
+.uspin{display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:13px;color:var(--t2)}
+.sp{width:14px;height:14px;border:2px solid var(--bg3);border-top-color:var(--blue);border-radius:50%;animation:rot .7s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- LOGIN -->
+<div id="ls" class="scr on">
+  <div class="lcard">
+    <img src="/logo.png" alt="KV9RU" style="width:80px;height:80px;border-radius:16px;margin-bottom:24px;object-fit:cover;display:block">
+    <div class="ltit">Поддержка KV9RU</div>
+    <div class="lsub">Представьтесь — ответим как можно скорее</div>
+    <input id="ni" class="linp" type="text" placeholder="Ваше имя" maxlength="50" autocomplete="given-name" enterkeyhint="go">
+    <button id="sb" class="lbtn" disabled>
+      <span id="sl">Начать чат</span>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 8h11M8.5 3.5l5 4.5-5 4.5"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- CHAT -->
+<div id="cs" class="scr">
+  <div class="hdr">
+    <img src="/logo.png" alt="KV9RU" style="width:34px;height:34px;border-radius:8px;object-fit:cover;flex-shrink:0">
+    <div class="hin">
+      <div class="hname">Служба поддержки</div>
+      <div class="hst"><span class="hdot"></span><span class="hstxt">онлайн</span></div>
+    </div>
+    <button class="hbtn" id="hcl">
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <rect x="1" y="1" width="11" height="11" rx="2"/>
+        <path d="M4 4l5 5M9 4l-5 5"/>
+      </svg>
+      <span class="hbtxt">Закрыть</span>
+    </button>
+  </div>
+
+  <div style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
+    <div class="mwrap" id="mwrap">
+      <div class="mlist" id="ml"></div>
+    </div>
+    <button class="sdwn" id="sdwn">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 5.5l4.5 4.5 4.5-4.5"/></svg>
+    </button>
+  </div>
+
+  <div class="cbar" id="cbar" style="display:none">
+    <span class="cbar-t">🔒 Обращение закрыто</span>
+    <button class="reopenbtn" id="reopenbtn">Переоткрыть</button>
+  </div>
+
+  <div class="epick" id="ep" style="display:none"></div>
+
+  <div class="iarea" id="ia">
+    <div class="fprev" id="fp" style="display:none">
+      <div class="fpi">
+        <div class="fpth" id="fpth"></div>
+        <button class="fprm" id="fprm">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 1l8 8M9 1L1 9"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="irow">
+      <button class="icn" id="abt">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M19.5 11.5L10.5 20.5a6 6 0 01-8.5-8.5L11 2.5a4 4 0 015.7 5.7L7.5 17.5a2 2 0 01-2.8-2.8l8-8"/>
+        </svg>
+      </button>
+      <input type="file" id="fi" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.zip" style="display:none">
+      <div class="tbox">
+        <textarea id="ti" placeholder="Сообщение..." rows="1" enterkeyhint="send"></textarea>
+      </div>
+      <button class="icn" id="ebt">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <circle cx="11" cy="11" r="9"/>
+          <path d="M7 14s1.2 2.5 4 2.5 4-2.5 4-2.5"/>
+          <circle cx="8" cy="9" r="1.1" fill="currentColor" stroke="none"/>
+          <circle cx="14" cy="9" r="1.1" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button class="sndbtn" id="sndbtn" disabled>
+        <svg width="19" height="19" viewBox="0 0 19 19" fill="currentColor">
+          <path d="M2.5 9.5L17 3 10 17l-.8-6.5L2.5 9.5z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+</div>
+<div class="tst" id="tst"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

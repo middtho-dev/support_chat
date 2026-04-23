@@ -1,0 +1,20 @@
+{
+  "name": "support-chat",
+  "version": "1.0.0",
+  "description": "Support chat with Telegram integration",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "better-sqlite3": "^9.4.3",
+    "node-telegram-bot-api": "^0.65.1",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^9.0.0",
+    "cookie-parser": "^1.4.6",
+    "express-session": "^1.17.3",
+    "dotenv": "^16.4.5"
+  }
+}
