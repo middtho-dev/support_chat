@@ -4,19 +4,14 @@ const fs = require('fs');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../data/support.db');
 
-// Ensure data directory exists
 const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new Database(DB_PATH);
 
-// Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-// Initialize schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS tickets (
     id TEXT PRIMARY KEY,
@@ -49,6 +44,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 `);
 
+// Migration: add reply_to_id column if not exists
+try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
+
 module.exports = {
   // Tickets
   createTicket: db.prepare(`
@@ -56,51 +54,43 @@ module.exports = {
     VALUES (?, ?, ?, 'open')
   `),
 
-  getTicketBySessionAny: db.prepare(`
-    SELECT * FROM tickets WHERE session_token = ?
-  `),
+  getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
+  getTicketBySession:    db.prepare(`SELECT * FROM tickets WHERE session_token = ? AND status = 'open'`),
+  getTicketById:         db.prepare(`SELECT * FROM tickets WHERE id = ?`),
 
-  getTicketBySession: db.prepare(`
-    SELECT * FROM tickets WHERE session_token = ? AND status = 'open'
-  `),
+  setTopicId:   db.prepare(`UPDATE tickets SET telegram_topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
+  closeTicket:  db.prepare(`UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
+  reopenTicket: db.prepare(`UPDATE tickets SET status = 'open', closed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
 
-  getTicketById: db.prepare(`
-    SELECT * FROM tickets WHERE id = ?
-  `),
+  // Returns only open tickets (for forwarding messages)
+  getTicketByTopicId:    db.prepare(`SELECT * FROM tickets WHERE telegram_topic_id = ? AND status = 'open'`),
+  // Returns ticket regardless of status (for handling /close, /reopen commands)
+  getTicketByTopicIdAny: db.prepare(`SELECT * FROM tickets WHERE telegram_topic_id = ?`),
 
-  setTopicId: db.prepare(`
-    UPDATE tickets SET telegram_topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-  `),
-
-  closeTicket: db.prepare(`
-    UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-  `),
-
-  getTicketByTopicId: db.prepare(`
-    SELECT * FROM tickets WHERE telegram_topic_id = ? AND status = 'open'
-  `),
-
-  getAllOpenTickets: db.prepare(`
-    SELECT * FROM tickets WHERE status = 'open' ORDER BY updated_at DESC
-  `),
-
-  reopenTicket: db.prepare(`
-    UPDATE tickets SET status='open', closed_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?
-  `),
+  getAllOpenTickets: db.prepare(`SELECT * FROM tickets WHERE status = 'open' ORDER BY updated_at DESC`),
 
   // Messages
   saveMessage: db.prepare(`
-    INSERT INTO messages (id, ticket_id, sender, sender_name, content, message_type, file_url, file_name, file_mime, telegram_message_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages
+      (id, ticket_id, sender, sender_name, content, message_type, file_url, file_name, file_mime, telegram_message_id, reply_to_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
 
+  // JOIN to bring reply content alongside each message
   getMessages: db.prepare(`
-    SELECT * FROM messages WHERE ticket_id = ? ORDER BY created_at ASC
+    SELECT m.*,
+      r.content      AS reply_to_content,
+      r.sender_name  AS reply_to_sender_name,
+      r.message_type AS reply_to_type,
+      r.file_name    AS reply_to_file_name
+    FROM messages m
+    LEFT JOIN messages r ON r.id = m.reply_to_id
+    WHERE m.ticket_id = ? ORDER BY m.created_at ASC
   `),
 
-  updateTelegramMessageId: db.prepare(`
-    UPDATE messages SET telegram_message_id = ? WHERE id = ?
-  `),
+  getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
+
+  updateTelegramMessageId: db.prepare(`UPDATE messages SET telegram_message_id = ? WHERE id = ?`),
 
   db
 };

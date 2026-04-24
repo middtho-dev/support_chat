@@ -88,7 +88,7 @@ hcl.addEventListener('click',()=>{
   if(S.closed)return;
   dlg('Закрыть обращение?','После закрытия вы не сможете писать. Можно переоткрыть в любое время.',async()=>{
     await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
-    markClosed();clearS();
+    markClosed();
   });
 });
 function markClosed(){S.closed=true;ia.style.display='none';cbar.style.display='flex';hcl.style.display='none'}
@@ -129,6 +129,7 @@ function renderMsg(msg){
   let h='';
   if(!isO)h+=`<div class="bsnm">${esc(msg.sender_name)}</div>`;
   h+='<div class="bub">';
+  if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
   if(msg.message_type==='image'&&msg.file_url){
     h+=`<img class="mimg" src="${msg.file_url}" loading="lazy" onclick="openLb(this)">`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${esc(msg.content)}</div>`;

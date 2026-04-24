@@ -7,17 +7,16 @@ const { v4: uuidv4 } = require('uuid');
 const TOKEN    = process.env.TELEGRAM_BOT_TOKEN;
 const GROUP_ID = process.env.TELEGRAM_GROUP_ID;
 
-let bot           = null;
-let io            = null;
+let bot            = null;
+let io             = null;
 let reconnectTimer = null;
-let connected     = false;
+let connected      = false;
 
-// Эмодзи статусов — меняются только при создании/закрытии/переоткрытии
 const E_OPEN   = '🟢';
 const E_CLOSED = '🔴';
 const E_WAIT   = '🟡';
 
-// Хранит текущий статус темы чтобы не переименовывать лишний раз
+// Tracks current topic emoji to avoid unnecessary renames
 const topicStatus = new Map();
 
 function init(socketIo) {
@@ -77,27 +76,40 @@ async function handleMessage(msg) {
     if (String(msg.chat.id) !== String(GROUP_ID)) return;
     const topicId = msg.message_thread_id;
 
-    // Delete service messages about topic renaming (generated when bot renames topics)
+    // Delete service messages about topic renaming
     if (msg.forum_topic_edited && topicId) {
-      try { await bot.deleteMessage(GROUP_ID, msg.message_id); } catch {}
+      try { await bot.deleteMessage(GROUP_ID, msg.message_id); }
+      catch (e) { console.error('[TG] Delete rename notice failed (needs can_delete_messages):', e.message); }
       return;
     }
 
     if (!topicId || (msg.from && msg.from.is_bot)) return;
 
-    const ticket = db.getTicketByTopicId.get(topicId);
+    // Use Any variant so commands work on closed tickets too
+    const ticket = db.getTicketByTopicIdAny.get(topicId);
     if (!ticket) return;
 
     const rawText = msg.text || msg.caption || null;
     const cmd = parseCmd(rawText);
 
     if (cmd === '/close') {
+      if (ticket.status === 'closed') {
+        await safeSend(GROUP_ID, '⚠️ Тикет уже закрыт. /reopen — переоткрыть', { message_thread_id: topicId });
+        return;
+      }
       await closeTicketFromTelegram(ticket, topicId);
       return;
     }
+
     if (cmd === '/reopen') {
-      db.db.prepare(`UPDATE tickets SET status='open', closed_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(ticket.id);
-      // Переименовываем только если статус изменился
+      if (ticket.status !== 'closed') {
+        await safeSend(GROUP_ID, '⚠️ Тикет уже открыт', { message_thread_id: topicId });
+        return;
+      }
+      db.reopenTicket.run(ticket.id);
+      try { await bot.reopenForumTopic(GROUP_ID, topicId); } catch {}
+      // Force rename regardless of cached status
+      topicStatus.delete(topicId);
       await setTopicStatus(topicId, ticket, E_OPEN);
       await safeSend(GROUP_ID, '🟢 Тикет переоткрыт', { message_thread_id: topicId });
       if (io) io.to(`ticket:${ticket.id}`).emit('ticket_reopened');
@@ -109,6 +121,8 @@ async function handleMessage(msg) {
       return;
     }
 
+    // --- Regular message from operator ---
+
     let type = 'text', fileUrl = null, fileName = null, fileMime = null;
     if (msg.photo || msg.video || msg.document || msg.voice) {
       const f = await downloadFile(msg);
@@ -116,11 +130,24 @@ async function handleMessage(msg) {
     }
     if (!rawText && !fileUrl) return;
 
-    const id = uuidv4();
-    db.saveMessage.run(id, ticket.id, 'support', msg.from.first_name || 'Support',
-      rawText, type, fileUrl, fileName, fileMime, msg.message_id);
+    // Detect reply/quote
+    let replyToId = null, replyToContent = null, replyToSenderName = null, replyToType = null, replyToFileName = null;
+    if (msg.reply_to_message) {
+      const replyMsg = db.getMessageByTelegramId.get(msg.reply_to_message.message_id);
+      if (replyMsg) {
+        replyToId         = replyMsg.id;
+        replyToContent    = replyMsg.content;
+        replyToSenderName = replyMsg.sender_name;
+        replyToType       = replyMsg.message_type;
+        replyToFileName   = replyMsg.file_name;
+      }
+    }
 
-    // НЕ переименовываем при обычных ответах — только при ключевых событиях
+    const id = uuidv4();
+    db.saveMessage.run(
+      id, ticket.id, 'support', msg.from.first_name || 'Support',
+      rawText, type, fileUrl, fileName, fileMime, msg.message_id, replyToId
+    );
 
     if (io) {
       io.to(`ticket:${ticket.id}`).emit('message', {
@@ -129,7 +156,12 @@ async function handleMessage(msg) {
         sender_name: msg.from.first_name || 'Support',
         content: rawText, message_type: type,
         file_url: fileUrl, file_name: fileName, file_mime: fileMime,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        reply_to_id:          replyToId          || null,
+        reply_to_content:     replyToContent     || null,
+        reply_to_sender_name: replyToSenderName  || null,
+        reply_to_type:        replyToType        || null,
+        reply_to_file_name:   replyToFileName    || null,
       });
     }
   } catch (e) { console.error('[TG] handleMessage:', e.message); }
@@ -143,11 +175,10 @@ async function closeTicketFromTelegram(ticket, topicId) {
   try { await bot.closeForumTopic(GROUP_ID, topicId); } catch {}
 }
 
-// Переименовываем тему только если статус реально изменился
 async function setTopicStatus(topicId, ticket, emoji) {
   if (!bot || !GROUP_ID) return;
   const current = topicStatus.get(topicId);
-  if (current === emoji) return; // Уже в этом статусе — не трогаем
+  if (current === emoji) return;
   try {
     const t = db.getTicketById.get(typeof ticket === 'string' ? ticket : ticket.id);
     if (!t) return;
@@ -228,8 +259,6 @@ async function forwardMessage(ticket, message) {
       sent = await bot.sendDocument(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined });
     }
     if (sent) db.updateTelegramMessageId.run(sent.message_id, message.id);
-
-    // Меняем на 🟡 только если сейчас 🟢 (не спамим если уже 🟡)
     await setTopicStatus(tid, ticket, E_WAIT);
   } catch (e) { console.error('[TG] forwardMessage:', e.message); }
 }
@@ -249,6 +278,7 @@ async function notifyTicketReopened(ticket) {
   const tid = ticket.telegram_topic_id;
   try {
     await bot.reopenForumTopic(GROUP_ID, tid).catch(() => {});
+    topicStatus.delete(tid);
     await setTopicStatus(tid, ticket, E_OPEN);
     await safeSend(GROUP_ID, '🟢 Переоткрыто пользователем', { message_thread_id: tid });
   } catch (e) { console.error('[TG] notifyTicketReopened:', e.message); }

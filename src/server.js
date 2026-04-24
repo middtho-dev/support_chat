@@ -155,7 +155,7 @@ function scheduleWelcomeMessages(ticketId) {
 
     const id = uuidv4();
     const created_at = new Date().toISOString();
-    db.saveMessage.run(id, ticketId, 'support', SUPPORT_NAME, content, 'text', null, null, null, null);
+    db.saveMessage.run(id, ticketId, 'support', SUPPORT_NAME, content, 'text', null, null, null, null, null);
     io.to(`ticket:${ticketId}`).emit('message', {
       id, ticket_id: ticketId,
       sender: 'support', sender_name: SUPPORT_NAME,
@@ -213,7 +213,7 @@ io.on('connection', (socket) => {
         'user', ticket.user_name,
         content || null, msgType,
         fileUrl || null, fileName || null, fileMime || null,
-        null
+        null, null
       );
 
       const message = {
@@ -259,7 +259,7 @@ async function inactivityCheck() {
       const msgId = uuidv4();
       const created_at = new Date().toISOString();
       const content = 'Обращение закрыто автоматически — нет активности в течение 1 часа.';
-      db.saveMessage.run(msgId, ticket.id, 'system', 'Система', content, 'text', null, null, null, null);
+      db.saveMessage.run(msgId, ticket.id, 'system', 'Система', content, 'text', null, null, null, null, null);
 
       io.to(`ticket:${ticket.id}`).emit('message', {
         id: msgId, ticket_id: ticket.id,
