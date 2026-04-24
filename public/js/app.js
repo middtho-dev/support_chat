@@ -9,7 +9,7 @@ const ECATS=[
   {i:'❤️',e:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✨','⭐','🌟','💫','🔥','💥','🎉','🎊','🎁','🎈','🌈','☀️','🌤','⛅','🌧','❄️','☃️','⛄','🌊','🌸','🌺','🌻','🌹','🍀','🌿','🍃','🎵','🎶','💤','💬','💭','🔔','💡','🔍','💎','🔑','🧲','🌙','💸','💯']}
 ];
 
-const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0};
+const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0};
 const $=id=>document.getElementById(id);
 const ni=$('ni'),sb=$('sb'),sl=$('sl');
 const mwrap=$('mwrap'),ml=$('ml');
@@ -23,10 +23,17 @@ const reopenbtn=$('reopenbtn'),newbtn=$('newbtn');
 
 /* ── SOCKET ── */
 const socket=io({autoConnect:false});
-socket.on('message',msg=>{const b=isBot();renderMsg(msg);if(b)scrollBot();else{S.unread++;updSDB()}});
+socket.on('message',msg=>{
+  const b=isBot();renderMsg(msg);
+  if(b)scrollBot();
+  else{S.unread++;updSDB()}
+  if(msg.sender==='support'){playNotifSound();showBrowserNotif(msg);}
+});
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто')});
 socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';showToast('Обращение переоткрыто')});
-socket.on('connect',()=>{if(S.tid)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token})});
+socket.on('connect',()=>{setConnStatus('on');if(S.tid)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token})});
+socket.on('disconnect',()=>setConnStatus('off'));
+socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
 const SK='sc_v3';
@@ -81,7 +88,7 @@ sb.addEventListener('click',async()=>{
 });
 
 function showLogin(){$('ls').classList.add('on');$('cs').classList.remove('on');setTimeout(()=>ni.focus(),150)}
-function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on')}
+function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');tryRequestNotifications();}
 
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
@@ -126,10 +133,11 @@ function renderMsg(msg){
   if(ds!==S.lastDate){S.lastDate=ds;const s=document.createElement('div');s.className='dsp';s.innerHTML=`<span>${ds}</span>`;ml.appendChild(s)}
   const isO=msg.sender==='user';
   const w=document.createElement('div');w.className='msg '+(isO?'o':'i');
+  if(msg.id)w.dataset.msgId=msg.id;
   let h='';
   if(!isO)h+=`<div class="bsnm">${esc(msg.sender_name)}</div>`;
   h+='<div class="bub">';
-  if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
+  if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock" data-reply-id="${esc(msg.reply_to_id)}"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
   if(msg.message_type==='image'&&msg.file_url){
     h+=`<img class="mimg" src="${msg.file_url}" loading="lazy" onclick="openLb(this)">`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${esc(msg.content)}</div>`;
@@ -162,13 +170,18 @@ async function send(){
   }
   ti.value='';resize();updSend();closeEp();
   socket.emit('send_message',{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt},ack=>{
-    if(ack?.error)showToast(ack.error==='Ticket is closed'?'Обращение закрыто':'Ошибка');
+    if(ack?.error)showToast(ack.error==='Ticket is closed'?'Обращение закрыто':ack.error==='Rate limit'?'Слишком много сообщений — подождите':'Ошибка');
     sndbtn.disabled=false;updSend();
   });
 }
 sndbtn.addEventListener('click',send);
 ti.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
-ti.addEventListener('input',()=>{resize();updSend()});
+ti.addEventListener('input',()=>{
+  resize();updSend();
+  if(!S.tid||S.closed)return;
+  const now=Date.now();
+  if(now-S.lastTyping>4000){S.lastTyping=now;socket.emit('typing',{ticketId:S.tid,sessionToken:S.token});}
+});
 const updSend=()=>{sndbtn.disabled=!ti.value.trim()&&!S.file};
 function resize(){ti.style.height='auto';ti.style.height=Math.min(ti.scrollHeight,108)+'px'}
 
@@ -201,6 +214,17 @@ ebt.addEventListener('click',()=>{if(ep.style.display==='none'){ep.style.display
 function closeEp(){ep.style.display='none';S.epOpen=false}
 // НЕ закрываем emoji при фокусе textarea на мобильном — пусть остаётся
 
+/* ── QUOTE SCROLL ── */
+ml.addEventListener('click',e=>{
+  const qb=e.target.closest('.qblock[data-reply-id]');
+  if(!qb)return;
+  const target=ml.querySelector(`[data-msg-id="${qb.dataset.replyId}"]`);
+  if(!target)return;
+  target.scrollIntoView({behavior:'smooth',block:'center'});
+  target.classList.add('hl');
+  setTimeout(()=>target.classList.remove('hl'),1600);
+});
+
 /* ── SCROLL ── */
 const isBot=()=>mwrap.scrollHeight-mwrap.scrollTop-mwrap.clientHeight<120;
 function scrollBot(smooth=true){requestAnimationFrame(()=>mwrap.scrollTo({top:mwrap.scrollHeight,behavior:smooth?'smooth':'auto'}));S.unread=0;updSDB()}
@@ -229,6 +253,43 @@ function dlg(title,msg,cb){
 
 /* ── TOAST ── */
 let tt;function showToast(m,d=3200){clearTimeout(tt);tst.textContent=m;tst.classList.add('on');tt=setTimeout(()=>tst.classList.remove('on'),d)}
+
+/* ── CONNECTION STATUS ── */
+function setConnStatus(s){
+  const dot=$('cs').querySelector('.hdot');
+  const txt=$('cs').querySelector('.hstxt');
+  if(!dot||!txt)return;
+  if(s==='on'){dot.style.background='var(--green)';dot.style.animation='blink 2.5s ease infinite';txt.textContent='онлайн';}
+  else if(s==='connecting'){dot.style.background='#f59e0b';dot.style.animation='none';txt.textContent='переподключение...';}
+  else{dot.style.background='var(--red)';dot.style.animation='none';txt.textContent='нет соединения';}
+}
+
+/* ── NOTIFICATIONS ── */
+function playNotifSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const osc=ctx.createOscillator();const gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.frequency.value=880;osc.type='sine';
+    gain.gain.setValueAtTime(0.12,ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.35);
+    osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.35);
+  }catch{}
+}
+function tryRequestNotifications(){
+  if('Notification' in window&&Notification.permission==='default'){
+    Notification.requestPermission().catch(()=>{});
+  }
+}
+function showBrowserNotif(msg){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  if(document.visibilityState==='visible')return;
+  try{
+    const n=new Notification('Поддержка KV9RU',{body:msg.content||'Новое сообщение',icon:'/logo.png',tag:'support-msg'});
+    setTimeout(()=>n.close(),5000);
+    n.onclick=()=>{window.focus();n.close()};
+  }catch{}
+}
 
 /* ── UTILS ── */
 const esc=s=>s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):'';

@@ -136,12 +136,24 @@ app.post('/api/tickets/:ticketId/reopen', (req, res) => {
 
 // ─── SOCKET.IO ───────────────────────────────────────────────────────────────
 
-// Tracks tickets that already had welcome messages scheduled this session
 const welcomeSent = new Set();
+const messageRates = new Map();
+const warnedTickets = new Set();
 
 const SUPPORT_NAME = 'Поддержка KV9RU';
 const WELCOME_1 = 'Добро пожаловать в службу поддержки KV9RU! 👋';
 const WELCOME_2 = 'Чтобы мы могли быстрее разобраться и решить вашу проблему — пожалуйста, прикрепите скриншот из приложения VPN и опишите проблему максимально подробно 📸';
+
+function isRateLimited(sessionToken) {
+  const now = Date.now();
+  let rate = messageRates.get(sessionToken);
+  if (!rate || now > rate.resetAt) {
+    rate = { count: 0, resetAt: now + 60000 };
+  }
+  rate.count++;
+  messageRates.set(sessionToken, rate);
+  return rate.count > 20;
+}
 
 function scheduleWelcomeMessages(ticketId) {
   if (welcomeSent.has(ticketId)) return;
@@ -185,6 +197,13 @@ io.on('connection', (socket) => {
     scheduleWelcomeMessages(ticketId);
   });
 
+  socket.on('typing', () => {
+    if (!socket.ticketId) return;
+    const ticket = db.getTicketById.get(socket.ticketId);
+    if (!ticket || ticket.status === 'closed') return;
+    telegram.sendTyping(ticket).catch(() => {});
+  });
+
   socket.on('send_message', async (data, ack) => {
     try {
       const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType } = data;
@@ -204,6 +223,13 @@ io.on('connection', (socket) => {
         if (ack) ack({ error: 'Empty message' });
         return;
       }
+
+      if (isRateLimited(sessionToken)) {
+        if (ack) ack({ error: 'Rate limit' });
+        return;
+      }
+
+      warnedTickets.delete(ticket.id);
 
       const msgId = uuidv4();
       const msgType = messageType || 'text';
@@ -250,11 +276,43 @@ const staleTicketsQuery = db.db.prepare(`
   AND COALESCE(m.last_msg, t.created_at) < datetime('now', '-1 hour')
 `);
 
+const warnTicketsQuery = db.db.prepare(`
+  SELECT t.* FROM tickets t
+  LEFT JOIN (
+    SELECT ticket_id, MAX(created_at) AS last_msg FROM messages GROUP BY ticket_id
+  ) m ON m.ticket_id = t.id
+  WHERE t.status = 'open'
+  AND COALESCE(m.last_msg, t.created_at) < datetime('now', '-45 minutes')
+  AND COALESCE(m.last_msg, t.created_at) >= datetime('now', '-60 minutes')
+`);
+
 async function inactivityCheck() {
   try {
+    // Warn tickets approaching the 1-hour limit
+    const toWarn = warnTicketsQuery.all();
+    for (const ticket of toWarn) {
+      if (warnedTickets.has(ticket.id)) continue;
+      warnedTickets.add(ticket.id);
+
+      const msgId = uuidv4();
+      const created_at = new Date().toISOString();
+      const content = 'Нет активности 45 минут — обращение будет закрыто через 15 минут.';
+      db.saveMessage.run(msgId, ticket.id, 'system', 'Система', content, 'text', null, null, null, null, null);
+      io.to(`ticket:${ticket.id}`).emit('message', {
+        id: msgId, ticket_id: ticket.id,
+        sender: 'system', sender_name: 'Система',
+        content, message_type: 'text',
+        file_url: null, file_name: null, file_mime: null,
+        created_at
+      });
+      telegram.warnInactivity(ticket).catch(() => {});
+    }
+
+    // Close tickets that hit 1 hour of inactivity
     const stale = staleTicketsQuery.all();
     for (const ticket of stale) {
       db.closeTicket.run(ticket.id);
+      warnedTickets.delete(ticket.id);
 
       const msgId = uuidv4();
       const created_at = new Date().toISOString();
