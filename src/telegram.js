@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
 const db = require('./database');
+const push = require('./push');
 const { v4: uuidv4 } = require('uuid');
 
 const TOKEN    = process.env.TELEGRAM_BOT_TOKEN;
@@ -204,6 +205,7 @@ async function handleMessage(msg) {
         reply_to_file_name:   replyToFileName    || null,
       });
     }
+    push.send(ticket.id, rawText || 'Новое сообщение').catch(() => {});
   } catch (e) { console.error('[TG] handleMessage:', e.message); }
 }
 
@@ -342,6 +344,7 @@ async function autoCloseTicket(ticket) {
   if (!bot || !GROUP_ID || !ticket.telegram_topic_id) return;
   const tid = ticket.telegram_topic_id;
   try {
+    topicStatus.delete(tid); // force rename even if cache says already closed
     await setTopicStatus(tid, ticket, E_CLOSED);
     await safeSend(GROUP_ID,
       '⏱ Тикет закрыт автоматически — нет активности 1 час',

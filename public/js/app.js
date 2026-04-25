@@ -48,6 +48,9 @@ const clearS=()=>localStorage.removeItem(SK);
 async function init(){
   buildEmoji();
   updateLoginHint();
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw.js').catch(e=>console.warn('[SW] register failed',e));
+  }
 
   setAppHeight();
   window.addEventListener('resize',setAppHeight);
@@ -364,14 +367,34 @@ function playNotifSound(){
 }
 async function requestNotifications(){
   if(!('Notification' in window)){showToast('Уведомления не поддерживаются браузером');return;}
-  if(Notification.permission==='granted'){showToast('Уведомления уже включены ✓');return;}
+  if(Notification.permission==='granted'){showToast('Уведомления уже включены ✓');await setupPushSubscription();return;}
   if(Notification.permission==='denied'){showToast('Уведомления заблокированы — разрешите в настройках браузера');return;}
   try{
     const p=await Notification.requestPermission();
-    if(p==='granted')showToast('Уведомления включены ✓');
+    if(p==='granted'){showToast('Уведомления включены ✓');await setupPushSubscription();}
     else showToast('Уведомления не разрешены');
   }catch{showToast('Ошибка запроса уведомлений');}
 }
+
+async function setupPushSubscription(){
+  if(!S.tid||!S.token)return;
+  if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(sub){
+      // Already subscribed — re-send to server in case ticket changed
+      await fetch('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,subscription:sub.toJSON()})});
+      return;
+    }
+    const r=await fetch('/api/push/vapid-key');
+    if(!r.ok)return;
+    const{publicKey}=await r.json();
+    sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:publicKey});
+    await fetch('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,subscription:sub.toJSON()})});
+  }catch(e){console.warn('[Push] subscribe error',e);}
+}
+
 function tryRequestNotifications(){}  // permission now only via bell button
 function showBrowserNotif(msg){
   if(!('Notification' in window)||Notification.permission!=='granted')return;

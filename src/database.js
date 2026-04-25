@@ -47,6 +47,14 @@ db.exec(`
 // Migration: add reply_to_id column if not exists
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
 
+// Push subscriptions
+db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL,
+  subscription TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+
 module.exports = {
   // Tickets
   createTicket: db.prepare(`
@@ -91,6 +99,11 @@ module.exports = {
   getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
 
   updateTelegramMessageId: db.prepare(`UPDATE messages SET telegram_message_id = ? WHERE id = ?`),
+
+  // Push subscriptions
+  savePushSub: db.prepare(`INSERT OR REPLACE INTO push_subscriptions (id, ticket_id, subscription) VALUES (?, ?, ?)`),
+  getPushSubs: db.prepare(`SELECT * FROM push_subscriptions WHERE ticket_id = ?`),
+  delPushSub:  db.prepare(`DELETE FROM push_subscriptions WHERE id = ?`),
 
   db
 };

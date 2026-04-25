@@ -8,6 +8,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const db = require('./database');
 const telegram = require('./telegram');
+const push = require('./push');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,6 +18,7 @@ const io = new Server(server, {
 });
 
 telegram.init(io);
+push.init();
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -148,6 +150,25 @@ app.post('/api/tickets/:ticketId/reopen', (req, res) => {
   telegram.notifyTicketReopened(ticket).catch(e => console.error('[TG] notifyTicketReopened:', e?.message));
   io.to(`ticket:${ticket.id}`).emit('ticket_reopened');
 
+  res.json({ ok: true });
+});
+
+// ─── PUSH NOTIFICATIONS ──────────────────────────────────────────────────────
+
+app.get('/api/push/vapid-key', (req, res) => {
+  const key = push.getPublicKey();
+  if (!key) return res.status(503).json({ error: 'Push not configured' });
+  res.json({ publicKey: key });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+  const { ticketId, sessionToken, subscription } = req.body;
+  if (!subscription || !ticketId || !sessionToken) return res.status(400).json({ error: 'Missing params' });
+
+  const ticket = db.getTicketBySessionAny.get(sessionToken);
+  if (!ticket || ticket.id !== ticketId) return res.status(403).json({ error: 'Forbidden' });
+
+  db.savePushSub.run(uuidv4(), ticketId, JSON.stringify(subscription));
   res.json({ ok: true });
 });
 
