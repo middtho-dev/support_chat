@@ -38,11 +38,25 @@ const ALLOWED_MIMES = new Set([
   'application/x-zip'
 ]);
 
+// Extensions iOS Safari sends as application/octet-stream
+const IMG_EXTS  = new Set(['.jpg','.jpeg','.png','.gif','.webp','.heic','.heif','.bmp','.tiff','.avif']);
+const VID_EXTS  = new Set(['.mp4','.mov','.m4v','.avi','.mkv','.webm']);
+const AUD_EXTS  = new Set(['.mp3','.m4a','.aac','.ogg','.wav','.flac','.opus']);
+
+function mimeFromExt(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  if (IMG_EXTS.has(ext)) return 'image/jpeg';
+  if (VID_EXTS.has(ext)) return 'video/mp4';
+  if (AUD_EXTS.has(ext)) return 'audio/mpeg';
+  return null;
+}
+
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const mime = file.mimetype;
+    let mime = file.mimetype;
+    if (mime === 'application/octet-stream') mime = mimeFromExt(file.originalname) || mime;
     const ok = mime.startsWith('image/') || mime.startsWith('video/') ||
                 mime.startsWith('audio/') || ALLOWED_MIMES.has(mime);
     ok ? cb(null, true) : cb(new Error('File type not allowed'));
@@ -94,7 +108,10 @@ app.get('/api/tickets/:ticketId/messages', (req, res) => {
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
 
-  const mime = req.file.mimetype;
+  // iOS may report application/octet-stream — detect real type from extension
+  let mime = req.file.mimetype;
+  if (mime === 'application/octet-stream') mime = mimeFromExt(req.file.originalname) || mime;
+
   let type = 'file';
   if (mime.startsWith('image/')) type = 'image';
   else if (mime.startsWith('video/')) type = 'video';

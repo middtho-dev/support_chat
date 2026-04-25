@@ -58,6 +58,9 @@ async function init(){
     if(document.visibilityState==='visible'&&socket.connected)setConnStatus('on');
   });
 
+  // Bell button → request notification permission
+  $('nbtn')?.addEventListener('click',requestNotifications);
+
   // Update working-hours status every minute
   setInterval(()=>{
     updateLoginHint();
@@ -339,9 +342,18 @@ async function refreshMessages(){
 }
 
 /* ── NOTIFICATIONS ── */
+let _audioCtx=null;
+function _getAudioCtx(){
+  if(!_audioCtx)_audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(_audioCtx.state==='suspended')_audioCtx.resume().catch(()=>{});
+  return _audioCtx;
+}
+// Unlock AudioContext on first user interaction (required on mobile)
+['click','touchstart'].forEach(ev=>document.addEventListener(ev,()=>_getAudioCtx(),{once:true,passive:true}));
+
 function playNotifSound(){
   try{
-    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const ctx=_getAudioCtx();
     const osc=ctx.createOscillator();const gain=ctx.createGain();
     osc.connect(gain);gain.connect(ctx.destination);
     osc.frequency.value=880;osc.type='sine';
@@ -350,11 +362,17 @@ function playNotifSound(){
     osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.35);
   }catch{}
 }
-function tryRequestNotifications(){
-  if('Notification' in window&&Notification.permission==='default'){
-    Notification.requestPermission().catch(()=>{});
-  }
+async function requestNotifications(){
+  if(!('Notification' in window)){showToast('Уведомления не поддерживаются браузером');return;}
+  if(Notification.permission==='granted'){showToast('Уведомления уже включены ✓');return;}
+  if(Notification.permission==='denied'){showToast('Уведомления заблокированы — разрешите в настройках браузера');return;}
+  try{
+    const p=await Notification.requestPermission();
+    if(p==='granted')showToast('Уведомления включены ✓');
+    else showToast('Уведомления не разрешены');
+  }catch{showToast('Ошибка запроса уведомлений');}
 }
+function tryRequestNotifications(){}  // permission now only via bell button
 function showBrowserNotif(msg){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   if(document.visibilityState==='visible')return;
