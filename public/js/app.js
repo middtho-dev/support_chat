@@ -31,7 +31,10 @@ socket.on('message',msg=>{
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто')});
 socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';showToast('Обращение переоткрыто')});
-socket.on('connect',()=>{setConnStatus('on');if(S.tid)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token})});
+socket.on('connect',()=>{
+  setConnStatus('on');
+  if(S.tid){socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});setTimeout(refreshMessages,400);}
+});
 socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
@@ -44,10 +47,22 @@ const clearS=()=>localStorage.removeItem(SK);
 /* ── INIT ── */
 async function init(){
   buildEmoji();
+  updateLoginHint();
 
-  // 100dvh fallback для старых браузеров
   setAppHeight();
   window.addEventListener('resize',setAppHeight);
+
+  // Refresh messages when tab becomes visible again
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible'&&S.tid)refreshMessages();
+    if(document.visibilityState==='visible'&&socket.connected)setConnStatus('on');
+  });
+
+  // Update working-hours status every minute
+  setInterval(()=>{
+    updateLoginHint();
+    if(socket.connected)setConnStatus('on');
+  },60000);
 
   const sv=loadS();
   if(sv){
@@ -88,7 +103,7 @@ sb.addEventListener('click',async()=>{
 });
 
 function showLogin(){$('ls').classList.add('on');$('cs').classList.remove('on');setTimeout(()=>ni.focus(),150)}
-function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');tryRequestNotifications();}
+function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');tryRequestNotifications();setConnStatus('connecting');}
 
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
@@ -102,23 +117,28 @@ function markClosed(){S.closed=true;ia.style.display='none';cbar.style.display='
 
 /* ── REOPEN ── */
 reopenbtn.addEventListener('click',async()=>{
+  reopenbtn.disabled=true;
   try{
     const r=await fetch(`/api/tickets/${S.tid}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
     if(!r.ok)throw 0;
     S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';
-    saveS();socket.connect();showToast('Обращение переоткрыто');
+    saveS();
+    if(socket.connected)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});
+    else socket.connect();
+    showToast('Обращение переоткрыто');
   }catch{showToast('Ошибка — попробуйте снова')}
+  finally{reopenbtn.disabled=false;}
 });
 
 /* ── NEW CHAT ── */
 newbtn.addEventListener('click',()=>{
   clearS();
   socket.disconnect();
-  S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;
+  S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;S.unread=0;S.lastTyping=0;
   ml.innerHTML='';
   cbar.style.display='none';ia.style.display='';hcl.style.display='';
-  ni.value='';sb.disabled=true;
-  showLogin();
+  ni.value='';sb.disabled=true;sl.textContent='Начать чат';
+  showLogin();updateLoginHint();
 });
 
 /* ── RENDER ── */
@@ -254,14 +274,60 @@ function dlg(title,msg,cb){
 /* ── TOAST ── */
 let tt;function showToast(m,d=3200){clearTimeout(tt);tst.textContent=m;tst.classList.add('on');tt=setTimeout(()=>tst.classList.remove('on'),d)}
 
+/* ── WORKING HOURS (08:00–23:00 МСК = UTC+3) ── */
+function supportOnline(){
+  const h=(new Date().getUTCHours()+3)%24;
+  return h>=8&&h<23;
+}
+function supportOpenText(){
+  const nowUtcMins=(new Date().getUTCHours()*60+new Date().getUTCMinutes());
+  const mskMins=(nowUtcMins+180)%(24*60);
+  const openMins=8*60,closeMins=23*60;
+  let until;
+  if(mskMins<openMins)until=openMins-mskMins;
+  else until=24*60-mskMins+openMins;
+  const hh=Math.floor(until/60),mm=until%60;
+  return hh>0?`через ${hh} ч ${mm} мин`:`через ${mm} мин`;
+}
+function updateLoginHint(){
+  const sub=$('ls')?.querySelector('.lsub');
+  if(!sub)return;
+  if(supportOnline())sub.textContent='Представьтесь — ответим как можно скорее';
+  else sub.textContent=`Сейчас не в сети · ответим в 08:00 МСК (${supportOpenText()})`;
+}
+
 /* ── CONNECTION STATUS ── */
 function setConnStatus(s){
-  const dot=$('cs').querySelector('.hdot');
-  const txt=$('cs').querySelector('.hstxt');
+  const dot=$('cs')?.querySelector('.hdot');
+  const txt=$('cs')?.querySelector('.hstxt');
   if(!dot||!txt)return;
-  if(s==='on'){dot.style.background='var(--green)';dot.style.animation='blink 2.5s ease infinite';txt.textContent='онлайн';}
-  else if(s==='connecting'){dot.style.background='#f59e0b';dot.style.animation='none';txt.textContent='переподключение...';}
-  else{dot.style.background='var(--red)';dot.style.animation='none';txt.textContent='нет соединения';}
+  if(s==='on'){
+    if(supportOnline()){
+      dot.style.background='var(--green)';dot.style.animation='blink 2.5s ease infinite';txt.textContent='онлайн';
+    }else{
+      dot.style.background='#6b7280';dot.style.animation='none';txt.textContent='ответим в 08:00 МСК';
+    }
+  }else if(s==='connecting'){
+    dot.style.background='#f59e0b';dot.style.animation='none';txt.textContent='подключение...';
+  }else{
+    dot.style.background='var(--red)';dot.style.animation='none';txt.textContent='нет соединения';
+  }
+}
+
+/* ── REFRESH MESSAGES ── */
+async function refreshMessages(){
+  if(!S.tid)return;
+  try{
+    const r=await fetch(`/api/tickets/${S.tid}/messages`);
+    if(!r.ok)return;
+    const msgs=await r.json();
+    const known=new Set([...ml.querySelectorAll('[data-msg-id]')].map(el=>el.dataset.msgId));
+    const fresh=msgs.filter(m=>m.id&&!known.has(m.id));
+    if(!fresh.length)return;
+    const atBottom=isBot();
+    fresh.forEach(renderMsg);
+    if(atBottom)scrollBot(false);
+  }catch{}
 }
 
 /* ── NOTIFICATIONS ── */
