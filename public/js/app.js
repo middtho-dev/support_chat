@@ -48,6 +48,9 @@ const clearS=()=>localStorage.removeItem(SK);
 async function init(){
   buildEmoji();
   updateLoginHint();
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw.js').catch(e=>console.warn('[SW] register failed',e));
+  }
 
   setAppHeight();
   window.addEventListener('resize',setAppHeight);
@@ -57,6 +60,9 @@ async function init(){
     if(document.visibilityState==='visible'&&S.tid)refreshMessages();
     if(document.visibilityState==='visible'&&socket.connected)setConnStatus('on');
   });
+
+  // Bell button → request notification permission
+  $('nbtn')?.addEventListener('click',requestNotifications);
 
   // Update working-hours status every minute
   setInterval(()=>{
@@ -109,8 +115,11 @@ function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');t
 hcl.addEventListener('click',()=>{
   if(S.closed)return;
   dlg('Закрыть обращение?','После закрытия вы не сможете писать. Можно переоткрыть в любое время.',async()=>{
-    await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
-    markClosed();
+    try{
+      const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
+      if(!r.ok)throw 0;
+      markClosed();
+    }catch{showToast('Ошибка — попробуйте снова');}
   });
 });
 function markClosed(){S.closed=true;ia.style.display='none';cbar.style.display='flex';hcl.style.display='none'}
@@ -159,15 +168,15 @@ function renderMsg(msg){
   h+='<div class="bub">';
   if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock" data-reply-id="${esc(msg.reply_to_id)}"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
   if(msg.message_type==='image'&&msg.file_url){
-    h+=`<img class="mimg" src="${msg.file_url}" loading="lazy" onclick="openLb(this)">`;
+    h+=`<img class="mimg" src="${esc(msg.file_url)}" loading="lazy" onclick="openLb(this)">`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${esc(msg.content)}</div>`;
   }else if(msg.message_type==='video'&&msg.file_url){
-    h+=`<video class="mvid" src="${msg.file_url}" controls preload="metadata"></video>`;
+    h+=`<video class="mvid" src="${esc(msg.file_url)}" controls preload="metadata"></video>`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${esc(msg.content)}</div>`;
   }else if(msg.message_type==='audio'&&msg.file_url){
-    h+=`<audio class="maud" src="${msg.file_url}" controls></audio>`;
+    h+=`<audio class="maud" src="${esc(msg.file_url)}" controls></audio>`;
   }else if(msg.file_url){
-    h+=`<a class="mfile" href="${msg.file_url}" download="${esc(msg.file_name||'file')}" target="_blank"><div class="fic">${dico()}</div><div><div class="fnm">${esc(msg.file_name||'Файл')}</div></div></a>`;
+    h+=`<a class="mfile" href="${esc(msg.file_url)}" download="${esc(msg.file_name||'file')}" target="_blank" rel="noopener noreferrer"><div class="fic">${dico()}</div><div><div class="fnm">${esc(msg.file_name||'Файл')}</div></div></a>`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:4px">${esc(msg.content)}</div>`;
   }else{h+=`<div class="btxt">${linkify(esc(msg.content||''))}</div>`}
   const tick=isO?`<svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="rgba(122,178,220,.6)" stroke-width="1.8" stroke-linecap="round"><path d="M1 5.5l3.5 3.5L14 1"/><path d="M6 9L14 1" opacity=".5"/></svg>`:'';
@@ -189,6 +198,7 @@ async function send(){
     S.uploading=false;showSpin(false);clearFile();
   }
   ti.value='';resize();updSend();closeEp();
+  if(!socket.connected){showToast('Нет соединения — попробуйте позже');sndbtn.disabled=false;updSend();return;}
   socket.emit('send_message',{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt},ack=>{
     if(ack?.error)showToast(ack.error==='Ticket is closed'?'Обращение закрыто':ack.error==='Rate limit'?'Слишком много сообщений — подождите':'Ошибка');
     sndbtn.disabled=false;updSend();
@@ -280,8 +290,8 @@ function supportOnline(){
   return h>=8&&h<23;
 }
 function supportOpenText(){
-  const nowUtcMins=(new Date().getUTCHours()*60+new Date().getUTCMinutes());
-  const mskMins=(nowUtcMins+180)%(24*60);
+  const now=new Date();
+  const mskMins=(now.getUTCHours()*60+now.getUTCMinutes()+180)%(24*60);
   const openMins=8*60,closeMins=23*60;
   let until;
   if(mskMins<openMins)until=openMins-mskMins;
@@ -316,13 +326,17 @@ function setConnStatus(s){
 
 /* ── REFRESH MESSAGES ── */
 async function refreshMessages(){
-  if(!S.tid)return;
+  if(!S.tid||!S.token)return;
   try{
-    const r=await fetch(`/api/tickets/${S.tid}/messages`);
+    const r=await fetch('/api/session/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
     if(!r.ok)return;
-    const msgs=await r.json();
+    const{ticket,messages}=await r.json();
+    // Sync ticket status if changed remotely
+    if(ticket.status==='closed'&&!S.closed)markClosed();
+    else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';}
+    // Append only messages not yet rendered
     const known=new Set([...ml.querySelectorAll('[data-msg-id]')].map(el=>el.dataset.msgId));
-    const fresh=msgs.filter(m=>m.id&&!known.has(m.id));
+    const fresh=messages.filter(m=>m.id&&!known.has(m.id));
     if(!fresh.length)return;
     const atBottom=isBot();
     fresh.forEach(renderMsg);
@@ -331,9 +345,18 @@ async function refreshMessages(){
 }
 
 /* ── NOTIFICATIONS ── */
+let _audioCtx=null;
+function _getAudioCtx(){
+  if(!_audioCtx)_audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(_audioCtx.state==='suspended')_audioCtx.resume().catch(()=>{});
+  return _audioCtx;
+}
+// Unlock AudioContext on first user interaction (required on mobile)
+['click','touchstart'].forEach(ev=>document.addEventListener(ev,()=>_getAudioCtx(),{once:true,passive:true}));
+
 function playNotifSound(){
   try{
-    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const ctx=_getAudioCtx();
     const osc=ctx.createOscillator();const gain=ctx.createGain();
     osc.connect(gain);gain.connect(ctx.destination);
     osc.frequency.value=880;osc.type='sine';
@@ -342,11 +365,37 @@ function playNotifSound(){
     osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.35);
   }catch{}
 }
-function tryRequestNotifications(){
-  if('Notification' in window&&Notification.permission==='default'){
-    Notification.requestPermission().catch(()=>{});
-  }
+async function requestNotifications(){
+  if(!('Notification' in window)){showToast('Уведомления не поддерживаются браузером');return;}
+  if(Notification.permission==='granted'){showToast('Уведомления уже включены ✓');await setupPushSubscription();return;}
+  if(Notification.permission==='denied'){showToast('Уведомления заблокированы — разрешите в настройках браузера');return;}
+  try{
+    const p=await Notification.requestPermission();
+    if(p==='granted'){showToast('Уведомления включены ✓');await setupPushSubscription();}
+    else showToast('Уведомления не разрешены');
+  }catch{showToast('Ошибка запроса уведомлений');}
 }
+
+async function setupPushSubscription(){
+  if(!S.tid||!S.token)return;
+  if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(sub){
+      // Already subscribed — re-send to server in case ticket changed
+      await fetch('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,subscription:sub.toJSON()})});
+      return;
+    }
+    const r=await fetch('/api/push/vapid-key');
+    if(!r.ok)return;
+    const{publicKey}=await r.json();
+    sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:publicKey});
+    await fetch('/api/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,subscription:sub.toJSON()})});
+  }catch(e){console.warn('[Push] subscribe error',e);}
+}
+
+function tryRequestNotifications(){}  // permission now only via bell button
 function showBrowserNotif(msg){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   if(document.visibilityState==='visible')return;

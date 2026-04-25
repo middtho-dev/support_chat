@@ -162,6 +162,7 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
   -webkit-appearance:none;transition:all .18s;
 }
 .hbtn:active{border-color:var(--red);color:var(--red);background:rgba(239,68,68,.08)}
+.hbtn-ico{padding:7px 8px}
 @media(max-width:380px){.hbtxt{display:none}.hbtn{padding:7px 8px}}
 
 /* MESSAGES */
@@ -448,6 +449,12 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
       <div class="hname">Служба поддержки</div>
       <div class="hst"><span class="hdot"></span><span class="hstxt">подключение...</span></div>
     </div>
+    <button class="hbtn hbtn-ico" id="nbtn" title="Включить уведомления">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 1.5a4.5 4.5 0 00-4.5 4.5v3l-1 1.5h11l-1-1.5V6A4.5 4.5 0 008 1.5z"/>
+        <path d="M6.5 13a1.5 1.5 0 003 0"/>
+      </svg>
+    </button>
     <button class="hbtn" id="hcl">
       <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
         <rect x="1" y="1" width="11" height="11" rx="2"/>
