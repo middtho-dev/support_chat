@@ -286,7 +286,10 @@ const warnTicketsQuery = db.db.prepare(`
   AND COALESCE(m.last_msg, t.created_at) >= datetime('now', '-60 minutes')
 `);
 
+let _inactivityRunning = false;
 async function inactivityCheck() {
+  if (_inactivityRunning) return;
+  _inactivityRunning = true;
   try {
     // Warn tickets approaching the 1-hour limit
     const toWarn = warnTicketsQuery.all();
@@ -332,6 +335,7 @@ async function inactivityCheck() {
       console.log(`[Auto] Closed inactive ticket ${ticket.id.slice(0, 8)}`);
     }
   } catch (e) { console.error('[Auto] inactivityCheck:', e.message); }
+  finally { _inactivityRunning = false; }
 }
 
 setInterval(inactivityCheck, 60 * 1000);
