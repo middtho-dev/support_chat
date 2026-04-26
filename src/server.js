@@ -35,9 +35,18 @@ const ALLOWED_MIMES = new Set([
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/zip',
   'application/x-zip-compressed',
-  'application/x-zip'
+  'application/x-zip',
+  'application/x-7z-compressed',
+  'application/x-rar-compressed',
+  'application/vnd.rar',
+  'text/plain',
+  'text/csv',
 ]);
 
 const IMG_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.webp','.heic','.heif','.bmp','.tiff','.avif']);
@@ -111,14 +120,26 @@ app.post('/api/session/resume', (req, res) => {
     return res.json({ orphaned: true });
   }
 
-  const messages = db.getMessages.all(ticket.id);
-  res.json({ ticket, messages });
+  const PAGE = 100;
+  const total = db.countMessages.get(ticket.id)?.cnt || 0;
+  const messages = db.getMessagesRecent.all(ticket.id, PAGE);
+  res.json({ ticket, messages, hasMore: total > PAGE });
 });
 
 app.get('/api/tickets/:ticketId/messages', (req, res) => {
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
   res.json(db.getMessages.all(ticket.id));
+});
+
+app.post('/api/tickets/:ticketId/messages/older', (req, res) => {
+  const { sessionToken, before } = req.body;
+  if (!sessionToken || !before) return res.status(400).json({ error: 'Missing params' });
+  const ticket = db.getTicketBySessionAny.get(sessionToken);
+  if (!ticket || ticket.id !== req.params.ticketId) return res.status(403).json({ error: 'Forbidden' });
+  const LIMIT = 50;
+  const msgs = db.getMessagesBefore.all(ticket.id, before, LIMIT);
+  res.json({ messages: msgs, hasMore: msgs.length === LIMIT });
 });
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
@@ -213,13 +234,14 @@ const WELCOME_2 = 'Чтобы мы могли быстрее разобрать�
 function isRateLimited(sessionToken) {
   const now = Date.now();
   let rate = messageRates.get(sessionToken);
-  if (!rate || now > rate.resetAt) {
-    rate = { count: 0, resetAt: now + 60000 };
-  }
+  if (!rate || now > rate.resetAt) rate = { count: 0, resetAt: now + 60000 };
   rate.count++;
   messageRates.set(sessionToken, rate);
-  return rate.count > 20;
+  if (rate.count > 20) { rate.retryAfter = Math.ceil((rate.resetAt - now) / 1000); return true; }
+  return false;
 }
+// Clean up expired rate-limit entries every 5 minutes
+setInterval(() => { const now = Date.now(); for (const [k, r] of messageRates) if (now > r.resetAt) messageRates.delete(k); }, 5 * 60 * 1000);
 
 function scheduleWelcomeMessages(ticketId) {
   if (welcomeSent.has(ticketId)) return;
@@ -274,6 +296,7 @@ io.on('connection', (socket) => {
     const ticket = db.getTicketById.get(socket.ticketId);
     if (!ticket || ticket.status === 'closed') return;
     telegram.sendTyping(ticket).catch(() => {});
+    io.to('admin').emit('admin_user_typing', { ticketId: socket.ticketId });
   });
 
   socket.on('send_message', async (data, ack) => {
@@ -294,7 +317,8 @@ io.on('connection', (socket) => {
         return;
       }
       if (isRateLimited(sessionToken)) {
-        if (ack) ack({ error: 'Rate limit' });
+        const retryAfter = messageRates.get(sessionToken)?.retryAfter || 60;
+        if (ack) ack({ error: 'Rate limit', retryAfter });
         return;
       }
 

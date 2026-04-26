@@ -1,5 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const db = require('./database');
 const push = require('./push');
@@ -259,13 +260,18 @@ async function downloadFile(msg) {
     }
     if (!fileId) return null;
     const link = await bot.getFileLink(fileId);
-    const resp = await fetch(link);
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 30000);
+    let resp;
+    try { resp = await fetch(link, { signal: controller.signal }); }
+    finally { clearTimeout(fetchTimeout); }
     if (!resp.ok) throw new Error('fetch failed');
     const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length > 50 * 1024 * 1024) throw new Error('File too large');
     const dir = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const safe = `tg_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    fs.writeFileSync(path.join(dir, safe), buf);
+    await fsp.writeFile(path.join(dir, safe), buf);
     return { url: `/uploads/${safe}`, name: fileName, mime: fileMime, type };
   } catch (e) { console.error('[TG] downloadFile:', e.message); return null; }
 }

@@ -39,9 +39,12 @@ db.exec(`
     FOREIGN KEY (ticket_id) REFERENCES tickets(id)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_messages_ticket ON messages(ticket_id);
-  CREATE INDEX IF NOT EXISTS idx_tickets_session ON tickets(session_token);
-  CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+  CREATE INDEX IF NOT EXISTS idx_messages_ticket   ON messages(ticket_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_created  ON messages(created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_tg_id    ON messages(telegram_message_id);
+  CREATE INDEX IF NOT EXISTS idx_tickets_session   ON tickets(session_token);
+  CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
+  CREATE INDEX IF NOT EXISTS idx_tickets_created   ON tickets(created_at);
 `);
 
 // Migration: add reply_to_id column if not exists
@@ -58,6 +61,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
   subscription TEXT NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_push_ticket ON push_subscriptions(ticket_id)`);
 
 module.exports = {
   // Tickets
@@ -99,6 +103,36 @@ module.exports = {
     LEFT JOIN messages r ON r.id = m.reply_to_id
     WHERE m.ticket_id = ? ORDER BY m.created_at ASC
   `),
+
+  // Returns last N messages (ASC order) — for initial load with pagination
+  getMessagesRecent: db.prepare(`
+    SELECT * FROM (
+      SELECT m.*,
+        r.content      AS reply_to_content,
+        r.sender_name  AS reply_to_sender_name,
+        r.message_type AS reply_to_type,
+        r.file_name    AS reply_to_file_name
+      FROM messages m
+      LEFT JOIN messages r ON r.id = m.reply_to_id
+      WHERE m.ticket_id = ? ORDER BY m.created_at DESC LIMIT ?
+    ) ORDER BY created_at ASC
+  `),
+
+  // Returns N messages strictly before a timestamp (ASC order) — "load older"
+  getMessagesBefore: db.prepare(`
+    SELECT * FROM (
+      SELECT m.*,
+        r.content      AS reply_to_content,
+        r.sender_name  AS reply_to_sender_name,
+        r.message_type AS reply_to_type,
+        r.file_name    AS reply_to_file_name
+      FROM messages m
+      LEFT JOIN messages r ON r.id = m.reply_to_id
+      WHERE m.ticket_id = ? AND m.created_at < ? ORDER BY m.created_at DESC LIMIT ?
+    ) ORDER BY created_at ASC
+  `),
+
+  countMessages: db.prepare(`SELECT COUNT(*) AS cnt FROM messages WHERE ticket_id = ?`),
 
   getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
 

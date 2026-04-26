@@ -29,7 +29,7 @@ const $ = id => document.getElementById(id);
 // ── Utilities ──────────────────────────────────────────────────────────────
 
 const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
-const linkify = t => t.replace(/(https?:\/\/[^\s<>"]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const linkify = t => t.replace(/https?:\/\/[^\s<>"&]+/g, url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
 const fmtTime = d => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 function fmtDate(d) {
   const n = new Date(), td = new Date(n.getFullYear(), n.getMonth(), n.getDate());
@@ -190,8 +190,19 @@ socket.on('admin_ticket_status', ({ ticketId, status }) => {
 
 socket.on('admin_error', ({ message }) => toast(message, 'err'));
 
-// User typing (forwarded from socket room via ticket:id room — admin doesn't join those)
-// We detect user activity from admin_new_message and don't show typing in admin (complex)
+socket.on('admin_user_typing', ({ ticketId }) => {
+  if (ticketId !== S.current?.id) return;
+  showUserTyping();
+});
+
+let _userTypingHide = null;
+function showUserTyping() {
+  const bar = $('user-typing-bar');
+  if (!bar) return;
+  bar.style.display = '';
+  clearTimeout(_userTypingHide);
+  _userTypingHide = setTimeout(() => { if (bar) bar.style.display = 'none'; }, 3000);
+}
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -235,7 +246,9 @@ function renderSidebar() {
     const col   = avatarColor(t.user_name);
     const init  = initials(t.user_name);
     const dotCls = t.status === 'closed' ? 'closed' : (t.unread_count > 0 ? 'wait' : 'open');
-    const ago   = timeAgo(t.last_activity || t.created_at);
+    const ts    = t.last_activity || t.created_at;
+    const ago   = timeAgo(ts);
+    const absTs = new Date(ts).toLocaleString('ru-RU');
     const badge = t.unread_count > 0 ? `<div class="ti-badge">${t.unread_count}</div>` : '';
     const pre   = msgPreview(t);
 
@@ -248,7 +261,7 @@ function renderSidebar() {
         <div class="ti-last">${pre}</div>
       </div>
       <div class="ti-meta">
-        <div class="ti-time">${ago}</div>
+        <div class="ti-time" data-ts="${esc(ts)}" title="${esc(absTs)}">${ago}</div>
         ${badge}
       </div>`;
     div.addEventListener('click', () => openTicket(t.id));
@@ -321,6 +334,10 @@ function updateCvHeader() {
       reply.innerHTML = '🔒 Обращение закрыто';
     } else {
       reply.innerHTML = `
+        <div class="user-typing-bar" id="user-typing-bar" style="display:none">
+          <span class="tdot-wrap"><span></span><span></span><span></span></span>
+          Пользователь печатает...
+        </div>
         <div class="reply-row">
           <div class="canned-wrap">
             <button class="rbtn rbtn-canned" id="canned-btn" title="Быстрые ответы">
@@ -337,7 +354,10 @@ function updateCvHeader() {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 8L15 2.5 8.5 15l-.7-6L2 8z"/></svg>
           </button>
         </div>
-        <div class="reply-hint">Ctrl+Enter — отправить</div>`;
+        <div class="reply-footer">
+          <span class="reply-hint">Ctrl+Enter — отправить</span>
+          <span class="reply-cnt" id="reply-cnt"></span>
+        </div>`;
       rebuildCannedPop();
       wireReply();
     }
@@ -428,6 +448,8 @@ function wireReply() {
     txt.style.height = 'auto';
     txt.style.height = Math.min(txt.scrollHeight, 130) + 'px';
     send.disabled = !txt.value.trim();
+    const cnt = $('reply-cnt');
+    if (cnt) cnt.textContent = txt.value.length > 0 ? txt.value.length : '';
 
     const now = Date.now();
     if (S.current?.status === 'open' && now - S.lastTyping > 4000) {
