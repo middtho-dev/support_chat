@@ -332,7 +332,8 @@ async function forwardMessage(ticket, message) {
       sent = await bot.sendDocument(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined });
     }
     if (sent) db.updateTelegramMessageId.run(sent.message_id, message.id);
-    await setTopicStatus(tid, ticket, E_WAIT);
+    // User message → operator needs to respond (🔔); support/admin reply → in progress (🔵)
+    await setTopicStatus(tid, ticket, message.sender === 'user' ? E_WAIT : E_OPEN);
   } catch (e) {
     if (isThreadNotFound(e)) {
       db.markTopicDeleted.run(ticket.id);
@@ -414,19 +415,24 @@ async function sendTyping(ticket) {
   } catch {}
 }
 
-// Lightweight check: returns false if the Telegram topic no longer exists.
-// Network/other errors are treated as "alive" to avoid false closures.
+// Lightweight check: returns false ONLY when the topic is definitively deleted/gone.
+// Returns true when bot is unavailable, on network errors, or when topic is merely closed.
 async function checkTopicAlive(ticket) {
-  if (!bot || !GROUP_ID || !ticket.telegram_topic_id) return false;
+  if (!bot || !GROUP_ID) return true;  // can't verify without bot — assume alive
+  if (!ticket.telegram_topic_id) return false;
   try {
     await bot.sendChatAction(GROUP_ID, 'typing', { message_thread_id: ticket.telegram_topic_id });
     return true;
   } catch (e) {
-    if (isTopicGone(e)) {
+    const msg = String(e?.message || e?.response?.body?.description || '').toLowerCase();
+    // topic_closed means the topic exists but is closed — NOT the same as deleted
+    const gone = msg.includes('thread not found') || msg.includes('topic_deleted') ||
+                 msg.includes('chat not found');
+    if (gone) {
       try { db.markTopicDeleted.run(ticket.id); } catch {}
       return false;
     }
-    return true;
+    return true; // network blip, rate limit, etc — assume alive
   }
 }
 

@@ -37,6 +37,7 @@ socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classLi
 socket.on('ticket_orphaned',()=>{markClosedNoReopen();showToast('Тема удалена — начните новый чат','err',5000);});
 socket.on('messages_read',()=>{/* support has opened the ticket */});
 socket.on('typing_support',()=>{showSupportTyping();});
+socket.on('error',({message})=>{if(message==='Unauthorized'){clearS();clearMsgCache();showLogin();showToast('Сессия истекла — войдите снова','err');}});
 let _socketEverConnected=false;
 socket.on('connect',()=>{
   setConnStatus('on');
@@ -468,16 +469,20 @@ async function refreshMessages(){
   try{
     const r=await fetch('/api/session/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
     if(!r.ok)return;
-    const{ticket,messages}=await r.json();
-    // Sync ticket status if changed remotely
+    const data=await r.json();
+    if(data.orphaned){clearS();clearMsgCache();showLogin();showToast('Сессия истекла — начните новый чат','err');return;}
+    const{ticket,messages}=data;
+    // Sync ticket status
     if(ticket.status==='closed'&&!S.closed)markClosed();
     else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';}
-    // Append only messages not yet rendered
-    const known=new Set([...ml.querySelectorAll('[data-msg-id]')].map(el=>el.dataset.msgId));
-    const fresh=messages.filter(m=>m.id&&!known.has(m.id));
+    // Append only messages not yet in S._msgs
+    const knownIds=new Set(S._msgs.map(m=>m.id));
+    const fresh=messages.filter(m=>m.id&&!knownIds.has(m.id));
     if(!fresh.length)return;
     const atBottom=isBot();
+    S._msgs.push(...fresh);
     fresh.forEach(renderMsg);
+    saveMsgCache();
     if(atBottom)scrollBot(false);
   }catch{}
 }
