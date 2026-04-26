@@ -474,16 +474,20 @@ io.on('connection', (socket) => {
 const staleTicketsQuery = db.db.prepare(`
   SELECT t.* FROM tickets t
   LEFT JOIN (
-    SELECT ticket_id, MAX(created_at) AS last_msg FROM messages GROUP BY ticket_id
+    SELECT ticket_id, MAX(created_at) AS last_msg
+    FROM messages WHERE sender != 'system'
+    GROUP BY ticket_id
   ) m ON m.ticket_id = t.id
   WHERE t.status = 'open'
-  AND COALESCE(m.last_msg, t.created_at) < datetime('now', '-1 hour')
+  AND COALESCE(m.last_msg, t.created_at) < datetime('now', '-60 minutes')
 `);
 
 const warnTicketsQuery = db.db.prepare(`
   SELECT t.* FROM tickets t
   LEFT JOIN (
-    SELECT ticket_id, MAX(created_at) AS last_msg FROM messages GROUP BY ticket_id
+    SELECT ticket_id, MAX(created_at) AS last_msg
+    FROM messages WHERE sender != 'system'
+    GROUP BY ticket_id
   ) m ON m.ticket_id = t.id
   WHERE t.status = 'open'
   AND COALESCE(m.last_msg, t.created_at) < datetime('now', '-45 minutes')

@@ -14,13 +14,14 @@ let io             = null;
 let reconnectTimer = null;
 let connected      = false;
 
-const E_OPEN   = '🟢';
-const E_CLOSED = '🔴';
-const E_WAIT   = '🟡';
+const E_NEW    = '❗';   // just opened, needs operator attention
+const E_OPEN   = '🔵';  // operator replied, in progress
+const E_WAIT   = '🔔';  // user replied, waiting for operator
+const E_CLOSED = '🗑️'; // closed
 
 const topicStatus = new Map();
 
-const kbClose  = tid => ({ inline_keyboard: [[{ text: '🔴 Закрыть тикет', callback_data: `close:${tid}`  }]] });
+const kbClose  = tid => ({ inline_keyboard: [[{ text: '🗑️ Закрыть тикет', callback_data: `close:${tid}`  }]] });
 const kbReopen = tid => ({ inline_keyboard: [[{ text: '🟢 Переоткрыть',   callback_data: `reopen:${tid}` }]] });
 
 function isThreadNotFound(e) {
@@ -105,8 +106,8 @@ async function handleCallbackQuery(query) {
       db.reopenTicket.run(ticket.id);
       try { await bot.reopenForumTopic(GROUP_ID, topicId); } catch {}
       topicStatus.delete(topicId);
-      await setTopicStatus(topicId, ticket, E_OPEN);
-      await safeSend(GROUP_ID, '🟢 Тикет переоткрыт', {
+      await setTopicStatus(topicId, ticket, E_WAIT);
+      await safeSend(GROUP_ID, '🔔 Тикет переоткрыт', {
         message_thread_id: topicId,
         reply_markup: kbClose(topicId)
       });
@@ -157,8 +158,8 @@ async function handleMessage(msg) {
       db.reopenTicket.run(ticket.id);
       try { await bot.reopenForumTopic(GROUP_ID, topicId); } catch {}
       topicStatus.delete(topicId);
-      await setTopicStatus(topicId, ticket, E_OPEN);
-      await safeSend(GROUP_ID, '🟢 Тикет переоткрыт', {
+      await setTopicStatus(topicId, ticket, E_WAIT);
+      await safeSend(GROUP_ID, '🔔 Тикет переоткрыт', {
         message_thread_id: topicId,
         reply_markup: kbClose(topicId)
       });
@@ -295,11 +296,11 @@ async function createTopic(ticketId, userName) {
   if (!bot || !GROUP_ID) return null;
   try {
     const date = new Date().toLocaleDateString('ru-RU');
-    const name = `${E_OPEN} ${userName} • ${date}`;
+    const name = `${E_NEW} ${userName} • ${date}`;
     const topic = await bot.createForumTopic(GROUP_ID, name);
     const topicId = topic.message_thread_id;
     db.setTopicId.run(topicId, ticketId);
-    topicStatus.set(topicId, E_OPEN);
+    topicStatus.set(topicId, E_NEW);
     const infoMsg = await safeSend(GROUP_ID,
       `🎫 *Новое обращение*\n👤 *${userName}*\n🆔 \`${ticketId.slice(0,8)}\`\n📅 ${new Date().toLocaleString('ru-RU')}`,
       { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kbClose(topicId) }
@@ -347,7 +348,7 @@ async function notifyTicketClosed(ticket) {
   const tid = ticket.telegram_topic_id;
   try {
     await setTopicStatus(tid, ticket, E_CLOSED);
-    await safeSend(GROUP_ID, '🔴 Закрыто пользователем', {
+    await safeSend(GROUP_ID, '🗑️ Закрыто пользователем', {
       message_thread_id: tid,
       reply_markup: kbReopen(tid)
     });
@@ -371,8 +372,8 @@ async function notifyTicketReopened(ticket) {
       }
     }
     topicStatus.delete(tid);
-    await setTopicStatus(tid, ticket, E_OPEN);
-    await safeSend(GROUP_ID, '🟢 Переоткрыто пользователем', {
+    await setTopicStatus(tid, ticket, E_WAIT);
+    await safeSend(GROUP_ID, '🔔 Переоткрыто пользователем', {
       message_thread_id: tid,
       reply_markup: kbClose(tid)
     });
