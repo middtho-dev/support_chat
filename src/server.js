@@ -289,6 +289,19 @@ io.on('connection', (socket) => {
     socket.ticketId = ticketId;
     console.log(`[Socket] ${socket.id} joined ticket:${ticketId}`);
     scheduleWelcomeMessages(ticketId);
+
+    // Verify Telegram topic still exists (silent chat-action ping).
+    // If the topic was deleted while bot was offline / user wasn't writing,
+    // close the ticket and tell the client to start fresh.
+    if (ticket.status === 'open' && ticket.telegram_topic_id && !ticket.telegram_topic_deleted) {
+      telegram.checkTopicAlive(ticket).then(alive => {
+        if (alive) return;
+        db.closeTicket.run(ticketId);
+        io.to(`ticket:${ticketId}`).emit('ticket_orphaned');
+        io.to('admin').emit('admin_ticket_status', { ticketId, status: 'closed' });
+        broadcastAdminTickets();
+      }).catch(() => {});
+    }
   });
 
   socket.on('typing', () => {
