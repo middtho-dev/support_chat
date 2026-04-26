@@ -325,30 +325,21 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 }
 
 /* Закрыт */
-.cbar-t{font-size:13px;font-weight:500;color:#fca5a5;display:flex;align-items:center;gap:6px}
-.reopenbtn{
-  padding:7px 14px;
-  background:linear-gradient(135deg,rgba(14,165,233,.25),rgba(2,132,199,.35));
-  border:1px solid var(--blueb);
-  border-radius:10px;color:var(--blue3);
-  font-size:12.5px;font-weight:600;font-family:inherit;
-  cursor:pointer;white-space:nowrap;flex-shrink:0;
-  -webkit-appearance:none;transition:all .18s;
-  box-shadow:0 2px 8px rgba(14,165,233,.2),inset 0 1px 0 rgba(255,255,255,.1);
-}
-.reopenbtn:hover{background:linear-gradient(135deg,rgba(14,165,233,.35),rgba(2,132,199,.45))}
-.reopenbtn:active{transform:scale(.97)}
+.cbar-t{font-size:13px;font-weight:500;color:#fca5a5;text-align:center}
 .newbtn{
-  padding:7px 14px;
-  background:var(--glass-2);
-  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
-  border:1px solid var(--glass-b);
-  border-radius:10px;color:var(--t1);
-  font-size:12.5px;font-weight:600;font-family:inherit;
-  cursor:pointer;white-space:nowrap;flex-shrink:0;
-  -webkit-appearance:none;transition:all .18s;
+  width:100%;max-width:300px;
+  padding:13px 20px;
+  background:linear-gradient(135deg,rgba(14,165,233,.9),rgba(2,132,199,1));
+  border:1px solid rgba(125,211,252,.4);
+  border-radius:14px;color:#fff;
+  font-size:15px;font-weight:600;font-family:inherit;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  -webkit-appearance:none;transition:transform .12s,box-shadow .2s;
+  box-shadow:0 6px 20px rgba(14,165,233,.4),inset 0 1px 0 rgba(255,255,255,.25);
+  position:relative;overflow:hidden;
 }
-.newbtn:hover{background:var(--glass-3)}
+.newbtn:hover{box-shadow:0 8px 28px rgba(14,165,233,.5),inset 0 1px 0 rgba(255,255,255,.3)}
 .newbtn:active{transform:scale(.97)}
 
 /* INPUT */
@@ -568,12 +559,12 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 /* Closed bar slides up */
 .cbar{
   flex-shrink:0;
-  background:linear-gradient(180deg,rgba(248,113,113,.08),rgba(248,113,113,.04));
+  background:linear-gradient(180deg,rgba(248,113,113,.07),rgba(248,113,113,.03));
   backdrop-filter:blur(16px) saturate(180%);
   -webkit-backdrop-filter:blur(16px) saturate(180%);
-  border-top:1px solid rgba(248,113,113,.18);
-  padding:0 14px;min-height:54px;
-  display:none;align-items:center;justify-content:space-between;gap:12px;
+  border-top:1px solid rgba(248,113,113,.16);
+  padding:14px 20px 16px;
+  display:none;flex-direction:column;align-items:center;gap:12px;
 }
 .cbar.on{display:flex;animation:slideUp .22s ease}
 
@@ -644,7 +635,7 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 .lo-btn:disabled{opacity:.5;cursor:not-allowed}
 
 /* Buttons need overflow:hidden for ripple */
-.hbtn,.lbtn,.reopenbtn,.newbtn,.sndbtn,.icn{overflow:hidden;position:relative}
+.hbtn,.lbtn,.newbtn,.sndbtn,.icn{overflow:hidden;position:relative}
 </style>
 </head>
 <body>
@@ -702,11 +693,11 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
   </div>
 
   <div class="cbar" id="cbar">
-    <span class="cbar-t">🔒 Обращение закрыто</span>
-    <div style="display:flex;gap:8px;flex-shrink:0">
-      <button class="reopenbtn" id="reopenbtn">Переоткрыть</button>
-      <button class="newbtn" id="newbtn">Новый чат</button>
-    </div>
+    <div class="cbar-t">🔒 Обращение закрыто</div>
+    <button class="newbtn" id="newbtn">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7.5 1v13M1 7.5h13"/></svg>
+      Начать новый чат
+    </button>
   </div>
 
   <div class="epick" id="ep" style="display:none"></div>

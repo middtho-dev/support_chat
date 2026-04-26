@@ -19,7 +19,7 @@ const fp=$('fp'),fpth=$('fpth'),fprm=$('fprm');
 const ia=$('ia'),cbar=$('cbar'),hcl=$('hcl');
 const ebt=$('ebt'),ep=$('ep');
 const tst=$('tst'),sdwn=$('sdwn');
-const reopenbtn=$('reopenbtn'),newbtn=$('newbtn');
+const newbtn=$('newbtn');
 
 /* ── SOCKET ── */
 const socket=io({autoConnect:false});
@@ -33,7 +33,7 @@ socket.on('message',msg=>{
   if(msg.sender==='support'){playNotifSound();showBrowserNotif(msg);}
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто','info')});
-socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';showToast('Обращение переоткрыто','ok')});
+socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';saveMsgCache();showToast('Обращение переоткрыто','ok')});
 socket.on('ticket_orphaned',()=>{markClosedNoReopen();showToast('Тема удалена — начните новый чат','err',5000);});
 socket.on('messages_read',()=>{/* support has opened the ticket */});
 socket.on('typing_support',()=>{showSupportTyping();});
@@ -179,7 +179,7 @@ function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');t
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
   if(S.closed)return;
-  dlg('Закрыть обращение?','После закрытия вы не сможете писать. Можно переоткрыть в любое время.',async()=>{
+  dlg('Закрыть обращение?','После закрытия можно начать новый чат.',async()=>{
     try{
       const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
       if(!r.ok)throw 0;
@@ -187,28 +187,8 @@ hcl.addEventListener('click',()=>{
     }catch{showToast('Ошибка — попробуйте снова','err');}
   });
 });
-function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='';saveMsgCache();}
-function markClosedNoReopen(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='none';saveMsgCache();}
-
-/* ── REOPEN ── */
-reopenbtn.addEventListener('click',async()=>{
-  reopenbtn.disabled=true;
-  try{
-    const r=await fetch(`/api/tickets/${S.tid}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
-    if(r.status===409){
-      markClosedNoReopen();
-      showToast('Тема удалена — начните новый чат','err');
-      return;
-    }
-    if(!r.ok)throw 0;
-    S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';
-    saveS();
-    if(socket.connected)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});
-    else socket.connect();
-    showToast('Обращение переоткрыто');
-  }catch{showToast('Ошибка — попробуйте снова')}
-  finally{reopenbtn.disabled=false;}
-});
+function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';saveMsgCache();}
+const markClosedNoReopen=markClosed;
 
 
 /* ── NEW CHAT ── */
@@ -584,7 +564,7 @@ function dico(){return`<svg width="18" height="18" viewBox="0 0 18 18" fill="non
 
 /* ── RIPPLE ── */
 document.addEventListener('pointerdown',e=>{
-  const btn=e.target.closest('.hbtn,.lbtn,.reopenbtn,.newbtn,.sndbtn,.icn,.mbo,.mbc');
+  const btn=e.target.closest('.hbtn,.lbtn,.newbtn,.sndbtn,.icn,.mbo,.mbc');
   if(!btn)return;
   const r=document.createElement('span');r.className='rpl';
   const rect=btn.getBoundingClientRect();
