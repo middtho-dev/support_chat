@@ -425,14 +425,14 @@ async function checkTopicAlive(ticket) {
     return true;
   } catch (e) {
     const msg = String(e?.message || e?.response?.body?.description || '').toLowerCase();
-    // topic_closed means the topic exists but is closed — NOT the same as deleted
-    const gone = msg.includes('thread not found') || msg.includes('topic_deleted') ||
-                 msg.includes('chat not found');
+    // Only treat topic-specific errors as "gone" — NOT 'chat not found' which can mean
+    // the bot was removed from the group or GROUP_ID is wrong (would falsely orphan all tickets)
+    const gone = msg.includes('thread not found') || msg.includes('topic_deleted');
     if (gone) {
       try { db.markTopicDeleted.run(ticket.id); } catch {}
       return false;
     }
-    return true; // network blip, rate limit, etc — assume alive
+    return true; // network blip, rate limit, wrong group config, etc — assume alive
   }
 }
 

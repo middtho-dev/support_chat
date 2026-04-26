@@ -296,6 +296,7 @@ io.on('connection', (socket) => {
     if (ticket.status === 'open' && ticket.telegram_topic_id && !ticket.telegram_topic_deleted) {
       telegram.checkTopicAlive(ticket).then(alive => {
         if (alive) return;
+        console.warn(`[Socket] Topic gone for ticket ${ticketId.slice(0,8)} — orphaning`);
         db.closeTicket.run(ticketId);
         io.to(`ticket:${ticketId}`).emit('ticket_orphaned');
         io.to('admin').emit('admin_ticket_status', { ticketId, status: 'closed' });
@@ -315,6 +316,7 @@ io.on('connection', (socket) => {
   socket.on('send_message', async (data, ack) => {
     try {
       const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType } = data;
+      console.log(`[Socket] send_message ticket:${(ticketId||'').slice(0,8)} type:${messageType||'text'}`);
 
       const ticket = db.getTicketBySessionAny.get(sessionToken);
       if (!ticket || ticket.id !== ticketId) {
