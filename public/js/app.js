@@ -202,6 +202,7 @@ async function loadOlderMessages(){
     S.hasMore=hasMore;
     S.oldestTs=messages[0].created_at;
     S._msgs=[...messages,...S._msgs];
+    _pinToBottom=false; // user is reading history, don't snap back
     // Re-render all preserving distance from bottom
     const fromBot=mwrap.scrollHeight-mwrap.scrollTop-mwrap.clientHeight;
     _doRender();
@@ -334,8 +335,27 @@ ml.addEventListener('click',e=>{
 });
 
 /* ── SCROLL ── */
+let _pinToBottom=true;   // true → auto-scroll whenever content grows
+let _autoScrolling=false; // true while we're scrolling programmatically
+
 const isBot=()=>mwrap.scrollHeight-mwrap.scrollTop-mwrap.clientHeight<120;
-function scrollBot(smooth=true){requestAnimationFrame(()=>mwrap.scrollTo({top:mwrap.scrollHeight,behavior:smooth?'smooth':'auto'}));S.unread=0;updSDB()}
+
+function scrollBot(smooth=true){
+  _pinToBottom=true;
+  _autoScrolling=true;
+  requestAnimationFrame(()=>{
+    mwrap.scrollTo({top:mwrap.scrollHeight,behavior:smooth?'smooth':'auto'});
+    // Give the browser time to fire the scroll event before clearing the flag
+    setTimeout(()=>{_autoScrolling=false;},120);
+  });
+  S.unread=0;updSDB();
+}
+
+// Re-pin whenever content height grows (images loading, new messages, etc.)
+new ResizeObserver(()=>{
+  if(_pinToBottom) mwrap.scrollTo({top:mwrap.scrollHeight,behavior:'auto'});
+}).observe(ml);
+
 function updSDB(){
   const show=!isBot()||S.unread>0;
   sdwn.classList.toggle('on',show);
@@ -350,7 +370,11 @@ function updSDB(){
     }
   }else badge?.remove();
 }
-mwrap.addEventListener('scroll',updSDB,{passive:true});
+mwrap.addEventListener('scroll',()=>{
+  // Only update pin flag from genuine user scrolls, not our own programmatic ones
+  if(!_autoScrolling) _pinToBottom=isBot();
+  updSDB();
+},{passive:true});
 sdwn.addEventListener('click',()=>{scrollBot();S.unread=0;updSDB()});
 
 /* ── LIGHTBOX ── */
