@@ -29,11 +29,17 @@ socket.on('message',msg=>{
   else{S.unread++;updSDB()}
   if(msg.sender==='support'){playNotifSound();showBrowserNotif(msg);}
 });
-socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто')});
-socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';showToast('Обращение переоткрыто')});
+socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто','info')});
+socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';showToast('Обращение переоткрыто','ok')});
+socket.on('messages_read',()=>{/* support has opened the ticket */});
+socket.on('typing_support',()=>{showSupportTyping();});
 socket.on('connect',()=>{
   setConnStatus('on');
-  if(S.tid){socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});setTimeout(refreshMessages,400);}
+  if(S.tid){
+    socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});
+    setTimeout(refreshMessages,400);
+    if(Notification.permission==='granted')setTimeout(setupPushSubscription,800);
+  }
 });
 socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
@@ -75,10 +81,18 @@ async function init(){
     try{
       const r=await fetch('/api/session/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:sv.t})});
       if(r.ok){
-        const{ticket,messages}=await r.json();
+        const data=await r.json();
+        // Topic was deleted — session is orphaned, start fresh
+        if(data.orphaned){clearS();showLogin();showToast('Тема удалена — начните новый чат');return;}
+        const{ticket,messages}=data;
         S.token=sv.t;S.tid=ticket.id;S.uname=ticket.user_name;
         showChat();renderMsgs(messages);scrollBot(false);socket.connect();
-        if(ticket.status==='closed'){S.closed=true;markClosed();}
+        if(ticket.status==='closed'){
+          S.closed=true;
+          // If topic was deleted and ticket closed, only show "New Chat"
+          if(ticket.telegram_topic_deleted){markClosedNoReopen();}
+          else{markClosed();}
+        }
         return;
       }
       clearS(); // server rejected (ticket gone) — clear stored session
@@ -105,7 +119,7 @@ sb.addEventListener('click',async()=>{
     const{sessionToken,ticketId,userName}=await r.json();
     S.token=sessionToken;S.tid=ticketId;S.uname=userName;
     saveS();showChat();renderMsgs([]);socket.connect();
-  }catch{showToast('Ошибка подключения');sb.disabled=false;sl.textContent='Начать чат'}
+  }catch{showToast('Ошибка подключения','err');sb.disabled=false;sl.textContent='Начать чат'}
 });
 
 function showLogin(){$('ls').classList.add('on');$('cs').classList.remove('on');setTimeout(()=>ni.focus(),150)}
@@ -119,18 +133,24 @@ hcl.addEventListener('click',()=>{
       const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
       if(!r.ok)throw 0;
       markClosed();
-    }catch{showToast('Ошибка — попробуйте снова');}
+    }catch{showToast('Ошибка — попробуйте снова','err');}
   });
 });
-function markClosed(){S.closed=true;ia.style.display='none';cbar.style.display='flex';hcl.style.display='none'}
+function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='';}
+function markClosedNoReopen(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='none';}
 
 /* ── REOPEN ── */
 reopenbtn.addEventListener('click',async()=>{
   reopenbtn.disabled=true;
   try{
     const r=await fetch(`/api/tickets/${S.tid}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
+    if(r.status===409){
+      markClosedNoReopen();
+      showToast('Тема удалена — начните новый чат','err');
+      return;
+    }
     if(!r.ok)throw 0;
-    S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';
+    S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';
     saveS();
     if(socket.connected)socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});
     else socket.connect();
@@ -139,13 +159,14 @@ reopenbtn.addEventListener('click',async()=>{
   finally{reopenbtn.disabled=false;}
 });
 
+
 /* ── NEW CHAT ── */
 newbtn.addEventListener('click',()=>{
   clearS();
   socket.disconnect();
   S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;S.unread=0;S.lastTyping=0;
   ml.innerHTML='';
-  cbar.style.display='none';ia.style.display='';hcl.style.display='';
+  cbar.classList.remove('on');ia.style.display='';hcl.style.display='';
   ni.value='';sb.disabled=true;sl.textContent='Начать чат';
   showLogin();updateLoginHint();
 });
@@ -194,11 +215,11 @@ async function send(){
   if(file){
     S.uploading=true;showSpin(true);
     try{const fd=new FormData();fd.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:fd});if(!r.ok)throw 0;const d=await r.json();fu=d.url;fn=d.name;fm=d.mime;mt=d.type}
-    catch{showToast('Ошибка загрузки');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
+    catch{showToast('Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
     S.uploading=false;showSpin(false);clearFile();
   }
   ti.value='';resize();updSend();closeEp();
-  if(!socket.connected){showToast('Нет соединения — попробуйте позже');sndbtn.disabled=false;updSend();return;}
+  if(!socket.connected){showToast('Нет соединения — попробуйте позже','err');sndbtn.disabled=false;updSend();return;}
   socket.emit('send_message',{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt},ack=>{
     if(ack?.error)showToast(ack.error==='Ticket is closed'?'Обращение закрыто':ack.error==='Rate limit'?'Слишком много сообщений — подождите':'Ошибка');
     sndbtn.disabled=false;updSend();
@@ -262,8 +283,15 @@ function updSDB(){
   const show=!isBot()||S.unread>0;
   sdwn.classList.toggle('on',show);
   let badge=sdwn.querySelector('.ubadge');
-  if(S.unread>0){if(!badge){badge=document.createElement('div');badge.className='ubadge';sdwn.appendChild(badge)}badge.textContent=S.unread}
-  else badge?.remove();
+  if(S.unread>0){
+    const isNew=!badge;
+    if(isNew){badge=document.createElement('div');badge.className='ubadge';sdwn.appendChild(badge);}
+    badge.textContent=S.unread;
+    if(isNew){
+      sdwn.classList.remove('bounce');
+      requestAnimationFrame(()=>requestAnimationFrame(()=>sdwn.classList.add('bounce')));
+    }
+  }else badge?.remove();
 }
 mwrap.addEventListener('scroll',updSDB,{passive:true});
 sdwn.addEventListener('click',()=>{scrollBot();S.unread=0;updSDB()});
@@ -282,7 +310,16 @@ function dlg(title,msg,cb){
 }
 
 /* ── TOAST ── */
-let tt;function showToast(m,d=3200){clearTimeout(tt);tst.textContent=m;tst.classList.add('on');tt=setTimeout(()=>tst.classList.remove('on'),d)}
+const TICO={ok:'✓',err:'✗',info:'ℹ'};
+let tt;
+function showToast(m,type='info',d=3200){
+  clearTimeout(tt);
+  tst.innerHTML=`<span class="tst-ico">${TICO[type]||'ℹ'}</span><span>${esc(m)}</span>`;
+  tst.dataset.type=type;
+  tst.classList.remove('on');void tst.offsetWidth;
+  tst.classList.add('on');
+  tt=setTimeout(()=>tst.classList.remove('on'),d);
+}
 
 /* ── WORKING HOURS (08:00–23:00 МСК = UTC+3) ── */
 function supportOnline(){
@@ -311,16 +348,16 @@ function setConnStatus(s){
   const dot=$('cs')?.querySelector('.hdot');
   const txt=$('cs')?.querySelector('.hstxt');
   if(!dot||!txt)return;
+  let newTxt,dotBg,dotAnim='none';
   if(s==='on'){
-    if(supportOnline()){
-      dot.style.background='var(--green)';dot.style.animation='blink 2.5s ease infinite';txt.textContent='онлайн';
-    }else{
-      dot.style.background='#6b7280';dot.style.animation='none';txt.textContent='ответим в 08:00 МСК';
-    }
-  }else if(s==='connecting'){
-    dot.style.background='#f59e0b';dot.style.animation='none';txt.textContent='подключение...';
-  }else{
-    dot.style.background='var(--red)';dot.style.animation='none';txt.textContent='нет соединения';
+    if(supportOnline()){newTxt='онлайн';dotBg='var(--green)';dotAnim='blink 2.5s ease infinite';}
+    else{newTxt='ответим в 08:00 МСК';dotBg='#6b7280';}
+  }else if(s==='connecting'){newTxt='подключение...';dotBg='#f59e0b';}
+  else{newTxt='нет соединения';dotBg='var(--red)';}
+  dot.style.background=dotBg;dot.style.animation=dotAnim;
+  if(txt.textContent!==newTxt){
+    txt.classList.remove('anim');void txt.offsetWidth;
+    txt.textContent=newTxt;txt.classList.add('anim');
   }
 }
 
@@ -333,7 +370,7 @@ async function refreshMessages(){
     const{ticket,messages}=await r.json();
     // Sync ticket status if changed remotely
     if(ticket.status==='closed'&&!S.closed)markClosed();
-    else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.style.display='none';hcl.style.display='';}
+    else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';}
     // Append only messages not yet rendered
     const known=new Set([...ml.querySelectorAll('[data-msg-id]')].map(el=>el.dataset.msgId));
     const fresh=messages.filter(m=>m.id&&!known.has(m.id));
@@ -342,6 +379,17 @@ async function refreshMessages(){
     fresh.forEach(renderMsg);
     if(atBottom)scrollBot(false);
   }catch{}
+}
+
+/* ── SUPPORT TYPING ── */
+let _typingHide=null;
+function showSupportTyping(){
+  if(S.closed)return;
+  const bar=$('typing-bar');
+  if(!bar)return;
+  bar.style.display='';
+  clearTimeout(_typingHide);
+  _typingHide=setTimeout(()=>{bar.style.display='none';},3000);
 }
 
 /* ── NOTIFICATIONS ── */
@@ -412,6 +460,18 @@ const linkify=t=>t.replace(/(https?:\/\/[^\s<>"]+)/g,'<a href="$1" target="_blan
 const fmtTime=d=>d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 function fmtDate(d){const n=new Date(),td=new Date(n.getFullYear(),n.getMonth(),n.getDate()),diff=Math.round((td-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000);if(diff===0)return'Сегодня';if(diff===1)return'Вчера';return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}
 function dico(){return`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="1" width="14" height="16" rx="2"/><path d="M5 6h8M5 9h8M5 12h5"/></svg>`}
+
+/* ── RIPPLE ── */
+document.addEventListener('pointerdown',e=>{
+  const btn=e.target.closest('.hbtn,.lbtn,.reopenbtn,.newbtn,.sndbtn,.icn,.mbo,.mbc');
+  if(!btn)return;
+  const r=document.createElement('span');r.className='rpl';
+  const rect=btn.getBoundingClientRect();
+  const size=Math.max(rect.width,rect.height)*2;
+  r.style.cssText=`width:${size}px;height:${size}px;left:${e.clientX-rect.left-size/2}px;top:${e.clientY-rect.top-size/2}px`;
+  btn.appendChild(r);
+  setTimeout(()=>r.remove(),600);
+});
 
 /* prevent double-tap zoom */
 let lt=0;document.addEventListener('touchend',e=>{const n=Date.now();if(n-lt<300&&e.target.tagName!=='TEXTAREA'&&e.target.tagName!=='INPUT')e.preventDefault();lt=n},{passive:false});

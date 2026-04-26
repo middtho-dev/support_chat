@@ -1,0 +1,14 @@
+{
+  "name": "Поддержка KV9RU",
+  "short_name": "KV9RU",
+  "description": "Служба поддержки KV9RU",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0ea5e9",
+  "lang": "ru",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/logo.png", "sizes": "any", "type": "image/png", "purpose": "any" }
+  ]
+}

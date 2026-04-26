@@ -47,6 +47,10 @@ db.exec(`
 // Migration: add reply_to_id column if not exists
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
 
+// Migrations: admin + topic tracking
+try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_topic_deleted INTEGER DEFAULT 0`); } catch {}
+
 // Push subscriptions
 db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
   id TEXT PRIMARY KEY,
@@ -104,6 +108,27 @@ module.exports = {
   savePushSub: db.prepare(`INSERT OR REPLACE INTO push_subscriptions (id, ticket_id, subscription) VALUES (?, ?, ?)`),
   getPushSubs: db.prepare(`SELECT * FROM push_subscriptions WHERE ticket_id = ?`),
   delPushSub:  db.prepare(`DELETE FROM push_subscriptions WHERE id = ?`),
+
+  // Telegram topic tracking
+  markTopicDeleted: db.prepare(`UPDATE tickets SET telegram_topic_deleted = 1, telegram_topic_id = NULL WHERE id = ?`),
+
+  // Admin panel
+  markSupportRead: db.prepare(`UPDATE tickets SET support_read_at = CURRENT_TIMESTAMP WHERE id = ?`),
+  getTicketsForAdmin: db.prepare(`
+    SELECT t.*,
+      m.content        AS last_msg,
+      m.sender         AS last_sender,
+      m.message_type   AS last_msg_type,
+      COALESCE(m.created_at, t.created_at) AS last_activity,
+      (SELECT COUNT(*) FROM messages
+       WHERE ticket_id = t.id AND sender = 'user'
+         AND created_at > COALESCE(t.support_read_at, '1970-01-01')) AS unread_count
+    FROM tickets t
+    LEFT JOIN messages m ON m.id = (
+      SELECT id FROM messages WHERE ticket_id = t.id ORDER BY created_at DESC LIMIT 1
+    )
+    ORDER BY last_activity DESC
+  `),
 
   db
 };
