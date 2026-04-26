@@ -9,7 +9,7 @@ const ECATS=[
   {i:'❤️',e:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✨','⭐','🌟','💫','🔥','💥','🎉','🎊','🎁','🎈','🌈','☀️','🌤','⛅','🌧','❄️','☃️','⛄','🌊','🌸','🌺','🌻','🌹','🍀','🌿','🍃','🎵','🎶','💤','💬','💭','🔔','💡','🔍','💎','🔑','🧲','🌙','💸','💯']}
 ];
 
-const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0};
+const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0,hasMore:false,oldestTs:null,_msgs:[]};
 const $=id=>document.getElementById(id);
 const ni=$('ni'),sb=$('sb'),sl=$('sl');
 const mwrap=$('mwrap'),ml=$('ml');
@@ -24,7 +24,9 @@ const reopenbtn=$('reopenbtn'),newbtn=$('newbtn');
 /* ── SOCKET ── */
 const socket=io({autoConnect:false});
 socket.on('message',msg=>{
-  const b=isBot();renderMsg(msg);
+  const b=isBot();
+  S._msgs.push(msg);
+  renderMsg(msg);
   if(b)scrollBot();
   else{S.unread++;updSDB()}
   if(msg.sender==='support'){playNotifSound();showBrowserNotif(msg);}
@@ -49,6 +51,12 @@ const SK='sc_v3';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
 const clearS=()=>localStorage.removeItem(SK);
+
+/* ── DRAFT ── */
+const DRAFT_KEY='sc_draft';
+const saveDraft=()=>ti.value?localStorage.setItem(DRAFT_KEY,ti.value):localStorage.removeItem(DRAFT_KEY);
+const loadDraft=()=>{const d=localStorage.getItem(DRAFT_KEY);if(d){ti.value=d;resize();updSend();}};
+const clearDraft=()=>localStorage.removeItem(DRAFT_KEY);
 
 /* ── INIT ── */
 async function init(){
@@ -86,7 +94,10 @@ async function init(){
         if(data.orphaned){clearS();showLogin();showToast('Тема удалена — начните новый чат');return;}
         const{ticket,messages}=data;
         S.token=sv.t;S.tid=ticket.id;S.uname=ticket.user_name;
+        S.hasMore=data.hasMore||false;
         showChat();renderMsgs(messages);scrollBot(false);socket.connect();
+        if(S.hasMore)showLoadOlder();
+        loadDraft();
         if(ticket.status==='closed'){
           S.closed=true;
           // If topic was deleted and ticket closed, only show "New Chat"
@@ -117,8 +128,8 @@ sb.addEventListener('click',async()=>{
     const r=await fetch('/api/session/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
     if(!r.ok)throw 0;
     const{sessionToken,ticketId,userName}=await r.json();
-    S.token=sessionToken;S.tid=ticketId;S.uname=userName;
-    saveS();showChat();renderMsgs([]);socket.connect();
+    S.token=sessionToken;S.tid=ticketId;S.uname=userName;S.hasMore=false;
+    saveS();showChat();renderMsgs([]);socket.connect();loadDraft();
   }catch{showToast('Ошибка подключения','err');sb.disabled=false;sl.textContent='Начать чат'}
 });
 
@@ -164,15 +175,51 @@ reopenbtn.addEventListener('click',async()=>{
 newbtn.addEventListener('click',()=>{
   clearS();
   socket.disconnect();
-  S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;S.unread=0;S.lastTyping=0;
+  S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;S.unread=0;S.lastTyping=0;S.hasMore=false;S.oldestTs=null;S._msgs=[];
   ml.innerHTML='';
   cbar.classList.remove('on');ia.style.display='';hcl.style.display='';
   ni.value='';sb.disabled=true;sl.textContent='Начать чат';
   showLogin();updateLoginHint();
 });
 
+/* ── LOAD OLDER ── */
+function showLoadOlder(){
+  if(ml.querySelector('.lo-btn'))return;
+  const btn=document.createElement('button');btn.className='lo-btn';btn.textContent='⬆ Загрузить ранее';
+  btn.addEventListener('click',loadOlderMessages);
+  ml.prepend(btn);
+}
+function hideLoadOlder(){ml.querySelector('.lo-btn')?.remove();}
+async function loadOlderMessages(){
+  if(!S.tid||!S.token||!S.hasMore)return;
+  const btn=ml.querySelector('.lo-btn');
+  if(btn){btn.disabled=true;btn.textContent='Загружаем...';}
+  try{
+    const r=await fetch(`/api/tickets/${S.tid}/messages/older`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token,before:S.oldestTs})});
+    if(!r.ok)throw 0;
+    const{messages,hasMore}=await r.json();
+    if(!messages.length){S.hasMore=false;hideLoadOlder();return;}
+    S.hasMore=hasMore;
+    S.oldestTs=messages[0].created_at;
+    S._msgs=[...messages,...S._msgs];
+    // Re-render all preserving distance from bottom
+    const fromBot=mwrap.scrollHeight-mwrap.scrollTop-mwrap.clientHeight;
+    _doRender();
+    if(S.hasMore)showLoadOlder();
+    requestAnimationFrame(()=>{mwrap.scrollTop=mwrap.scrollHeight-mwrap.clientHeight-fromBot;});
+  }catch{if(btn){btn.disabled=false;btn.textContent='⬆ Загрузить ранее';}}
+}
+
 /* ── RENDER ── */
-function renderMsgs(msgs){ml.innerHTML='';S.lastDate=null;if(!msgs.length){renderEmpty();return}msgs.forEach(renderMsg)}
+function _doRender(){
+  ml.innerHTML='';S.lastDate=null;
+  if(!S._msgs.length){renderEmpty();return;}
+  S._msgs.forEach(m=>renderMsg(m));
+}
+function renderMsgs(msgs){
+  S._msgs=msgs.slice();S.oldestTs=msgs[0]?.created_at||null;
+  _doRender();
+}
 function renderEmpty(){const d=document.createElement('div');d.className='emp';d.innerHTML=`<svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M29 6C16.3 6 6 15.3 6 27c0 6.3 2.9 12 7.6 16L12 52l9.5-2.8A23.5 23.5 0 0029 52c12.7 0 23-9.3 23-21S41.7 6 29 6Z"/><circle cx="20" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="29" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="38" cy="28" r="2" fill="currentColor" stroke="none"/></svg><p>Напишите ваш первый вопрос — ответим быстро</p>`;ml.appendChild(d)}
 function renderSys(txt){ml.querySelector('.emp')?.remove();const d=document.createElement('div');d.className='sysmsg';d.innerHTML=`<span>${esc(txt)}</span>`;ml.appendChild(d)}
 
@@ -218,17 +265,21 @@ async function send(){
     catch{showToast('Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
     S.uploading=false;showSpin(false);clearFile();
   }
-  ti.value='';resize();updSend();closeEp();
+  ti.value='';resize();updSend();closeEp();clearDraft();
   if(!socket.connected){showToast('Нет соединения — попробуйте позже','err');sndbtn.disabled=false;updSend();return;}
   socket.emit('send_message',{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt},ack=>{
-    if(ack?.error)showToast(ack.error==='Ticket is closed'?'Обращение закрыто':ack.error==='Rate limit'?'Слишком много сообщений — подождите':'Ошибка');
+    if(ack?.error){
+      if(ack.error==='Rate limit')showToast(`Слишком много сообщений — подождите ${ack.retryAfter||60}с`,'err');
+      else if(ack.error==='Ticket is closed')showToast('Обращение закрыто','info');
+      else showToast('Ошибка отправки','err');
+    }
     sndbtn.disabled=false;updSend();
   });
 }
 sndbtn.addEventListener('click',send);
 ti.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 ti.addEventListener('input',()=>{
-  resize();updSend();
+  resize();updSend();saveDraft();
   if(!S.tid||S.closed)return;
   const now=Date.now();
   if(now-S.lastTyping>4000){S.lastTyping=now;socket.emit('typing',{ticketId:S.tid,sessionToken:S.token});}
@@ -243,7 +294,13 @@ mwrap.addEventListener('dragover',e=>{e.preventDefault();mwrap.style.outline='2p
 mwrap.addEventListener('dragleave',()=>{mwrap.style.outline=''});
 mwrap.addEventListener('drop',e=>{e.preventDefault();mwrap.style.outline='';if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0])});
 document.addEventListener('paste',e=>{if(S.closed)return;for(const it of(e.clipboardData?.items||[])){if(it.kind==='file'){setFile(it.getAsFile());break}}});
-function setFile(f){S.file=f;fp.style.display='block';fpth.innerHTML='';if(f.type.startsWith('image/')){const img=document.createElement('img');img.src=URL.createObjectURL(f);fpth.appendChild(img)}else{const d=document.createElement('div');d.className='fpnm';d.textContent=f.name;fpth.appendChild(d)}updSend()}
+function setFile(f){
+  if(f.size>50*1024*1024){showToast('Файл слишком большой (макс. 50 МБ)','err');return;}
+  S.file=f;fp.style.display='block';fpth.innerHTML='';
+  if(f.type.startsWith('image/')){const img=document.createElement('img');img.src=URL.createObjectURL(f);fpth.appendChild(img)}
+  else{const d=document.createElement('div');d.className='fpnm';d.textContent=f.name;fpth.appendChild(d)}
+  updSend();
+}
 function clearFile(){S.file=null;fp.style.display='none';fpth.innerHTML='';updSend()}
 fprm.addEventListener('click',clearFile);
 function showSpin(on){const ex=ia.querySelector('.uspin');if(on&&!ex){const d=document.createElement('div');d.className='uspin';d.innerHTML='<div class="sp"></div><span>Загрузка...</span>';ia.insertBefore(d,ia.firstChild)}else if(!on&&ex)ex.remove()}
@@ -443,7 +500,7 @@ async function setupPushSubscription(){
   }catch(e){console.warn('[Push] subscribe error',e);}
 }
 
-function tryRequestNotifications(){}  // permission now only via bell button
+function tryRequestNotifications(){} // kept for compat
 function showBrowserNotif(msg){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   if(document.visibilityState==='visible')return;
@@ -456,7 +513,7 @@ function showBrowserNotif(msg){
 
 /* ── UTILS ── */
 const esc=s=>s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):'';
-const linkify=t=>t.replace(/(https?:\/\/[^\s<>"]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
+const linkify=t=>t.replace(/https?:\/\/[^\s<>"&]+/g,url=>`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
 const fmtTime=d=>d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 function fmtDate(d){const n=new Date(),td=new Date(n.getFullYear(),n.getMonth(),n.getDate()),diff=Math.round((td-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000);if(diff===0)return'Сегодня';if(diff===1)return'Вчера';return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}
 function dico(){return`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="1" width="14" height="16" rx="2"/><path d="M5 6h8M5 9h8M5 12h5"/></svg>`}
