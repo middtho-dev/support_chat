@@ -413,6 +413,22 @@ async function sendTyping(ticket) {
   } catch {}
 }
 
+// Lightweight check: returns false if the Telegram topic no longer exists.
+// Network/other errors are treated as "alive" to avoid false closures.
+async function checkTopicAlive(ticket) {
+  if (!bot || !GROUP_ID || !ticket.telegram_topic_id) return false;
+  try {
+    await bot.sendChatAction(GROUP_ID, 'typing', { message_thread_id: ticket.telegram_topic_id });
+    return true;
+  } catch (e) {
+    if (isTopicGone(e)) {
+      try { db.markTopicDeleted.run(ticket.id); } catch {}
+      return false;
+    }
+    return true;
+  }
+}
+
 async function cleanupOldTopics() {
   if (!bot || !GROUP_ID) return;
   try {
@@ -432,4 +448,4 @@ async function cleanupOldTopics() {
   } catch (e) { console.error('[TG] cleanup:', e.message); }
 }
 
-module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened, autoCloseTicket, sendTyping, warnInactivity };
+module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened, autoCloseTicket, sendTyping, warnInactivity, checkTopicAlive };

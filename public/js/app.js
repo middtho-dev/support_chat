@@ -27,21 +27,26 @@ socket.on('message',msg=>{
   const b=isBot();
   S._msgs.push(msg);
   renderMsg(msg);
+  saveMsgCache();
   if(b)scrollBot();
   else{S.unread++;updSDB()}
   if(msg.sender==='support'){playNotifSound();showBrowserNotif(msg);}
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто','info')});
 socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';showToast('Обращение переоткрыто','ok')});
+socket.on('ticket_orphaned',()=>{markClosedNoReopen();showToast('Тема удалена — начните новый чат','err',5000);});
 socket.on('messages_read',()=>{/* support has opened the ticket */});
 socket.on('typing_support',()=>{showSupportTyping();});
+let _socketEverConnected=false;
 socket.on('connect',()=>{
   setConnStatus('on');
   if(S.tid){
     socket.emit('join_ticket',{ticketId:S.tid,sessionToken:S.token});
-    setTimeout(refreshMessages,400);
+    // Only refresh on reconnect — initial load already fetched fresh data.
+    if(_socketEverConnected)refreshMessages();
     if(Notification.permission==='granted')setTimeout(setupPushSubscription,800);
   }
+  _socketEverConnected=true;
 });
 socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
@@ -57,6 +62,25 @@ const DRAFT_KEY='sc_draft';
 const saveDraft=()=>ti.value?localStorage.setItem(DRAFT_KEY,ti.value):localStorage.removeItem(DRAFT_KEY);
 const loadDraft=()=>{const d=localStorage.getItem(DRAFT_KEY);if(d){ti.value=d;resize();updSend();}};
 const clearDraft=()=>localStorage.removeItem(DRAFT_KEY);
+
+/* ── MESSAGE CACHE (instant paint on reload) ── */
+const MCACHE_KEY='sc_msgs_v1';
+const MCACHE_LIMIT=80;
+function saveMsgCache(){
+  if(!S.tid||!S._msgs.length)return;
+  try{
+    const slice=S._msgs.slice(-MCACHE_LIMIT);
+    localStorage.setItem(MCACHE_KEY,JSON.stringify({tid:S.tid,msgs:slice,closed:S.closed}));
+  }catch{}
+}
+function loadMsgCache(tid){
+  try{
+    const raw=localStorage.getItem(MCACHE_KEY);if(!raw)return null;
+    const c=JSON.parse(raw);
+    return c&&c.tid===tid?c:null;
+  }catch{return null}
+}
+function clearMsgCache(){localStorage.removeItem(MCACHE_KEY);}
 
 /* ── INIT ── */
 async function init(){
@@ -86,28 +110,44 @@ async function init(){
 
   const sv=loadS();
   if(sv){
+    // 1) Optimistic paint from local cache — chat appears instantly
+    const cached=loadMsgCache(sv.id);
+    if(cached){
+      S.token=sv.t;S.tid=sv.id;S.uname=sv.n;
+      showChat();renderMsgs(cached.msgs);scrollBot(false);loadDraft();
+      if(cached.closed){S.closed=true;markClosed();}
+    }
+    // 2) Hit the network in background, reconcile when it lands
     try{
       const r=await fetch('/api/session/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:sv.t})});
       if(r.ok){
         const data=await r.json();
-        // Topic was deleted — session is orphaned, start fresh
-        if(data.orphaned){clearS();showLogin();showToast('Тема удалена — начните новый чат');return;}
+        if(data.orphaned){clearS();clearMsgCache();showLogin();showToast('Тема удалена — начните новый чат','err');return;}
         const{ticket,messages}=data;
         S.token=sv.t;S.tid=ticket.id;S.uname=ticket.user_name;
         S.hasMore=data.hasMore||false;
-        showChat();renderMsgs(messages);scrollBot(false);socket.connect();
+        if(!cached)showChat();
+        renderMsgs(messages);scrollBot(false);socket.connect();
         if(S.hasMore)showLoadOlder();
-        loadDraft();
+        if(!cached)loadDraft();
         if(ticket.status==='closed'){
           S.closed=true;
-          // If topic was deleted and ticket closed, only show "New Chat"
           if(ticket.telegram_topic_deleted){markClosedNoReopen();}
           else{markClosed();}
+        }else if(cached&&cached.closed){
+          // Server says open — undo cached closed state
+          S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';
         }
+        saveMsgCache();
         return;
       }
-      clearS(); // server rejected (ticket gone) — clear stored session
-    }catch{showLogin();return;} // network error — keep session for next load
+      clearS();clearMsgCache();
+      if(cached){showLogin();return;}
+    }catch{
+      // Network failure — keep cached chat on screen and the saved session for next load
+      if(cached){socket.connect();return;}
+      showLogin();return;
+    }
   }
   showLogin();
 }
@@ -147,8 +187,8 @@ hcl.addEventListener('click',()=>{
     }catch{showToast('Ошибка — попробуйте снова','err');}
   });
 });
-function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='';}
-function markClosedNoReopen(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='none';}
+function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='';saveMsgCache();}
+function markClosedNoReopen(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';reopenbtn.style.display='none';saveMsgCache();}
 
 /* ── REOPEN ── */
 reopenbtn.addEventListener('click',async()=>{
@@ -173,7 +213,7 @@ reopenbtn.addEventListener('click',async()=>{
 
 /* ── NEW CHAT ── */
 newbtn.addEventListener('click',()=>{
-  clearS();
+  clearS();clearMsgCache();
   socket.disconnect();
   S.token=null;S.tid=null;S.uname=null;S.closed=false;S.lastDate=null;S.unread=0;S.lastTyping=0;S.hasMore=false;S.oldestTs=null;S._msgs=[];
   ml.innerHTML='';
