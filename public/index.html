@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0d0d0d">
+<link rel="manifest" href="/manifest.json">
 <title>Поддержка — KV9RU</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -422,6 +423,160 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 .uspin{display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:13px;color:var(--t2)}
 .sp{width:14px;height:14px;border:2px solid var(--bg3);border-top-color:var(--blue);border-radius:50%;animation:rot .7s linear infinite}
 @keyframes rot{to{transform:rotate(360deg)}}
+
+/* Typing indicator */
+.typing-bar{
+  flex-shrink:0;padding:4px 14px 2px;
+  display:flex;align-items:center;gap:8px;
+  animation:slideUp .2s ease;
+}
+.typing-dots{display:flex;align-items:center;gap:3px}
+.typing-dots span{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--t2);
+  animation:tdot 1.2s ease infinite;
+}
+.typing-dots span:nth-child(2){animation-delay:.15s}
+.typing-dots span:nth-child(3){animation-delay:.3s}
+@keyframes tdot{0%,80%,100%{transform:scale(1);opacity:.35}40%{transform:scale(1.4);opacity:1}}
+.typing-lbl{font-size:12px;color:var(--t2)}
+
+/* ── NEW ANIMATIONS ── */
+@keyframes springIn{
+  0%{opacity:0;transform:scale(.85) translateY(12px)}
+  60%{opacity:1;transform:scale(1.03) translateY(-2px)}
+  100%{opacity:1;transform:scale(1) translateY(0)}
+}
+@keyframes slideUp{
+  from{opacity:0;transform:translateY(14px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes bounceIn{
+  0%{transform:scale(0)}
+  60%{transform:scale(1.28)}
+  100%{transform:scale(1)}
+}
+@keyframes ripple{to{transform:scale(5);opacity:0}}
+@keyframes breathe{
+  0%,100%{box-shadow:0 0 0 1px rgba(59,130,246,.3),0 8px 32px rgba(29,78,216,.3)}
+  50%{box-shadow:0 0 0 1px rgba(59,130,246,.5),0 8px 32px rgba(29,78,216,.5),0 0 0 10px rgba(59,130,246,.06)}
+}
+@keyframes gradMove{
+  0%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+  100%{background-position:0% 50%}
+}
+@keyframes fadeSlide{
+  from{opacity:0;transform:translateX(-5px)}
+  to{opacity:1;transform:translateX(0)}
+}
+@keyframes screenIn{
+  from{opacity:0;transform:scale(.98)}
+  to{opacity:1;transform:scale(1)}
+}
+@keyframes sdwnBounce{
+  0%,100%{transform:scale(1)}
+  40%{transform:scale(1.22)}
+  70%{transform:scale(.92)}
+}
+
+/* Login screen animated gradient */
+#ls{
+  justify-content:center;align-items:center;
+  padding:32px 24px;
+  background:linear-gradient(-45deg,#0d0d0d,#0a1520,#0d0d0d,#0f1a2e);
+  background-size:400% 400%;
+  animation:gradMove 14s ease infinite;
+}
+
+/* Logo breathe on login */
+.llogo{
+  width:72px;height:72px;border-radius:16px;
+  background:linear-gradient(135deg,#1e3a5f 0%,#1d4ed8 100%);
+  display:flex;align-items:center;justify-content:center;
+  margin-bottom:24px;
+  animation:breathe 3s ease infinite;
+  font-size:22px;font-weight:800;color:#fff;letter-spacing:-1px;
+  font-family:'Inter',sans-serif;
+}
+
+/* Chat screen entrance */
+#cs.on{animation:screenIn .28s cubic-bezier(.34,1.4,.64,1) both}
+
+/* Incoming message slides from left, outgoing from right */
+@keyframes mpopIn{
+  from{opacity:0;transform:scale(.95) translate(-10px,4px)}
+  to{opacity:1;transform:none}
+}
+@keyframes mpopOut{
+  from{opacity:0;transform:scale(.95) translate(10px,4px)}
+  to{opacity:1;transform:none}
+}
+.msg.i{animation:mpopIn .18s ease both}
+.msg.o{animation:mpopOut .18s ease both}
+
+/* Closed bar slides up */
+.cbar{
+  flex-shrink:0;background:rgba(239,68,68,.05);
+  border-top:1px solid rgba(239,68,68,.15);
+  padding:0 14px;min-height:50px;
+  display:none;align-items:center;justify-content:space-between;gap:12px;
+}
+.cbar.on{display:flex;animation:slideUp .22s ease}
+
+/* File preview spring in */
+.fprev{margin-bottom:7px;animation:springIn .2s cubic-bezier(.34,1.4,.64,1)}
+
+/* Emoji picker slides up */
+.epick{
+  background:var(--bg2);
+  border-top:1px solid var(--bdr);
+  padding:10px 8px 8px;
+  animation:slideUp .18s cubic-bezier(.34,1.4,.64,1);
+}
+
+/* Scroll-down button bounce on new message */
+.sdwn.bounce{animation:sdwnBounce .4s ease}
+
+/* Unread badge pop */
+.ubadge{
+  position:absolute;top:-5px;right:-4px;
+  background:var(--blue);color:#fff;
+  font-size:10px;font-weight:700;
+  min-width:17px;height:17px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;padding:0 3px;
+  animation:bounceIn .3s cubic-bezier(.34,1.4,.64,1);
+}
+
+/* Status text fade-slide on change */
+.hstxt.anim{animation:fadeSlide .22s ease}
+
+/* Ripple */
+.rpl{
+  position:absolute;border-radius:50%;
+  background:rgba(255,255,255,.18);pointer-events:none;
+  transform:scale(0);animation:ripple .55s ease-out forwards;
+}
+
+/* Toast with icon layout */
+.tst{
+  position:fixed;bottom:80px;left:50%;
+  transform:translateX(-50%) translateY(10px);
+  background:rgba(20,20,20,.96);backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--t1);padding:9px 16px;border-radius:20px;font-size:13px;
+  pointer-events:none;opacity:0;
+  transition:opacity .2s,transform .2s;
+  z-index:9999;white-space:nowrap;
+  display:flex;align-items:center;gap:7px;
+}
+.tst.on{opacity:1;transform:translateX(-50%) translateY(0);animation:springIn .25s cubic-bezier(.34,1.4,.64,1)}
+.tst .tst-ico{font-size:12px;opacity:.8}
+.tst[data-type=ok]{border-color:rgba(34,197,94,.3);color:#86efac}
+.tst[data-type=err]{border-color:rgba(239,68,68,.3);color:#fca5a5}
+
+/* Buttons need overflow:hidden for ripple */
+.hbtn,.lbtn,.reopenbtn,.newbtn,.sndbtn,.icn{overflow:hidden;position:relative}
 </style>
 </head>
 <body>
@@ -473,7 +628,12 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
     </button>
   </div>
 
-  <div class="cbar" id="cbar" style="display:none">
+  <div class="typing-bar" id="typing-bar" style="display:none">
+    <div class="typing-dots"><span></span><span></span><span></span></div>
+    <span class="typing-lbl">Поддержка печатает...</span>
+  </div>
+
+  <div class="cbar" id="cbar">
     <span class="cbar-t">🔒 Обращение закрыто</span>
     <div style="display:flex;gap:8px;flex-shrink:0">
       <button class="reopenbtn" id="reopenbtn">Переоткрыть</button>

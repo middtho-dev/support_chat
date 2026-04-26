@@ -22,6 +22,12 @@ const topicStatus = new Map();
 const kbClose  = tid => ({ inline_keyboard: [[{ text: '🔴 Закрыть тикет', callback_data: `close:${tid}`  }]] });
 const kbReopen = tid => ({ inline_keyboard: [[{ text: '🟢 Переоткрыть',   callback_data: `reopen:${tid}` }]] });
 
+function isThreadNotFound(e) {
+  const msg = String(e?.message || e?.response?.body?.description || '').toLowerCase();
+  return msg.includes('thread not found') || msg.includes('topic_deleted') ||
+         msg.includes('topic_closed') || msg.includes('chat not found');
+}
+
 function init(socketIo) {
   io = socketIo;
   if (!TOKEN || !GROUP_ID) {
@@ -266,7 +272,17 @@ async function downloadFile(msg) {
 
 async function safeSend(chatId, text, opts = {}) {
   try { return bot ? await bot.sendMessage(chatId, text, opts) : null; }
-  catch (e) { console.error('[TG] safeSend:', e.message); return null; }
+  catch (e) {
+    console.error('[TG] safeSend:', e.message);
+    if (opts.message_thread_id && isThreadNotFound(e)) {
+      const ticket = db.getTicketByTopicIdAny.get(opts.message_thread_id);
+      if (ticket) {
+        db.markTopicDeleted.run(ticket.id);
+        console.warn(`[TG] Topic ${opts.message_thread_id} marked deleted`);
+      }
+    }
+    return null;
+  }
 }
 
 async function createTopic(ticketId, userName) {
@@ -310,7 +326,14 @@ async function forwardMessage(ticket, message) {
     }
     if (sent) db.updateTelegramMessageId.run(sent.message_id, message.id);
     await setTopicStatus(tid, ticket, E_WAIT);
-  } catch (e) { console.error('[TG] forwardMessage:', e.message); }
+  } catch (e) {
+    if (isThreadNotFound(e)) {
+      db.markTopicDeleted.run(ticket.id);
+      console.warn(`[TG] Topic ${tid} not found on forward — marked deleted`);
+    } else {
+      console.error('[TG] forwardMessage:', e.message);
+    }
+  }
 }
 
 async function notifyTicketClosed(ticket) {
@@ -330,14 +353,27 @@ async function notifyTicketReopened(ticket) {
   if (!bot || !GROUP_ID || !ticket.telegram_topic_id) return;
   const tid = ticket.telegram_topic_id;
   try {
-    await bot.reopenForumTopic(GROUP_ID, tid).catch(() => {});
+    try {
+      await bot.reopenForumTopic(GROUP_ID, tid);
+    } catch (reopenErr) {
+      if (isThreadNotFound(reopenErr)) {
+        db.markTopicDeleted.run(ticket.id);
+        console.warn(`[TG] Topic ${tid} not found on reopen — marked deleted`);
+        const err = new Error('Telegram topic deleted');
+        err.topicDeleted = true;
+        throw err;
+      }
+    }
     topicStatus.delete(tid);
     await setTopicStatus(tid, ticket, E_OPEN);
     await safeSend(GROUP_ID, '🟢 Переоткрыто пользователем', {
       message_thread_id: tid,
       reply_markup: kbClose(tid)
     });
-  } catch (e) { console.error('[TG] notifyTicketReopened:', e.message); }
+  } catch (e) {
+    if (e.topicDeleted) throw e;
+    console.error('[TG] notifyTicketReopened:', e.message);
+  }
 }
 
 async function autoCloseTicket(ticket) {

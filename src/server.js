@@ -40,10 +40,9 @@ const ALLOWED_MIMES = new Set([
   'application/x-zip'
 ]);
 
-// Extensions iOS Safari sends as application/octet-stream
-const IMG_EXTS  = new Set(['.jpg','.jpeg','.png','.gif','.webp','.heic','.heif','.bmp','.tiff','.avif']);
-const VID_EXTS  = new Set(['.mp4','.mov','.m4v','.avi','.mkv','.webm']);
-const AUD_EXTS  = new Set(['.mp3','.m4a','.aac','.ogg','.wav','.flac','.opus']);
+const IMG_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.webp','.heic','.heif','.bmp','.tiff','.avif']);
+const VID_EXTS = new Set(['.mp4','.mov','.m4v','.avi','.mkv','.webm']);
+const AUD_EXTS = new Set(['.mp3','.m4a','.aac','.ogg','.wav','.flac','.opus']);
 
 function mimeFromExt(filename) {
   const ext = path.extname(filename).toLowerCase();
@@ -67,6 +66,14 @@ const upload = multer({
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Admin panel route (before static so /admin resolves to admin.html)
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+app.get('/admin', (req, res) => {
+  if (!ADMIN_TOKEN) return res.status(503).send('<h1>Admin panel disabled</h1><p>Set ADMIN_TOKEN in .env to enable.</p>');
+  res.sendFile(path.join(__dirname, '../public/admin.html'));
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ─── REST API ────────────────────────────────────────────────────────────────
@@ -83,6 +90,10 @@ app.post('/api/session/start', (req, res) => {
   db.createTicket.run(ticketId, name, sessionToken);
   telegram.createTopic(ticketId, name).catch(e => console.error('[TG] createTopic:', e?.message));
 
+  // Notify admin panel of new ticket
+  const newTicket = db.getTicketById.get(ticketId);
+  if (newTicket) io.to('admin').emit('admin_new_ticket', newTicket);
+
   res.json({ sessionToken, ticketId, userName: name });
 });
 
@@ -95,6 +106,11 @@ app.post('/api/session/resume', (req, res) => {
   const ticket = db.getTicketBySessionAny.get(sessionToken);
   if (!ticket) return res.status(404).json({ error: 'No active ticket' });
 
+  // Ticket closed + topic was deleted → tell client to start fresh
+  if (ticket.status === 'closed' && ticket.telegram_topic_deleted) {
+    return res.json({ orphaned: true });
+  }
+
   const messages = db.getMessages.all(ticket.id);
   res.json({ ticket, messages });
 });
@@ -102,15 +118,12 @@ app.post('/api/session/resume', (req, res) => {
 app.get('/api/tickets/:ticketId/messages', (req, res) => {
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-
-  const messages = db.getMessages.all(ticket.id);
-  res.json(messages);
+  res.json(db.getMessages.all(ticket.id));
 });
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
 
-  // iOS may report application/octet-stream — detect real type from extension
   let mime = req.file.mimetype;
   if (mime === 'application/octet-stream') mime = mimeFromExt(req.file.originalname) || mime;
 
@@ -119,12 +132,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   else if (mime.startsWith('video/')) type = 'video';
   else if (mime.startsWith('audio/')) type = 'audio';
 
-  res.json({
-    url: `/uploads/${req.file.filename}`,
-    name: req.file.originalname,
-    mime,
-    type
-  });
+  res.json({ url: `/uploads/${req.file.filename}`, name: req.file.originalname, mime, type });
 });
 
 app.post('/api/tickets/:ticketId/close', (req, res) => {
@@ -136,20 +144,40 @@ app.post('/api/tickets/:ticketId/close', (req, res) => {
   db.closeTicket.run(ticket.id);
   telegram.notifyTicketClosed(ticket).catch(e => console.error('[TG] notifyTicketClosed:', e?.message));
   io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'user' });
+  io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
+  io.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
 
   res.json({ ok: true });
 });
 
-app.post('/api/tickets/:ticketId/reopen', (req, res) => {
+app.post('/api/tickets/:ticketId/reopen', async (req, res) => {
   const { sessionToken } = req.body;
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Not found' });
   if (!sessionToken || ticket.session_token !== sessionToken) return res.status(403).json({ error: 'Forbidden' });
 
-  db.reopenTicket.run(ticket.id);
-  telegram.notifyTicketReopened(ticket).catch(e => console.error('[TG] notifyTicketReopened:', e?.message));
-  io.to(`ticket:${ticket.id}`).emit('ticket_reopened');
+  // Refuse if Telegram topic was deleted
+  if (ticket.telegram_topic_deleted) {
+    return res.status(409).json({ error: 'Topic deleted' });
+  }
 
+  db.reopenTicket.run(ticket.id);
+
+  try {
+    await telegram.notifyTicketReopened(ticket);
+  } catch (e) {
+    if (e.topicDeleted) {
+      // Undo reopen — topic is gone
+      db.closeTicket.run(ticket.id);
+      io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'system' });
+      io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
+      return res.status(409).json({ error: 'Topic deleted' });
+    }
+  }
+
+  io.to(`ticket:${ticket.id}`).emit('ticket_reopened');
+  io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'open' });
+  io.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
   res.json({ ok: true });
 });
 
@@ -219,8 +247,15 @@ function scheduleWelcomeMessages(ticketId) {
   sendMsg(WELCOME_2, 2800);
 }
 
+// Broadcast updated ticket list to all admins
+function broadcastAdminTickets() {
+  io.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
+}
+
 io.on('connection', (socket) => {
   console.log('[Socket] Connected:', socket.id);
+
+  // ── USER HANDLERS ────────────────────────────────────────────────────────
 
   socket.on('join_ticket', ({ ticketId, sessionToken }) => {
     const ticket = db.getTicketBySessionAny.get(sessionToken);
@@ -231,7 +266,6 @@ io.on('connection', (socket) => {
     socket.join(`ticket:${ticketId}`);
     socket.ticketId = ticketId;
     console.log(`[Socket] ${socket.id} joined ticket:${ticketId}`);
-
     scheduleWelcomeMessages(ticketId);
   });
 
@@ -251,17 +285,14 @@ io.on('connection', (socket) => {
         if (ack) ack({ error: 'Unauthorized' });
         return;
       }
-
       if (ticket.status === 'closed') {
         if (ack) ack({ error: 'Ticket is closed' });
         return;
       }
-
       if (!content && !fileUrl) {
         if (ack) ack({ error: 'Empty message' });
         return;
       }
-
       if (isRateLimited(sessionToken)) {
         if (ack) ack({ error: 'Rate limit' });
         return;
@@ -289,6 +320,9 @@ io.on('connection', (socket) => {
       };
 
       io.to(`ticket:${ticketId}`).emit('message', message);
+      io.to('admin').emit('admin_new_message', { ticketId, message });
+      broadcastAdminTickets();
+
       telegram.forwardMessage(ticket, message).catch(e => console.error('[TG] forwardMessage:', e?.message));
 
       if (ack) ack({ ok: true, id: msgId });
@@ -300,6 +334,101 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('[Socket] Disconnected:', socket.id);
+  });
+
+  // ── ADMIN HANDLERS ───────────────────────────────────────────────────────
+
+  socket.on('admin_auth', ({ token }) => {
+    if (!ADMIN_TOKEN || !token || token !== ADMIN_TOKEN) {
+      socket.emit('admin_auth_error', { message: 'Invalid token' });
+      return;
+    }
+    socket.isAdmin = true;
+    socket.join('admin');
+    socket.emit('admin_auth_ok');
+    socket.emit('admin_tickets', db.getTicketsForAdmin.all());
+  });
+
+  socket.on('admin_open_ticket', ({ ticketId }) => {
+    if (!socket.isAdmin) return;
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket) return;
+    const messages = db.getMessages.all(ticketId);
+    db.markSupportRead.run(ticketId);
+    // Notify user their messages were read
+    io.to(`ticket:${ticketId}`).emit('messages_read');
+    socket.emit('admin_ticket_messages', { ticketId, messages, ticket });
+    // Refresh ticket list (unread count reset)
+    broadcastAdminTickets();
+  });
+
+  socket.on('admin_reply', async ({ ticketId, content }) => {
+    if (!socket.isAdmin) return;
+    const text = (content || '').trim();
+    if (!text) return;
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket || ticket.status === 'closed') return;
+
+    const msgId = uuidv4();
+    db.saveMessage.run(msgId, ticketId, 'support', SUPPORT_NAME, text, 'text', null, null, null, null, null);
+    db.markSupportRead.run(ticketId);
+
+    const message = {
+      id: msgId, ticket_id: ticketId,
+      sender: 'support', sender_name: SUPPORT_NAME,
+      content: text, message_type: 'text',
+      file_url: null, file_name: null, file_mime: null,
+      created_at: new Date().toISOString()
+    };
+
+    io.to(`ticket:${ticketId}`).emit('message', message);
+    io.to('admin').emit('admin_new_message', { ticketId, message });
+    broadcastAdminTickets();
+
+    push.send(ticketId, text).catch(() => {});
+    const freshTicket = db.getTicketById.get(ticketId);
+    telegram.forwardMessage(freshTicket, message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
+  });
+
+  socket.on('admin_typing', ({ ticketId }) => {
+    if (!socket.isAdmin) return;
+    // Send to user sockets in the ticket room (admin sockets are not in ticket rooms)
+    io.to(`ticket:${ticketId}`).emit('typing_support');
+  });
+
+  socket.on('admin_close_ticket', ({ ticketId }) => {
+    if (!socket.isAdmin) return;
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket || ticket.status === 'closed') return;
+    db.closeTicket.run(ticket.id);
+    io.to(`ticket:${ticketId}`).emit('ticket_closed', { by: 'support' });
+    socket.emit('admin_ticket_status', { ticketId, status: 'closed' });
+    broadcastAdminTickets();
+    telegram.notifyTicketClosed(ticket).catch(() => {});
+  });
+
+  socket.on('admin_reopen_ticket', async ({ ticketId }) => {
+    if (!socket.isAdmin) return;
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket || ticket.status !== 'closed') return;
+    if (ticket.telegram_topic_deleted) {
+      socket.emit('admin_error', { message: 'Тема удалена — создайте новый тикет' });
+      return;
+    }
+    db.reopenTicket.run(ticket.id);
+    try {
+      await telegram.notifyTicketReopened(ticket);
+    } catch (e) {
+      if (e.topicDeleted) {
+        db.closeTicket.run(ticket.id);
+        socket.emit('admin_error', { message: 'Тема удалена — создайте новый тикет' });
+        broadcastAdminTickets();
+        return;
+      }
+    }
+    io.to(`ticket:${ticketId}`).emit('ticket_reopened');
+    socket.emit('admin_ticket_status', { ticketId, status: 'open' });
+    broadcastAdminTickets();
   });
 });
 
@@ -329,7 +458,6 @@ async function inactivityCheck() {
   if (_inactivityRunning) return;
   _inactivityRunning = true;
   try {
-    // Warn tickets approaching the 1-hour limit
     const toWarn = warnTicketsQuery.all();
     for (const ticket of toWarn) {
       if (warnedTickets.has(ticket.id)) continue;
@@ -349,7 +477,6 @@ async function inactivityCheck() {
       telegram.warnInactivity(ticket).catch(() => {});
     }
 
-    // Close tickets that hit 1 hour of inactivity
     const stale = staleTicketsQuery.all();
     for (const ticket of stale) {
       db.closeTicket.run(ticket.id);
@@ -368,17 +495,19 @@ async function inactivityCheck() {
         created_at
       });
       io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'inactivity' });
+      io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
 
       telegram.autoCloseTicket(ticket).catch(() => {});
       console.log(`[Auto] Closed inactive ticket ${ticket.id.slice(0, 8)}`);
     }
+
+    if (stale.length > 0) broadcastAdminTickets();
   } catch (e) { console.error('[Auto] inactivityCheck:', e.message); }
   finally { _inactivityRunning = false; }
 }
 
 setInterval(inactivityCheck, 60 * 1000);
 
-// Health check
 app.get('/health', (req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
 
 // ─── START ───────────────────────────────────────────────────────────────────
