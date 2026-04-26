@@ -317,7 +317,7 @@ async function forwardMessage(ticket, message) {
   try {
     let sent;
     const uploadsDir = path.resolve(__dirname, '../public/uploads');
-    const fp = message.file_url ? path.resolve(__dirname, '../public', message.file_url) : null;
+    const fp = message.file_url ? path.join(__dirname, '../public', message.file_url) : null;
     if (fp && !fp.startsWith(uploadsDir + path.sep) && fp !== uploadsDir) return;
     if (message.message_type === 'text') {
       sent = await bot.sendMessage(GROUP_ID, message.content, { message_thread_id: tid });
