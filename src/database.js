@@ -63,6 +63,24 @@ db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
 )`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_push_ticket ON push_subscriptions(ticket_id)`);
 
+// Runtime settings
+db.exec(`CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+)`);
+const defaultSettings = {
+  timezone: 'Europe/Moscow',
+  work_start_hour: '8',
+  work_end_hour: '23',
+  offhours_enabled: '1',
+  offhours_banner_text: 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.',
+  offhours_reject_text: 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.'
+};
+const upsertSetting = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`);
+for (const [k, v] of Object.entries(defaultSettings)) {
+  upsertSetting.run(k, v);
+}
+
 module.exports = {
   // Tickets
   createTicket: db.prepare(`
@@ -145,6 +163,8 @@ module.exports = {
 
   // Telegram topic tracking
   markTopicDeleted: db.prepare(`UPDATE tickets SET telegram_topic_deleted = 1, telegram_topic_id = NULL WHERE id = ?`),
+  getAllSettings: db.prepare(`SELECT key, value FROM settings`),
+  setSetting: db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
 
   // Admin panel
   markSupportRead: db.prepare(`UPDATE tickets SET support_read_at = CURRENT_TIMESTAMP WHERE id = ?`),
