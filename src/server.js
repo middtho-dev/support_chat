@@ -88,6 +88,8 @@ app.use(express.static(path.join(__dirname, '../public')));
 // ─── REST API ────────────────────────────────────────────────────────────────
 
 app.post('/api/session/start', (req, res) => {
+  const cfg = loadSettings();
+  if (cfg.offhoursEnabled && !isWithinWorkHours(cfg)) return res.status(403).json({ error: 'Off hours', message: cfg.offhoursRejectText });
   const raw = req.body?.name;
   if (!raw || typeof raw !== 'string') return res.status(400).json({ error: 'Name required' });
   const name = raw.trim().slice(0, 50);
@@ -123,7 +125,12 @@ app.post('/api/session/resume', (req, res) => {
   const PAGE = 100;
   const total = db.countMessages.get(ticket.id)?.cnt || 0;
   const messages = db.getMessagesRecent.all(ticket.id, PAGE);
-  res.json({ ticket, messages, hasMore: total > PAGE });
+  const cfg = loadSettings();
+  res.json({ ticket, messages, hasMore: total > PAGE, settings: cfg, online: isWithinWorkHours(cfg) });
+});
+app.get('/api/chat-config', (req, res) => {
+  const cfg = loadSettings();
+  res.json({ settings: cfg, online: isWithinWorkHours(cfg) });
 });
 
 app.get('/api/tickets/:ticketId/messages', (req, res) => {
@@ -230,6 +237,21 @@ const warnedTickets = new Set();
 const SUPPORT_NAME = 'Поддержка KV9RU';
 const WELCOME_1 = 'Добро пожаловать в службу поддержки KV9RU! 👋';
 const WELCOME_2 = 'Чтобы мы могли быстрее разобраться и решить вашу проблему — пожалуйста, прикрепите скриншот из приложения VPN и опишите проблему максимально подробно 📸';
+function loadSettings() {
+  const raw = Object.fromEntries(db.getAllSettings.all().map(r => [r.key, r.value]));
+  return {
+    timezone: raw.timezone || 'Europe/Moscow',
+    workStartHour: Number(raw.work_start_hour || 8),
+    workEndHour: Number(raw.work_end_hour || 23),
+    offhoursEnabled: raw.offhours_enabled !== '0',
+    offhoursBannerText: raw.offhours_banner_text || '',
+    offhoursRejectText: raw.offhours_reject_text || ''
+  };
+}
+function isWithinWorkHours(cfg = loadSettings()) {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: cfg.timezone }).format(new Date()));
+  return hour >= cfg.workStartHour && hour < cfg.workEndHour;
+}
 
 function isRateLimited(sessionToken) {
   const now = Date.now();
@@ -327,6 +349,11 @@ io.on('connection', (socket) => {
         if (ack) ack({ error: 'Ticket is closed' });
         return;
       }
+      const cfg = loadSettings();
+      if (cfg.offhoursEnabled && !isWithinWorkHours(cfg)) {
+        if (ack) ack({ error: 'Off hours', message: cfg.offhoursRejectText });
+        return;
+      }
       if (!content && !fileUrl) {
         if (ack) ack({ error: 'Empty message' });
         return;
@@ -399,6 +426,21 @@ io.on('connection', (socket) => {
     socket.emit('admin_ticket_messages', { ticketId, messages, ticket });
     // Refresh ticket list (unread count reset)
     broadcastAdminTickets();
+  });
+  socket.on('admin_get_settings', () => {
+    if (!socket.isAdmin) return;
+    socket.emit('admin_settings', loadSettings());
+  });
+  socket.on('admin_update_settings', (payload = {}) => {
+    if (!socket.isAdmin) return;
+    const workStartHour = Math.max(0, Math.min(23, Number(payload.workStartHour ?? 8)));
+    const workEndHour = Math.max(1, Math.min(24, Number(payload.workEndHour ?? 23)));
+    db.setSetting.run('work_start_hour', String(workStartHour));
+    db.setSetting.run('work_end_hour', String(workEndHour));
+    db.setSetting.run('offhours_enabled', payload.offhoursEnabled ? '1' : '0');
+    db.setSetting.run('offhours_banner_text', String(payload.offhoursBannerText || '').slice(0, 500));
+    db.setSetting.run('offhours_reject_text', String(payload.offhoursRejectText || '').slice(0, 500));
+    socket.emit('admin_settings', loadSettings());
   });
 
   socket.on('admin_reply', async ({ ticketId, content }) => {
