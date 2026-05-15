@@ -136,6 +136,24 @@ socket.on('admin_auth_ok', () => {
   sessionStorage.setItem('admin_token', S.token);
   $('login').style.display = 'none';
   $('app').style.display = 'flex';
+  socket.emit('admin_get_settings');
+});
+socket.on('admin_settings', s => {
+  $('set-work-start').value = s.workStartHour ?? 8;
+  $('set-work-end').value = s.workEndHour ?? 23;
+  $('set-offhours-enabled').checked = !!s.offhoursEnabled;
+  $('set-banner-text').value = s.offhoursBannerText || '';
+  $('set-reject-text').value = s.offhoursRejectText || '';
+});
+$('set-save')?.addEventListener('click', () => {
+  socket.emit('admin_update_settings', {
+    workStartHour: Number($('set-work-start').value || 8),
+    workEndHour: Number($('set-work-end').value || 23),
+    offhoursEnabled: $('set-offhours-enabled').checked,
+    offhoursBannerText: $('set-banner-text').value.trim(),
+    offhoursRejectText: $('set-reject-text').value.trim()
+  });
+  toast('Настройки сохранены', 'ok');
 });
 
 socket.on('admin_auth_error', () => {

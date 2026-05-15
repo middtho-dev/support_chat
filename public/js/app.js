@@ -10,6 +10,7 @@ const ECATS=[
 ];
 
 const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0,hasMore:false,oldestTs:null,_msgs:[]};
+const CFG={workStartHour:8,workEndHour:23,offhoursEnabled:true,offhoursBannerText:'',offhoursRejectText:'',timezone:'Europe/Moscow',online:true};
 const $=id=>document.getElementById(id);
 const ni=$('ni'),sb=$('sb'),sl=$('sl');
 const mwrap=$('mwrap'),ml=$('ml');
@@ -85,6 +86,7 @@ function clearMsgCache(){localStorage.removeItem(MCACHE_KEY);}
 
 /* ── INIT ── */
 async function init(){
+  await refreshConfig();
   buildEmoji();
   updateLoginHint();
   if('serviceWorker' in navigator){
@@ -277,6 +279,7 @@ function renderMsg(msg){
 /* ── SEND ── */
 async function send(){
   if(S.closed||S.uploading)return;
+  if(CFG.offhoursEnabled&&!CFG.online){showToast(CFG.offhoursRejectText||'Сейчас нерабочее время. Напишите в рабочее время.','info');return;}
   const txt=ti.value.trim(),file=S.file;
   if(!txt&&!file)return;
   sndbtn.disabled=true;
@@ -441,8 +444,17 @@ function supportOpenText(){
 function updateLoginHint(){
   const sub=$('ls')?.querySelector('.lsub');
   if(!sub)return;
-  if(supportOnline())sub.textContent='Представьтесь — ответим как можно скорее';
-  else sub.textContent=`Сейчас не в сети · ответим в 08:00 МСК (${supportOpenText()})`;
+  if(!CFG.offhoursEnabled||CFG.online)sub.textContent='Представьтесь — ответим как можно скорее';
+  else sub.textContent=CFG.offhoursBannerText||`Сейчас не в сети · ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 МСК (${supportOpenText()})`;
+}
+async function refreshConfig(){
+  try{
+    const r=await fetch('/api/chat-config');
+    if(!r.ok)return;
+    const d=await r.json();
+    Object.assign(CFG,d.settings||{});
+    CFG.online=!!d.online;
+  }catch{}
 }
 
 /* ── CONNECTION STATUS ── */
@@ -452,8 +464,8 @@ function setConnStatus(s){
   if(!dot||!txt)return;
   let newTxt,dotBg,dotAnim='none';
   if(s==='on'){
-    if(supportOnline()){newTxt='онлайн';dotBg='var(--green)';dotAnim='blink 2.5s ease infinite';}
-    else{newTxt='ответим в 08:00 МСК';dotBg='#6b7280';}
+    if(!CFG.offhoursEnabled||CFG.online){newTxt='онлайн';dotBg='var(--green)';dotAnim='blink 2.5s ease infinite';}
+    else{newTxt=`ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 МСК`;dotBg='#6b7280';}
   }else if(s==='connecting'){newTxt='подключение...';dotBg='#f59e0b';}
   else{newTxt='нет соединения';dotBg='var(--red)';}
   dot.style.background=dotBg;dot.style.animation=dotAnim;
