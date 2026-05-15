@@ -52,6 +52,18 @@ docker compose restart
 docker compose down
 ```
 
+### Если `/admin` пишет, что токен не задан
+
+1. Проверьте, что в **том же каталоге проекта**, где `docker-compose.yml`, есть `.env` c:
+   - `ADMIN_TOKEN=...`
+   - `TELEGRAM_BOT_TOKEN=...`
+   - `TELEGRAM_GROUP_ID=...`
+2. Запустите `sudo bash update.sh` — теперь скрипт остановится с ошибкой, если `ADMIN_TOKEN` пустой.
+3. После запуска проверьте внутри контейнера:
+   `docker exec -it support-chat sh -lc 'echo $ADMIN_TOKEN'`
+
+Если команда выводит пусто — используется не тот `.env` или в нём нет `ADMIN_TOKEN`.
+
 ---
 
 ## Команды Telegram

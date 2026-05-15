@@ -18,6 +18,15 @@ echo -e "${NC}"
 
 [ -f ".env" ] || err ".env не найден. Сначала запустите setup.sh"
 
+# Проверка обязательных переменных
+set -a
+source .env
+set +a
+
+[ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
+[ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
+[ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
+
 info "Останавливаю контейнер..."
 docker compose down
 
