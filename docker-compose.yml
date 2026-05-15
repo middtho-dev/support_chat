@@ -4,6 +4,8 @@ services:
     container_name: support-chat
     restart: unless-stopped
     network_mode: host
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=3001
@@ -11,6 +13,7 @@ services:
       - UPLOADS_DIR=/app/public/uploads
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_GROUP_ID=${TELEGRAM_GROUP_ID}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
     healthcheck:
       test: ["CMD", "sh", "-c", "wget -qO- http://localhost:$$PORT/health || exit 1"]
       interval: 30s
