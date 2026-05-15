@@ -40,6 +40,7 @@ bash setup.sh
 
 ```bash
 # Обновление после изменений кода
+git pull
 sudo bash update.sh
 
 # Логи

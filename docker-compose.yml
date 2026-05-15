@@ -4,6 +4,8 @@ services:
     container_name: support-chat
     restart: unless-stopped
     network_mode: host
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=3001
