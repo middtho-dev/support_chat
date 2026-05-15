@@ -27,6 +27,9 @@ read -p "$(echo -e ${BLUE})Telegram Bot Token: $(echo -e ${NC})" TG_TOKEN
 read -p "$(echo -e ${BLUE})Telegram Group ID (-1001234567890): $(echo -e ${NC})" TG_GROUP
 [[ -z "$TG_GROUP" ]] && err "Group ID не указан"
 
+read -p "$(echo -e ${BLUE})Admin Token для /admin: $(echo -e ${NC})" ADMIN_TOKEN
+[[ -z "$ADMIN_TOKEN" ]] && err "Admin Token не указан"
+
 SERVER_IP=$(curl -s --max-time 5 ifconfig.me || hostname -I | awk '{print $1}')
 
 echo ""
@@ -34,6 +37,7 @@ echo -e "  Домен:     ${GREEN}$DOMAIN${NC}"
 echo -e "  IP:        ${GREEN}$SERVER_IP${NC}"
 echo -e "  TG Token:  ${GREEN}${TG_TOKEN:0:12}...${NC}"
 echo -e "  TG Group:  ${GREEN}$TG_GROUP${NC}"
+echo -e "  AdminToken:${GREEN}${ADMIN_TOKEN:0:6}...${NC}"
 echo ""
 echo -e "${YELLOW}Убедитесь что DNS A-запись $DOMAIN → $SERVER_IP настроена!${NC}"
 echo -e "${YELLOW}Порты 80 и 443 должны быть свободны.${NC}"
@@ -70,6 +74,7 @@ info "3/5 Конфигурация..."
 cat > "$SCRIPT_DIR/.env" << ENV
 TELEGRAM_BOT_TOKEN=${TG_TOKEN}
 TELEGRAM_GROUP_ID=${TG_GROUP}
+ADMIN_TOKEN=${ADMIN_TOKEN}
 PORT=3001
 ENV
 log ".env создан"

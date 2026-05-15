@@ -73,6 +73,7 @@ docker compose down
 |------------|----------|--------------|
 | `TELEGRAM_BOT_TOKEN` | Токен бота | — |
 | `TELEGRAM_GROUP_ID` | ID группы (отрицательное) | — |
+| `ADMIN_TOKEN` | Токен входа в админ-панель `/admin` | — |
 | `PORT` | Порт приложения | `3001` |
 | `DB_PATH` | Путь к SQLite базе | `/app/data/support.db` |
 | `UPLOADS_DIR` | Папка загрузок | `/app/public/uploads` |
