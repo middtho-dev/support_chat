@@ -54,19 +54,20 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const SK='sc_v3';
+const APP_CACHE_VERSION='2026-05-15-v2';
+const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
 const clearS=()=>localStorage.removeItem(SK);
 
 /* ── DRAFT ── */
-const DRAFT_KEY='sc_draft';
+const DRAFT_KEY='sc_draft_v2';
 const saveDraft=()=>ti.value?localStorage.setItem(DRAFT_KEY,ti.value):localStorage.removeItem(DRAFT_KEY);
 const loadDraft=()=>{const d=localStorage.getItem(DRAFT_KEY);if(d){ti.value=d;resize();updSend();}};
 const clearDraft=()=>localStorage.removeItem(DRAFT_KEY);
 
 /* ── MESSAGE CACHE (instant paint on reload) ── */
-const MCACHE_KEY='sc_msgs_v1';
+const MCACHE_KEY='sc_msgs_v2';
 const MCACHE_LIMIT=80;
 function saveMsgCache(){
   if(!S.tid||!S._msgs.length)return;
@@ -86,11 +87,12 @@ function clearMsgCache(){localStorage.removeItem(MCACHE_KEY);}
 
 /* ── INIT ── */
 async function init(){
+  runClientCacheMigration();
   await refreshConfig();
   buildEmoji();
   updateLoginHint();
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('/sw.js').catch(e=>console.warn('[SW] register failed',e));
+    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(APP_CACHE_VERSION)}`).catch(e=>console.warn('[SW] register failed',e));
   }
 
   setAppHeight();
@@ -153,6 +155,20 @@ async function init(){
     }
   }
   showLogin();
+}
+
+function runClientCacheMigration(){
+  try{
+    const prev=localStorage.getItem('sc_cache_version');
+    if(prev===APP_CACHE_VERSION)return;
+    localStorage.removeItem('sc_v3');
+    localStorage.removeItem('sc_draft');
+    localStorage.removeItem('sc_msgs_v1');
+    localStorage.setItem('sc_cache_version',APP_CACHE_VERSION);
+  }catch{}
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.update())).catch(()=>{});
+  }
 }
 
 function setAppHeight(){
