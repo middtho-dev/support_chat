@@ -14,7 +14,7 @@
   --t1:#f0f0f0;--t2:#6b7280;--t3:#374151;
   --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;
   --bdr:rgba(255,255,255,.06);
-  --sw:300px;
+  --sw:360px;
 }
 html,body{height:100%;overflow:hidden;font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--t1);-webkit-tap-highlight-color:transparent}
 
@@ -65,6 +65,22 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',-apple-system,sans-ser
   width:var(--sw);flex-shrink:0;background:var(--bg2);
   border-right:1px solid var(--bdr);display:flex;flex-direction:column;min-height:0;
 }
+.sb-settings{
+  padding:12px;
+  border-bottom:1px solid var(--bdr);
+  background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0));
+}
+.sb-settings-title{font-size:12px;font-weight:700;color:var(--t1);margin-bottom:8px}
+.set-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.set-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--t2)}
+.set-field input,.set-field textarea{
+  width:100%;padding:7px 8px;background:var(--bg3);border:1px solid var(--bg4);border-radius:8px;
+  font-size:12px;font-family:inherit;color:var(--t1);outline:none;
+}
+.set-field textarea{min-height:56px;resize:vertical}
+.set-row{margin-top:8px}
+.set-check{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t2)}
+.set-save{width:100%;margin-top:8px}
 .sb-hdr{padding:10px;border-bottom:1px solid var(--bdr);display:flex;flex-direction:column;gap:8px}
 .sb-srch{
   width:100%;padding:8px 11px;background:var(--bg3);border:1px solid var(--bg4);
@@ -328,6 +344,7 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',-apple-system,sans-ser
 /* ── Mobile ── */
 @media(max-width:640px){
   :root{--sw:100%}
+  .set-grid{grid-template-columns:1fr}
   .sb{width:100%;flex-shrink:0}
   .main{display:none;position:absolute;inset:52px 0 0;z-index:5;background:var(--bg)}
   .cv-back{display:flex}
@@ -381,6 +398,31 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',-apple-system,sans-ser
       <div class="sb-stats">
         <div class="sb-stat"><div class="sb-sdot" style="background:var(--green)"></div> Открытых: <strong id="ocnt">0</strong></div>
         <div class="sb-stat"><div class="sb-sdot" style="background:var(--yellow)"></div> Новых: <strong id="ncnt">0</strong></div>
+      </div>
+      <div class="sb-settings">
+        <div class="sb-settings-title">Настройки графика (МСК)</div>
+        <div class="set-grid">
+          <label class="set-field">Начало (час)
+            <input id="set-work-start" type="number" min="0" max="23">
+          </label>
+          <label class="set-field">Конец (час)
+            <input id="set-work-end" type="number" min="1" max="24">
+          </label>
+        </div>
+        <div class="set-row">
+          <label class="set-check"><input id="set-offhours-enabled" type="checkbox"> Ограничивать вне графика</label>
+        </div>
+        <div class="set-row">
+          <label class="set-field">Текст баннера
+            <textarea id="set-banner-text" placeholder="Текст баннера"></textarea>
+          </label>
+        </div>
+        <div class="set-row">
+          <label class="set-field">Текст отказа отправки
+            <textarea id="set-reject-text" placeholder="Текст отказа отправки"></textarea>
+          </label>
+        </div>
+        <button id="set-save" class="tbtn set-save">Сохранить настройки</button>
       </div>
       <div class="tlist" id="tlist"></div>
     </div>

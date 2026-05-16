@@ -40,6 +40,7 @@ bash setup.sh
 
 ```bash
 # Обновление после изменений кода
+git pull
 sudo bash update.sh
 
 # Логи
@@ -51,6 +52,18 @@ docker compose restart
 # Остановка
 docker compose down
 ```
+
+### Если `/admin` пишет, что токен не задан
+
+1. Проверьте, что в **том же каталоге проекта**, где `docker-compose.yml`, есть `.env` c:
+   - `ADMIN_TOKEN=...`
+   - `TELEGRAM_BOT_TOKEN=...`
+   - `TELEGRAM_GROUP_ID=...`
+2. Запустите `sudo bash update.sh` — теперь скрипт остановится с ошибкой, если `ADMIN_TOKEN` пустой.
+3. После запуска проверьте внутри контейнера:
+   `docker exec -it support-chat sh -lc 'echo $ADMIN_TOKEN'`
+
+Если команда выводит пусто — используется не тот `.env` или в нём нет `ADMIN_TOKEN`.
 
 ---
 
@@ -73,6 +86,7 @@ docker compose down
 |------------|----------|--------------|
 | `TELEGRAM_BOT_TOKEN` | Токен бота | — |
 | `TELEGRAM_GROUP_ID` | ID группы (отрицательное) | — |
+| `ADMIN_TOKEN` | Токен входа в админ-панель `/admin` | — |
 | `PORT` | Порт приложения | `3001` |
 | `DB_PATH` | Путь к SQLite базе | `/app/data/support.db` |
 | `UPLOADS_DIR` | Папка загрузок | `/app/public/uploads` |
