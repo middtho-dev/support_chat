@@ -4,16 +4,22 @@ services:
     container_name: support-chat
     restart: unless-stopped
     network_mode: host
+    init: true
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=${PORT:-3001}
       - DB_PATH=/app/data/support.db
       - UPLOADS_DIR=/app/public/uploads
+      - VAPID_STORE=/app/data/vapid.json
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_GROUP_ID=${TELEGRAM_GROUP_ID}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_EMAIL=${VAPID_EMAIL:-support@example.com}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
     healthcheck:
       test: ["CMD", "sh", "-c", "wget -qO- http://localhost:$$PORT/health || exit 1"]
       interval: 30s
