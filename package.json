@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/database.js && node --check src/telegram.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js"
+    "check": "node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/telegram.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
