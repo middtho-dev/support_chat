@@ -2,10 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Панель оператора — KV9RU</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Админка поддержки — KV9RU</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -354,16 +354,17 @@ html,body{height:100%;overflow:hidden;font-family:'Inter',-apple-system,sans-ser
 </style>
 </head>
 <body>
-
-<!-- Login -->
-<div id="login">
-  <div class="lcard">
-    <div class="llogo">KV</div>
-    <div class="ltit">Панель оператора</div>
-    <div class="lsub">Служба поддержки KV9RU</div>
-    <input id="tok" class="linp" type="password" placeholder="Токен доступа" autocomplete="current-password">
-    <div class="lerr" id="lerr"></div>
-    <button id="lbtn" class="lbtn">Войти</button>
+<div id="login" class="auth"><form class="auth-card" id="login-form"><div class="brand"><div class="logo">KV</div><div><h1>Админка поддержки</h1><p>Диалоги, настройки и шаблоны ответов</p></div></div><input id="tok" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password"><button id="lbtn" type="submit">Войти</button><div id="lerr" class="err"></div></form></div>
+<div id="app" class="app">
+  <header class="top"><div class="brand"><div class="logo">KV</div><div><h1>KV9RU Support</h1><p>Панель оператора</p></div></div><div class="spacer"></div><div class="status"><i id="cdot" class="dot"></i><span id="ctxt">подключение</span></div><button id="logout-btn" class="ghost">Выйти</button></header>
+  <div class="workspace">
+    <nav class="rail">
+      <button class="navbtn on" data-view="chat" title="Диалоги"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></button>
+      <button class="navbtn" data-view="settings" title="Настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.43.17.78.5 1 .9.18.34.36.7.7.7H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.5.4Z"/></svg></button>
+      <button class="navbtn" data-view="templates" title="Шаблоны"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></button>
+    </nav>
+    <aside class="side" id="side"><div class="side-head"><div class="metrics"><div class="metric"><b id="m-open">0</b><span>открыто</span></div><div class="metric"><b id="m-unread">0</b><span>новых</span></div><div class="metric"><b id="m-all">0</b><span>всего</span></div></div><input id="srch" class="search" type="search" placeholder="Поиск по имени или ID"><div class="tabs"><button class="tab on" data-tab="open">Открытые</button><button class="tab" data-tab="closed">Закрытые</button><button class="tab" data-tab="all">Все</button></div></div><div id="tlist" class="tickets"></div></aside>
+    <main class="main" id="main"><section id="welcome" class="welcome"><div><h2>Выберите диалог</h2><p>Слева заявки, сверху метрики, в настройках управление графиком и текстами вне рабочего времени.</p></div></section><section id="chat" class="chat"><div class="chat-head"><button id="back" class="back">‹</button><div id="cv-av" class="avatar"></div><div class="chat-title"><b id="cv-name">—</b><span id="cv-sub">—</span></div><button id="cv-toggle" class="danger">Закрыть</button></div><div id="cv-msgs" class="msgs"></div><div id="typing" class="typing">Пользователь печатает...</div><div id="composer" class="composer"><div class="compose-row"><button id="quick" class="quick" title="Шаблоны">#</button><textarea id="reply-txt" rows="1" placeholder="Ответ оператора..."></textarea><button id="reply-send" class="send" disabled>➤</button></div><div class="hint"><span>Ctrl+Enter — отправить</span><span id="reply-cnt"></span></div></div></section><section id="settings" class="panel"></section><section id="templates" class="panel"></section></main>
   </div>
 </div>
 
