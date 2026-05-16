@@ -42,6 +42,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_ticket   ON messages(ticket_id);
   CREATE INDEX IF NOT EXISTS idx_messages_created  ON messages(created_at);
   CREATE INDEX IF NOT EXISTS idx_messages_tg_id    ON messages(telegram_message_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_ticket_created ON messages(ticket_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_tickets_session   ON tickets(session_token);
   CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
   CREATE INDEX IF NOT EXISTS idx_tickets_created   ON tickets(created_at);
@@ -76,9 +77,9 @@ const defaultSettings = {
   offhours_banner_text: 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.',
   offhours_reject_text: 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.'
 };
-const upsertSetting = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`);
+const insertDefaultSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
 for (const [k, v] of Object.entries(defaultSettings)) {
-  upsertSetting.run(k, v);
+  insertDefaultSetting.run(k, v);
 }
 
 module.exports = {
