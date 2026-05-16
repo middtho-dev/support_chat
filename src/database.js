@@ -54,6 +54,8 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
 // Migrations: admin + topic tracking
 try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_topic_deleted INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_tags TEXT DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_note TEXT DEFAULT ''`); } catch {}
 
 // Push subscriptions
 db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -169,6 +171,7 @@ module.exports = {
 
   // Admin panel
   markSupportRead: db.prepare(`UPDATE tickets SET support_read_at = CURRENT_TIMESTAMP WHERE id = ?`),
+  updateTicketMeta: db.prepare(`UPDATE tickets SET admin_tags = ?, admin_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
   getTicketsForAdmin: db.prepare(`
     SELECT t.*,
       m.content        AS last_msg,

@@ -64,6 +64,10 @@ const upload = multer({
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+app.get('/favicon.ico', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/logo.png'));
+});
+
 app.get('/admin', (req, res) => {
   if (!ADMIN_TOKEN) return res.status(503).send('<h1>Admin panel disabled</h1><p>Set ADMIN_TOKEN in .env to enable.</p>');
   res.sendFile(path.join(__dirname, '../public/admin.html'));
@@ -340,6 +344,27 @@ io.on('connection', (socket) => {
     socket.emit('admin_ticket_messages', { ticketId, messages, ticket });
     broadcastAdminTickets();
   });
+
+  socket.on('admin_update_ticket_meta', ({ ticketId, tags = '', note = '' } = {}) => {
+    if (!socket.isAdmin) return;
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket) return;
+
+    const cleanTags = String(tags || '')
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+      .join(', ');
+    const cleanNote = String(note || '').trim().slice(0, 1200);
+
+    db.updateTicketMeta.run(cleanTags, cleanNote, ticketId);
+    const updated = db.getTicketById.get(ticketId);
+    socket.emit('admin_ticket_meta', updated);
+    io.to('admin').emit('admin_ticket_updated', updated);
+    broadcastAdminTickets();
+  });
+
   socket.on('admin_get_settings', () => {
     if (!socket.isAdmin) return;
     socket.emit('admin_settings', loadSettings());
