@@ -38,6 +38,15 @@ if [ -z "${VAPID_PUBLIC_KEY:-}" ] || [ -z "${VAPID_PRIVATE_KEY:-}" ]; then
   warn "VAPID ключи не заданы в .env — приложение сохранит их в Docker volume автоматически"
 fi
 
+# Проверка обязательных переменных
+set -a
+source .env
+set +a
+
+[ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
+[ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
+[ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
+
 info "Останавливаю контейнер..."
 docker compose down --remove-orphans
 

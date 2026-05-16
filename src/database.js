@@ -77,9 +77,9 @@ const defaultSettings = {
   offhours_banner_text: 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.',
   offhours_reject_text: 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.'
 };
-const insertDefaultSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
+const upsertSetting = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`);
 for (const [k, v] of Object.entries(defaultSettings)) {
-  insertDefaultSetting.run(k, v);
+  upsertSetting.run(k, v);
 }
 
 module.exports = {

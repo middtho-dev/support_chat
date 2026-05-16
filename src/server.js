@@ -108,7 +108,12 @@ app.post('/api/session/resume', (req, res) => {
   const PAGE = 100;
   const total = db.countMessages.get(ticket.id)?.cnt || 0;
   const messages = db.getMessagesRecent.all(ticket.id, PAGE);
-  res.json({ ticket, messages, hasMore: total > PAGE, ...publicConfig() });
+  const cfg = loadSettings();
+  res.json({ ticket, messages, hasMore: total > PAGE, settings: cfg, online: isWithinWorkHours(cfg) });
+});
+app.get('/api/chat-config', (req, res) => {
+  const cfg = loadSettings();
+  res.json({ settings: cfg, online: isWithinWorkHours(cfg) });
 });
 
 app.get('/api/chat-config', (req, res) => res.json(publicConfig()));
@@ -203,6 +208,25 @@ const welcomeSent = new Set();
 const messageRates = new Map();
 const warnedTickets = new Set();
 
+const SUPPORT_NAME = 'Поддержка KV9RU';
+const WELCOME_1 = 'Добро пожаловать в службу поддержки KV9RU! 👋';
+const WELCOME_2 = 'Чтобы мы могли быстрее разобраться и решить вашу проблему — пожалуйста, прикрепите скриншот из приложения VPN и опишите проблему максимально подробно 📸';
+function loadSettings() {
+  const raw = Object.fromEntries(db.getAllSettings.all().map(r => [r.key, r.value]));
+  return {
+    timezone: raw.timezone || 'Europe/Moscow',
+    workStartHour: Number(raw.work_start_hour || 8),
+    workEndHour: Number(raw.work_end_hour || 23),
+    offhoursEnabled: raw.offhours_enabled !== '0',
+    offhoursBannerText: raw.offhours_banner_text || '',
+    offhoursRejectText: raw.offhours_reject_text || ''
+  };
+}
+function isWithinWorkHours(cfg = loadSettings()) {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: cfg.timezone }).format(new Date()));
+  return hour >= cfg.workStartHour && hour < cfg.workEndHour;
+}
+
 function isRateLimited(sessionToken) {
   const cfg = loadSettings();
   const now = Date.now();
@@ -277,12 +301,28 @@ io.on('connection', (socket) => {
     try {
       const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType } = data;
       const ticket = db.getTicketBySessionAny.get(sessionToken);
-      if (!ticket || ticket.id !== ticketId) return ack?.({ error: 'Unauthorized' });
-      if (ticket.status === 'closed') return ack?.({ error: 'Ticket is closed' });
+      if (!ticket || ticket.id !== ticketId) {
+        if (ack) ack({ error: 'Unauthorized' });
+        return;
+      }
+      if (ticket.status === 'closed') {
+        if (ack) ack({ error: 'Ticket is closed' });
+        return;
+      }
       const cfg = loadSettings();
-      if (cfg.offhoursEnabled && !isWithinWorkHours(cfg)) return ack?.({ error: 'Off hours', message: cfg.offhoursRejectText });
-      if (!content && !fileUrl) return ack?.({ error: 'Empty message' });
-      if (isRateLimited(sessionToken)) return ack?.({ error: 'Rate limit', retryAfter: messageRates.get(sessionToken)?.retryAfter || 60 });
+      if (cfg.offhoursEnabled && !isWithinWorkHours(cfg)) {
+        if (ack) ack({ error: 'Off hours', message: cfg.offhoursRejectText });
+        return;
+      }
+      if (!content && !fileUrl) {
+        if (ack) ack({ error: 'Empty message' });
+        return;
+      }
+      if (isRateLimited(sessionToken)) {
+        const retryAfter = messageRates.get(sessionToken)?.retryAfter || 60;
+        if (ack) ack({ error: 'Rate limit', retryAfter });
+        return;
+      }
 
       warnedTickets.delete(ticket.id);
       const msgId = uuidv4();
@@ -323,6 +363,21 @@ io.on('connection', (socket) => {
     io.to(`ticket:${ticketId}`).emit('messages_read');
     socket.emit('admin_ticket_messages', { ticketId, messages, ticket });
     broadcastAdminTickets();
+  });
+  socket.on('admin_get_settings', () => {
+    if (!socket.isAdmin) return;
+    socket.emit('admin_settings', loadSettings());
+  });
+  socket.on('admin_update_settings', (payload = {}) => {
+    if (!socket.isAdmin) return;
+    const workStartHour = Math.max(0, Math.min(23, Number(payload.workStartHour ?? 8)));
+    const workEndHour = Math.max(1, Math.min(24, Number(payload.workEndHour ?? 23)));
+    db.setSetting.run('work_start_hour', String(workStartHour));
+    db.setSetting.run('work_end_hour', String(workEndHour));
+    db.setSetting.run('offhours_enabled', payload.offhoursEnabled ? '1' : '0');
+    db.setSetting.run('offhours_banner_text', String(payload.offhoursBannerText || '').slice(0, 500));
+    db.setSetting.run('offhours_reject_text', String(payload.offhoursRejectText || '').slice(0, 500));
+    socket.emit('admin_settings', loadSettings());
   });
 
   socket.on('admin_get_settings', () => {

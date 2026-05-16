@@ -52,27 +52,110 @@ function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(
 
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
-socket.io.on('reconnect_attempt', () => setConn(''));
-socket.on('admin_auth_ok', () => { sessionStorage.setItem('admin_token', S.token); $('login').style.display = 'none'; $('app').style.display = 'grid'; $('lbtn').disabled = false; socket.emit('admin_get_settings'); });
-socket.on('admin_auth_error', () => { $('lbtn').disabled = false; $('lerr').textContent = 'Неверный токен доступа'; sessionStorage.removeItem('admin_token'); socket.disconnect(); setConn('off'); });
-socket.on('admin_settings', settings => { S.settings = settings; renderSettings(); });
-socket.on('admin_settings_updated', settings => { S.settings = settings; renderSettings(); });
-socket.on('admin_tickets', tickets => { S.tickets = tickets || []; renderSidebar(); });
-socket.on('admin_new_ticket', ticket => { S.tickets = [ticket, ...S.tickets.filter(t => t.id !== ticket.id)]; renderSidebar(); toast('Новая заявка', 'ok'); });
-socket.on('admin_ticket_messages', ({ ticketId, messages, ticket }) => { if (ticketId !== S.current?.id) return; S.current = ticket; S.messages = messages || []; renderConversation(); renderChatHeader(); });
-socket.on('admin_ticket_status', ({ ticketId, status }) => { const t = S.tickets.find(x => x.id === ticketId); if (t) t.status = status; if (S.current?.id === ticketId) { S.current.status = status; renderChatHeader(); } renderSidebar(); });
-socket.on('admin_new_message', ({ ticketId, message }) => { const t = S.tickets.find(x => x.id === ticketId); if (t) { t.last_msg = message.content; t.last_sender = message.sender; t.last_msg_type = message.message_type; t.last_activity = message.created_at; if (message.sender === 'user' && ticketId !== S.current?.id) t.unread_count = (t.unread_count || 0) + 1; } if (ticketId === S.current?.id) { S.messages.push(message); appendMessage(message); scrollBottom(true); } renderSidebar(); });
-socket.on('admin_user_typing', ({ ticketId }) => { if (ticketId !== S.current?.id) return; const el = $('typing'); el.style.display = 'block'; clearTimeout(el._timer); el._timer = setTimeout(() => el.style.display = 'none', 2600); });
-socket.on('admin_error', ({ message }) => toast(message || 'Ошибка', 'err'));
+socket.io.on('reconnect_attempt', () => setConn('connecting'));
 
-function setView(view) {
-  S.view = view;
-  document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === view));
-  if (view === 'chat') { $('side').style.display = ''; $('welcome').style.display = S.current ? 'none' : 'grid'; $('chat').style.display = S.current ? 'flex' : 'none'; $('settings').classList.remove('on'); $('templates').classList.remove('on'); }
-  if (view === 'settings') { $('side').style.display = 'none'; $('welcome').style.display = 'none'; $('chat').style.display = 'none'; $('templates').classList.remove('on'); $('settings').classList.add('on'); $('main').classList.add('open'); }
-  if (view === 'templates') { $('side').style.display = 'none'; $('welcome').style.display = 'none'; $('chat').style.display = 'none'; $('settings').classList.remove('on'); $('templates').classList.add('on'); $('main').classList.add('open'); }
+socket.on('admin_auth_ok', () => {
+  sessionStorage.setItem('admin_token', S.token);
+  $('login').style.display = 'none';
+  $('app').style.display = 'flex';
+  socket.emit('admin_get_settings');
+});
+socket.on('admin_settings', s => {
+  $('set-work-start').value = s.workStartHour ?? 8;
+  $('set-work-end').value = s.workEndHour ?? 23;
+  $('set-offhours-enabled').checked = !!s.offhoursEnabled;
+  $('set-banner-text').value = s.offhoursBannerText || '';
+  $('set-reject-text').value = s.offhoursRejectText || '';
+});
+$('set-save')?.addEventListener('click', () => {
+  socket.emit('admin_update_settings', {
+    workStartHour: Number($('set-work-start').value || 8),
+    workEndHour: Number($('set-work-end').value || 23),
+    offhoursEnabled: $('set-offhours-enabled').checked,
+    offhoursBannerText: $('set-banner-text').value.trim(),
+    offhoursRejectText: $('set-reject-text').value.trim()
+  });
+  toast('Настройки сохранены', 'ok');
+});
+
+socket.on('admin_auth_error', () => {
+  sessionStorage.removeItem('admin_token');
+  $('lbtn').disabled = false;
+  $('lerr').textContent = 'Неверный токен доступа';
+  setConn('off');
+  socket.disconnect();
+});
+
+socket.on('admin_tickets', tickets => {
+  S.tickets = tickets;
+  renderSidebar();
+});
+
+socket.on('admin_new_ticket', ticket => {
+  S.tickets.unshift(ticket);
+  renderSidebar();
+});
+
+socket.on('admin_new_message', ({ ticketId, message }) => {
+  const t = S.tickets.find(t => t.id === ticketId);
+  if (t) {
+    t.last_msg      = message.content;
+    t.last_sender   = message.sender;
+    t.last_msg_type = message.message_type;
+    t.last_activity = message.created_at;
+    if (message.sender === 'user' && ticketId !== S.current?.id) {
+      t.unread_count = (t.unread_count || 0) + 1;
+    }
+  }
+  renderSidebar();
+  if (ticketId === S.current?.id) appendMsg(message);
+});
+
+socket.on('admin_ticket_messages', ({ ticketId, messages, ticket }) => {
+  if (ticketId !== S.current?.id) return;
+  S.current = ticket;
+  renderConversation(messages);
+  updateCvHeader();
+});
+
+socket.on('admin_ticket_status', ({ ticketId, status }) => {
+  const t = S.tickets.find(t => t.id === ticketId);
+  if (t) t.status = status;
+  renderSidebar();
+  if (ticketId === S.current?.id) {
+    S.current.status = status;
+    updateCvHeader();
+  }
+});
+
+socket.on('admin_error', ({ message }) => toast(message, 'err'));
+
+socket.on('admin_user_typing', ({ ticketId }) => {
+  if (ticketId !== S.current?.id) return;
+  showUserTyping();
+});
+
+let _userTypingHide = null;
+function showUserTyping() {
+  const bar = $('user-typing-bar');
+  if (!bar) return;
+  bar.style.display = '';
+  clearTimeout(_userTypingHide);
+  _userTypingHide = setTimeout(() => { if (bar) bar.style.display = 'none'; }, 3000);
 }
-function setFilter(filter) { S.filter = filter; document.querySelectorAll('.tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab === filter)); renderSidebar(); }
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+
+$('srch').addEventListener('input', () => { S.search = $('srch').value.trim().toLowerCase(); renderSidebar(); });
+
+document.querySelectorAll('.sb-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sb-tab').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    S.filter = btn.dataset.tab;
+    renderSidebar();
+  });
+});
 
 function renderSidebar() {
   const open = S.tickets.filter(t => t.status === 'open').length;
