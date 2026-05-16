@@ -72,5 +72,5 @@ echo "  Последние логи:"
 docker logs support-chat --tail=12 2>&1 || true
 echo ""
 echo -e "  Мониторинг: ${BLUE}docker logs support-chat -f${NC}"
-echo -e "  Проверка токена: ${BLUE}docker exec support-chat sh -lc 'echo ADMIN_TOKEN=[$ADMIN_TOKEN]'${NC}"
+echo -e "  Проверка токена: ${BLUE}docker exec support-chat sh -lc 'test -n \"$ADMIN_TOKEN\" && echo ADMIN_TOKEN_OK'${NC}"
 echo ""
