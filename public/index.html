@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0d0d0d">
 <link rel="manifest" href="/manifest.json">
-<title>Поддержка — KV9RU</title>
+<title>Поддержка</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -636,6 +636,163 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 
 /* Buttons need overflow:hidden for ripple */
 .hbtn,.lbtn,.newbtn,.sndbtn,.icn{overflow:hidden;position:relative}
+
+/* ── 2026 UI polish: bigger, calmer, no viewport seams ── */
+:root{
+  --app-w:min(100vw,920px);
+  --surface:#0b111b;
+  --surface2:#101a29;
+  --surface3:#152235;
+  --stroke:rgba(226,232,240,.13);
+  --stroke2:rgba(125,211,252,.22);
+  --shadow-lg:0 24px 80px rgba(0,0,0,.48);
+}
+html,body{
+  width:100%;
+  min-height:100%;
+  background:
+    linear-gradient(120deg,rgba(45,212,191,.12),transparent 28%),
+    linear-gradient(240deg,rgba(56,189,248,.14),transparent 34%),
+    linear-gradient(180deg,#050914 0%,#08111e 48%,#050914 100%);
+}
+body::before{
+  content:"";
+  position:fixed;
+  inset:-1px;
+  background:
+    linear-gradient(120deg,rgba(45,212,191,.12),transparent 28%),
+    linear-gradient(240deg,rgba(56,189,248,.14),transparent 34%),
+    linear-gradient(180deg,#050914 0%,#08111e 48%,#050914 100%);
+  pointer-events:none;
+  z-index:-2;
+}
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);
+  background-size:42px 42px;
+  mask-image:linear-gradient(to bottom,rgba(0,0,0,.55),transparent 80%);
+  pointer-events:none;
+  z-index:-1;
+}
+#app{
+  width:var(--app-w);
+  max-width:var(--app-w);
+  background:linear-gradient(180deg,rgba(9,15,26,.86),rgba(7,12,21,.94));
+  box-shadow:0 0 0 1px rgba(255,255,255,.04),var(--shadow-lg);
+  isolation:isolate;
+}
+@media(min-width:921px){
+  #app{border-left:1px solid rgba(255,255,255,.07);border-right:1px solid rgba(255,255,255,.07)}
+}
+.lcard{
+  max-width:430px;
+  padding:42px 34px 32px;
+  border-radius:22px;
+  background:linear-gradient(180deg,rgba(16,27,43,.84),rgba(10,17,29,.78));
+  border-color:var(--stroke);
+}
+.lcard img{
+  width:92px!important;
+  height:92px!important;
+  border-radius:20px!important;
+  box-shadow:0 16px 48px rgba(14,165,233,.28),0 0 0 1px rgba(255,255,255,.16);
+}
+.ltit{font-size:28px;letter-spacing:0;margin-bottom:10px}
+.lsub{font-size:15px;max-width:310px;color:#aab8c8}
+.linp,.lbtn{min-height:50px;border-radius:14px}
+.lbtn{
+  font-size:16px;
+  background:linear-gradient(135deg,#22d3ee,#2563eb);
+  box-shadow:0 14px 34px rgba(37,99,235,.33),inset 0 1px 0 rgba(255,255,255,.28);
+}
+.hdr{
+  height:68px;
+  padding:0 16px 0 18px;
+  background:rgba(8,14,24,.82);
+  border-bottom-color:var(--stroke);
+}
+.hdr img{width:42px!important;height:42px!important;border-radius:12px!important}
+.hname{font-size:17px;font-weight:700}
+.hstxt{font-size:12.5px}
+.hbtn{min-height:40px;padding:9px 13px;border-radius:12px;font-size:13px}
+.mwrap{
+  background:linear-gradient(180deg,rgba(255,255,255,.015),transparent 140px);
+  scrollbar-color:rgba(148,163,184,.28) transparent;
+}
+.mlist{gap:5px;padding:18px 18px 14px}
+.dsp span,.sysmsg span{
+  background:rgba(15,23,42,.72);
+  border:1px solid var(--stroke);
+  color:#a8b3c3;
+}
+.msg{max-width:min(78%,620px)}
+.bub{
+  padding:11px 14px 8px;
+  border-radius:20px;
+  box-shadow:0 10px 28px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.msg.o .bub{
+  background:linear-gradient(135deg,rgba(37,99,235,.92),rgba(8,145,178,.9));
+  border-color:rgba(125,211,252,.36);
+}
+.msg.i .bub{
+  background:linear-gradient(180deg,rgba(20,32,49,.92),rgba(14,23,38,.9));
+  border-color:var(--stroke);
+}
+.btxt{font-size:16px;line-height:1.5}
+.bsnm{font-size:12.5px;color:#67e8f9}
+.btime{font-size:11px}
+.mimg,.mvid{max-width:min(320px,68vw);max-height:340px;border-radius:14px}
+.iarea{
+  padding:12px 14px;
+  padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));
+  background:rgba(8,14,24,.88);
+  border-top-color:var(--stroke);
+}
+.irow{gap:9px}
+.icn,.sndbtn{width:48px;height:48px}
+.icn{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06)}
+.tbox{
+  min-height:48px;
+  border-radius:18px;
+  background:rgba(17,28,45,.9);
+  border-color:rgba(255,255,255,.08);
+}
+#ti{font-size:16px;line-height:1.45}
+.sndbtn{
+  border-radius:16px;
+  background:linear-gradient(135deg,#22d3ee,#2563eb);
+}
+.sdwn{right:18px;bottom:18px;width:44px;height:44px}
+.typing-bar{
+  padding:9px 18px 7px;
+  background:rgba(8,14,24,.72);
+}
+.epick{
+  background:rgba(9,16,27,.96);
+  border-top-color:var(--stroke);
+}
+.eitm,.ecat{transition:transform .14s ease,background .14s ease}
+.eitm:hover,.ecat:hover{transform:translateY(-1px)}
+.mov{background:rgba(2,6,15,.68)}
+.mbox{border-radius:20px;background:linear-gradient(180deg,rgba(20,31,48,.96),rgba(12,20,34,.96))}
+.tst{bottom:96px}
+@media(max-width:560px){
+  #app{width:100vw;max-width:none;box-shadow:none}
+  .hdr{height:62px;padding:0 10px 0 12px}
+  .hdr img{width:38px!important;height:38px!important}
+  .hname{font-size:15.5px}
+  .mlist{padding:14px 10px 10px}
+  .msg{max-width:88%}
+  .btxt{font-size:15.5px}
+  .iarea{padding:10px 8px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  .icn,.sndbtn{width:44px;height:44px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
+}
 </style>
 </head>
 <body>
@@ -644,8 +801,8 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 <!-- LOGIN -->
 <div id="ls" class="scr on">
   <div class="lcard">
-    <img src="/logo.png" alt="KV9RU" style="width:80px;height:80px;border-radius:16px;margin-bottom:24px;object-fit:cover;display:block">
-    <div class="ltit">Поддержка KV9RU</div>
+    <img src="/logo.png" alt="Поддержка" style="width:80px;height:80px;border-radius:16px;margin-bottom:24px;object-fit:cover;display:block">
+    <div class="ltit">Поддержка</div>
     <div class="lsub">Представьтесь — ответим как можно скорее</div>
     <input id="ni" class="linp" type="text" placeholder="Ваше имя" maxlength="50" autocomplete="given-name" enterkeyhint="go">
     <button id="sb" class="lbtn" disabled>
@@ -658,7 +815,7 @@ input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
 <!-- CHAT -->
 <div id="cs" class="scr">
   <div class="hdr">
-    <img src="/logo.png" alt="KV9RU" style="width:34px;height:34px;border-radius:8px;object-fit:cover;flex-shrink:0">
+    <img src="/logo.png" alt="Поддержка" style="width:34px;height:34px;border-radius:8px;object-fit:cover;flex-shrink:0">
     <div class="hin">
       <div class="hname">Служба поддержки</div>
       <div class="hst"><span class="hdot"></span><span class="hstxt">подключение...</span></div>
