@@ -2,6 +2,7 @@ const webpush = require('web-push');
 const fs = require('fs');
 const path = require('path');
 const db = require('./database');
+const { loadSettings } = require('./settings');
 
 let publicKey = null;
 
@@ -66,11 +67,12 @@ function getPublicKey() { return publicKey; }
 async function send(ticketId, body) {
   if (!publicKey) return;
   const subs = db.getPushSubs.all(ticketId);
+  const title = loadSettings().supportName || 'Поддержка';
   for (const s of subs) {
     try {
       await webpush.sendNotification(
         JSON.parse(s.subscription),
-        JSON.stringify({ title: 'Поддержка KV9RU', body: body || 'Новое сообщение' })
+        JSON.stringify({ title, body: body || 'Новое сообщение' })
       );
     } catch (e) {
       // 404/410 = subscription expired → delete it
