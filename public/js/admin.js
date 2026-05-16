@@ -57,25 +57,12 @@ socket.io.on('reconnect_attempt', () => setConn('connecting'));
 socket.on('admin_auth_ok', () => {
   sessionStorage.setItem('admin_token', S.token);
   $('login').style.display = 'none';
-  $('app').style.display = 'flex';
+  $('app').style.display = 'grid';
   socket.emit('admin_get_settings');
 });
 socket.on('admin_settings', s => {
-  $('set-work-start').value = s.workStartHour ?? 8;
-  $('set-work-end').value = s.workEndHour ?? 23;
-  $('set-offhours-enabled').checked = !!s.offhoursEnabled;
-  $('set-banner-text').value = s.offhoursBannerText || '';
-  $('set-reject-text').value = s.offhoursRejectText || '';
-});
-$('set-save')?.addEventListener('click', () => {
-  socket.emit('admin_update_settings', {
-    workStartHour: Number($('set-work-start').value || 8),
-    workEndHour: Number($('set-work-end').value || 23),
-    offhoursEnabled: $('set-offhours-enabled').checked,
-    offhoursBannerText: $('set-banner-text').value.trim(),
-    offhoursRejectText: $('set-reject-text').value.trim()
-  });
-  toast('Настройки сохранены', 'ok');
+  S.settings = s || {};
+  renderSettings();
 });
 
 socket.on('admin_auth_error', () => {
@@ -108,14 +95,18 @@ socket.on('admin_new_message', ({ ticketId, message }) => {
     }
   }
   renderSidebar();
-  if (ticketId === S.current?.id) appendMsg(message);
+  if (ticketId === S.current?.id) {
+    S.messages.push(message);
+    appendMessage(message, true);
+  }
 });
 
 socket.on('admin_ticket_messages', ({ ticketId, messages, ticket }) => {
   if (ticketId !== S.current?.id) return;
   S.current = ticket;
-  renderConversation(messages);
-  updateCvHeader();
+  S.messages = Array.isArray(messages) ? messages : [];
+  renderConversation();
+  renderChatHeader();
 });
 
 socket.on('admin_ticket_status', ({ ticketId, status }) => {
@@ -124,7 +115,7 @@ socket.on('admin_ticket_status', ({ ticketId, status }) => {
   renderSidebar();
   if (ticketId === S.current?.id) {
     S.current.status = status;
-    updateCvHeader();
+    renderChatHeader();
   }
 });
 
@@ -137,7 +128,7 @@ socket.on('admin_user_typing', ({ ticketId }) => {
 
 let _userTypingHide = null;
 function showUserTyping() {
-  const bar = $('user-typing-bar');
+  const bar = $('typing');
   if (!bar) return;
   bar.style.display = '';
   clearTimeout(_userTypingHide);
@@ -146,16 +137,27 @@ function showUserTyping() {
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
-$('srch').addEventListener('input', () => { S.search = $('srch').value.trim().toLowerCase(); renderSidebar(); });
+function setFilter(filter) {
+  S.filter = filter || 'open';
+  document.querySelectorAll('.tab').forEach(btn => btn.classList.toggle('on', btn.dataset.tab === S.filter));
+  renderSidebar();
+}
 
-document.querySelectorAll('.sb-tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.sb-tab').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    S.filter = btn.dataset.tab;
-    renderSidebar();
-  });
-});
+function setView(view) {
+  S.view = view || 'chat';
+  document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
+  $('settings').classList.toggle('on', S.view === 'settings');
+  $('templates').classList.toggle('on', S.view === 'templates');
+
+  if (S.view === 'chat') {
+    $('welcome').style.display = S.current ? 'none' : 'grid';
+    $('chat').style.display = S.current ? 'flex' : 'none';
+  } else {
+    $('welcome').style.display = 'none';
+    $('chat').style.display = 'none';
+    $('main').classList.add('open');
+  }
+}
 
 function renderSidebar() {
   const open = S.tickets.filter(t => t.status === 'open').length;
