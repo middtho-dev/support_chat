@@ -11,7 +11,7 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('push', (e) => {
-  let data = { title: 'Поддержка KV9RU', body: 'Новое сообщение' };
+  let data = { title: 'Поддержка', body: 'Новое сообщение' };
   try { data = e.data.json(); } catch {}
   e.waitUntil(
     self.registration.showNotification(data.title, {
