@@ -9,6 +9,6 @@
   "lang": "ru",
   "orientation": "portrait-primary",
   "icons": [
-    { "src": "/logo.png", "sizes": "any", "type": "image/png", "purpose": "any" }
+    { "src": "/logo.png", "sizes": "any", "type": "image/png", "purpose": "any maskable" }
   ]
 }
