@@ -25,7 +25,8 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-const IMG_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.webp','.heic','.heif','.bmp','.tiff','.avif']);
+const DISPLAY_IMAGE_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.webp']);
+const IMG_EXTS = new Set([...DISPLAY_IMAGE_EXTS,'.heic','.heif','.bmp','.tif','.tiff','.avif']);
 const VID_EXTS = new Set(['.mp4','.mov','.m4v','.avi','.mkv','.webm']);
 const AUD_EXTS = new Set(['.mp3','.m4a','.aac','.ogg','.wav','.flac','.opus']);
 const ALLOWED_MIMES = new Set([
@@ -33,15 +34,57 @@ const ALLOWED_MIMES = new Set([
   'application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-powerpoint','application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/zip','application/x-zip-compressed','application/x-zip','application/x-7z-compressed',
-  'application/x-rar-compressed','application/vnd.rar','text/plain','text/csv'
+  'application/x-rar-compressed','application/vnd.rar','text/plain','text/csv',
+  'image/heic','image/heif','image/avif','image/tiff','image/bmp'
 ]);
 
 function mimeFromExt(filename) {
   const ext = path.extname(filename).toLowerCase();
-  if (IMG_EXTS.has(ext)) return 'image/jpeg';
-  if (VID_EXTS.has(ext)) return 'video/mp4';
-  if (AUD_EXTS.has(ext)) return 'audio/mpeg';
+  const byExt = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+    '.heic': 'image/heic', '.heif': 'image/heif', '.avif': 'image/avif', '.bmp': 'image/bmp', '.tif': 'image/tiff', '.tiff': 'image/tiff',
+    '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.m4v': 'video/x-m4v', '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
+    '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.opus': 'audio/opus'
+  };
+  if (byExt[ext]) return byExt[ext];
   return null;
+}
+
+function uploadMetadata(file) {
+  const ext = path.extname(file.originalname || file.filename || '').toLowerCase();
+  let mime = file.mimetype;
+  if (!mime || mime === 'application/octet-stream') mime = mimeFromExt(file.originalname) || mime || 'application/octet-stream';
+
+  let type = 'file';
+  if (mime.startsWith('image/') && DISPLAY_IMAGE_EXTS.has(ext)) type = 'image';
+  else if (mime.startsWith('video/')) type = 'video';
+  else if (mime.startsWith('audio/')) type = 'audio';
+
+  return { name: file.originalname, mime, type };
+}
+
+function isSafeUploadUrl(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== 'string') return false;
+  if (!fileUrl.startsWith('/uploads/')) return false;
+  let decoded;
+  try {
+    decoded = path.normalize(decodeURIComponent(fileUrl).replace(/^\/+/, ''));
+  } catch {
+    return false;
+  }
+  if (decoded.startsWith('..') || path.isAbsolute(decoded)) return false;
+  const fp = path.resolve(__dirname, '../public', decoded);
+  const uploadsDir = path.resolve(UPLOADS_DIR);
+  return fp === uploadsDir || fp.startsWith(uploadsDir + path.sep);
+}
+
+function canUpload(req) {
+  const adminToken = req.body?.adminToken;
+  if (ADMIN_TOKEN && adminToken && adminToken === ADMIN_TOKEN) return true;
+  const { ticketId, sessionToken } = req.body || {};
+  if (!ticketId || !sessionToken) return false;
+  const ticket = db.getTicketBySessionAny.get(sessionToken);
+  return !!ticket && ticket.id === ticketId && ticket.status === 'open';
 }
 
 const upload = multer({
@@ -75,7 +118,12 @@ app.get('/admin', (req, res) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 function isWithinWorkHours(cfg = loadSettings()) {
-  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: cfg.timezone }).format(new Date()));
+  let hour;
+  try {
+    hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: cfg.timezone }).format(new Date()));
+  } catch {
+    hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Europe/Moscow' }).format(new Date()));
+  }
   return hour >= cfg.workStartHour && hour < cfg.workEndHour;
 }
 
@@ -86,7 +134,6 @@ function publicConfig() {
 
 app.post('/api/session/start', (req, res) => {
   const cfg = loadSettings();
-  if (cfg.offhoursEnabled && !isWithinWorkHours(cfg)) return res.status(403).json({ error: 'Off hours', message: cfg.offhoursRejectText });
   const raw = req.body?.name;
   if (!raw || typeof raw !== 'string') return res.status(400).json({ error: 'Name required' });
   const name = raw.trim().slice(0, 50);
@@ -135,19 +182,18 @@ app.post('/api/tickets/:ticketId/messages/older', (req, res) => {
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
+  if (!canUpload(req)) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   const cfg = loadSettings();
   if (req.file.size > cfg.uploadMaxMb * 1024 * 1024) {
     fs.unlink(req.file.path, () => {});
     return res.status(413).json({ error: `File too large. Max ${cfg.uploadMaxMb} MB` });
   }
 
-  let mime = req.file.mimetype;
-  if (mime === 'application/octet-stream') mime = mimeFromExt(req.file.originalname) || mime;
-  let type = 'file';
-  if (mime.startsWith('image/')) type = 'image';
-  else if (mime.startsWith('video/')) type = 'video';
-  else if (mime.startsWith('audio/')) type = 'audio';
-  res.json({ url: `/uploads/${req.file.filename}`, name: req.file.originalname, mime, type });
+  const meta = uploadMetadata(req.file);
+  res.json({ url: `/uploads/${req.file.filename}`, ...meta });
 });
 
 app.post('/api/tickets/:ticketId/close', (req, res) => {
@@ -289,9 +335,8 @@ io.on('connection', (socket) => {
         if (ack) ack({ error: 'Ticket is closed' });
         return;
       }
-      const cfg = loadSettings();
-      if (cfg.offhoursEnabled && !isWithinWorkHours(cfg)) {
-        if (ack) ack({ error: 'Off hours', message: cfg.offhoursRejectText });
+      if (fileUrl && !isSafeUploadUrl(fileUrl)) {
+        if (ack) ack({ error: 'Invalid file' });
         return;
       }
       if (!content && !fileUrl) {
@@ -377,25 +422,27 @@ io.on('connection', (socket) => {
     io.to('admin').emit('admin_settings_updated', cfg);
   });
 
-  socket.on('admin_reply', async ({ ticketId, content }) => {
+  socket.on('admin_reply', async ({ ticketId, content, fileUrl, fileName, fileMime, messageType }) => {
     if (!socket.isAdmin) return;
     const text = (content || '').trim();
-    if (!text) return;
+    if (!text && !fileUrl) return;
+    if (fileUrl && !isSafeUploadUrl(fileUrl)) return socket.emit('admin_error', { message: 'Invalid file' });
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket || ticket.status === 'closed') return;
     const cfg = loadSettings();
     const msgId = uuidv4();
-    db.saveMessage.run(msgId, ticketId, 'support', cfg.supportName, text, 'text', null, null, null, null, null);
+    const msgType = messageType || (fileUrl ? 'file' : 'text');
+    db.saveMessage.run(msgId, ticketId, 'support', cfg.supportName, text || null, msgType, fileUrl || null, fileName || null, fileMime || null, null, null);
     db.markSupportRead.run(ticketId);
     const message = {
       id: msgId, ticket_id: ticketId, sender: 'support', sender_name: cfg.supportName,
-      content: text, message_type: 'text', file_url: null, file_name: null, file_mime: null,
+      content: text || null, message_type: msgType, file_url: fileUrl || null, file_name: fileName || null, file_mime: fileMime || null,
       created_at: new Date().toISOString()
     };
     io.to(`ticket:${ticketId}`).emit('message', message);
     io.to('admin').emit('admin_new_message', { ticketId, message });
     broadcastAdminTickets();
-    push.send(ticketId, text).catch(() => {});
+    push.send(ticketId, text || fileName || 'Новое сообщение').catch(() => {});
     telegram.forwardMessage(db.getTicketById.get(ticketId), message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
   });
 
@@ -410,7 +457,7 @@ io.on('connection', (socket) => {
     if (!ticket || ticket.status === 'closed') return;
     db.closeTicket.run(ticket.id);
     io.to(`ticket:${ticketId}`).emit('ticket_closed', { by: 'support' });
-    socket.emit('admin_ticket_status', { ticketId, status: 'closed' });
+    io.to('admin').emit('admin_ticket_status', { ticketId, status: 'closed' });
     broadcastAdminTickets();
     telegram.notifyTicketClosed(ticket).catch(() => {});
   });
@@ -431,7 +478,7 @@ io.on('connection', (socket) => {
       }
     }
     io.to(`ticket:${ticketId}`).emit('ticket_reopened');
-    socket.emit('admin_ticket_status', { ticketId, status: 'open' });
+    io.to('admin').emit('admin_ticket_status', { ticketId, status: 'open' });
     broadcastAdminTickets();
   });
 });

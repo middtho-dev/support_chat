@@ -5,8 +5,8 @@ const DEFAULTS = {
   workStartHour: 8,
   workEndHour: 23,
   offhoursEnabled: true,
-  offhoursBannerText: 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.',
-  offhoursRejectText: 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.',
+  offhoursBannerText: 'Сейчас нерабочее время (МСК). Ответим в рабочее время, но сообщение можно оставить сейчас.',
+  offhoursRejectText: 'Сейчас нерабочее время. Ответим в рабочее время, но сообщение можно оставить сейчас.',
 
   supportName: 'Поддержка KV9RU',
   welcomeEnabled: true,
@@ -101,6 +101,8 @@ const KEY_MAP = {
 };
 
 const TYPES = Object.fromEntries(Object.entries(DEFAULTS).map(([key, value]) => [key, typeof value]));
+const LEGACY_OFFHOURS_BANNER = 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.';
+const LEGACY_OFFHOURS_REJECT = 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.';
 
 function clamp(n, min, max, fallback) {
   const value = Number(n);
@@ -149,6 +151,8 @@ function normalize(input = {}) {
   cfg.welcomeText2 = sanitizeText(cfg.welcomeText2, DEFAULTS.welcomeText2, 1500);
   cfg.offhoursBannerText = sanitizeText(cfg.offhoursBannerText, DEFAULTS.offhoursBannerText, 1000);
   cfg.offhoursRejectText = sanitizeText(cfg.offhoursRejectText, DEFAULTS.offhoursRejectText, 1000);
+  if (cfg.offhoursBannerText === LEGACY_OFFHOURS_BANNER) cfg.offhoursBannerText = DEFAULTS.offhoursBannerText;
+  if (cfg.offhoursRejectText === LEGACY_OFFHOURS_REJECT) cfg.offhoursRejectText = DEFAULTS.offhoursRejectText;
   cfg.inactivityWarningText = sanitizeText(cfg.inactivityWarningText, DEFAULTS.inactivityWarningText, 1000);
   cfg.inactivityCloseText = sanitizeText(cfg.inactivityCloseText, DEFAULTS.inactivityCloseText, 1000);
 

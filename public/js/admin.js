@@ -9,7 +9,7 @@ const DEFAULT_TEMPLATES = [
   { label: 'Завершение', text: 'Спасибо за обращение в поддержку KV9RU! Будем рады помочь снова.' }
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
-const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, templates: loadTemplates(), view: 'chat', lastDate: '' };
+const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false };
 const socket = io({ autoConnect: false });
 const $ = id => document.getElementById(id);
 
@@ -63,6 +63,10 @@ socket.on('admin_auth_ok', () => {
 socket.on('admin_settings', s => {
   S.settings = s || {};
   renderSettings();
+});
+socket.on('admin_settings_updated', s => {
+  S.settings = s || {};
+  if (S.view === 'settings') renderSettings();
 });
 
 socket.on('admin_auth_error', () => {
@@ -175,14 +179,69 @@ function renderRelativeTimes() { document.querySelectorAll('[data-ts]').forEach(
 
 function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
 function renderChatHeader() { if (!S.current) return; const t = S.current; $('cv-av').style.background = avatarColor(t.user_name); $('cv-av').textContent = initials(t.user_name); $('cv-av').className = `avatar ${t.status === 'closed' ? 'closed' : ''}`; $('cv-name').textContent = t.user_name; $('cv-sub').textContent = `#${t.id.slice(0, 8)} · ${fmtDate(new Date(t.created_at))} · ${t.status === 'open' ? 'открыто' : 'закрыто'}`; const btn = $('cv-toggle'); btn.disabled = !!t.telegram_topic_deleted; btn.className = t.status === 'open' ? 'danger' : 'okbtn'; btn.textContent = t.status === 'open' ? 'Закрыть' : (t.telegram_topic_deleted ? 'Тема удалена' : 'Переоткрыть'); $('composer').innerHTML = t.status === 'open' ? composerHtml() : '<div class="closed-note">Обращение закрыто. При необходимости переоткройте его.</div>'; if (t.status === 'open') wireComposer(); }
-function composerHtml() { return `<div class="compose-row"><button id="quick" class="quick" title="Шаблоны">#</button><textarea id="reply-txt" rows="1" placeholder="Ответ оператора..."></textarea><button id="reply-send" class="send" disabled>➤</button></div><div class="hint"><span>Ctrl+Enter — отправить</span><span id="reply-cnt"></span></div>`; }
-function wireComposer() { $('reply-txt').addEventListener('input', onReplyInput); $('reply-txt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } }); $('reply-send').addEventListener('click', sendReply); $('quick').addEventListener('click', showTemplatePicker); }
+function composerHtml() { return `<div id="admin-file-preview" class="admin-file-preview" style="display:none"></div><div class="compose-row"><button id="quick" class="quick" title="Шаблоны">#</button><button id="reply-attach" class="quick" title="Прикрепить файл">+</button><input id="reply-file" type="file" accept="image/*,video/*,audio/*,.heic,.heif,.avif,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" style="display:none"><textarea id="reply-txt" rows="1" placeholder="Ответ оператора..."></textarea><button id="reply-send" class="send" disabled>➤</button></div><div class="hint"><span>Ctrl+Enter — отправить</span><span id="reply-cnt"></span></div>`; }
+function wireComposer() { S.file = null; S.uploading = false; $('reply-txt').addEventListener('input', onReplyInput); $('reply-txt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } }); $('reply-send').addEventListener('click', sendReply); $('quick').addEventListener('click', showTemplatePicker); $('reply-attach').addEventListener('click', () => $('reply-file').click()); $('reply-file').addEventListener('change', () => { if ($('reply-file').files[0]) setReplyFile($('reply-file').files[0]); $('reply-file').value = ''; }); }
 function renderConversation() { const box = $('cv-msgs'); box.innerHTML = ''; S.lastDate = ''; if (!S.messages.length) { box.innerHTML = '<div class="empty">Сообщений пока нет</div>'; return; } S.messages.forEach(m => appendMessage(m, false)); scrollBottom(false); }
 function appendMessage(msg, scroll = false) { const box = $('cv-msgs'); if (!box) return; box.querySelector('.empty')?.remove(); if (msg.sender !== 'system') { const ds = fmtDate(new Date(msg.created_at)); if (ds !== S.lastDate) { S.lastDate = ds; box.insertAdjacentHTML('beforeend', `<div class="day">${esc(ds)}</div>`); } } const out = msg.sender === 'support'; const sys = msg.sender === 'system'; const sender = !out && !sys ? `<div class="sender">${esc(msg.sender_name || 'Клиент')}</div>` : ''; box.insertAdjacentHTML('beforeend', `<div class="msg ${sys ? 'sys' : out ? 'out' : 'in'}"><div class="bubble">${sender}${messageBody(msg)}<div class="meta">${fmtTime(new Date(msg.created_at))}</div></div></div>`); if (scroll) scrollBottom(true); }
 function messageBody(msg) { const text = msg.content ? `<div>${linkify(esc(msg.content))}</div>` : ''; if (msg.message_type === 'image' && msg.file_url) return `<img src="${esc(msg.file_url)}" loading="lazy">${text}`; if (msg.message_type === 'video' && msg.file_url) return `<video src="${esc(msg.file_url)}" controls preload="metadata"></video>${text}`; if (msg.message_type === 'audio' && msg.file_url) return `<audio src="${esc(msg.file_url)}" controls></audio>${text}`; if (msg.file_url) return `<a class="file" href="${esc(msg.file_url)}" target="_blank" rel="noopener noreferrer" download="${esc(msg.file_name || 'file')}"><span class="file-ico">↧</span><span>${esc(msg.file_name || 'Файл')}</span></a>${text}`; return text || '<span></span>'; }
 function scrollBottom(smooth) { const box = $('cv-msgs'); requestAnimationFrame(() => box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })); }
-function onReplyInput() { const txt = $('reply-txt'), send = $('reply-send'), cnt = $('reply-cnt'); if (!txt || !send) return; txt.style.height = 'auto'; txt.style.height = `${Math.min(txt.scrollHeight, 140)}px`; send.disabled = !txt.value.trim(); if (cnt) cnt.textContent = txt.value ? `${txt.value.length} симв.` : ''; socket.emit('admin_typing', { ticketId: S.current?.id }); }
-function sendReply() { const txt = $('reply-txt'); if (!txt || !S.current || S.current.status !== 'open') return; const content = txt.value.trim(); if (!content) return; txt.value = ''; txt.style.height = 'auto'; $('reply-send').disabled = true; $('reply-cnt').textContent = ''; socket.emit('admin_reply', { ticketId: S.current.id, content }); }
+function onReplyInput() { const txt = $('reply-txt'), send = $('reply-send'), cnt = $('reply-cnt'); if (!txt || !send) return; txt.style.height = 'auto'; txt.style.height = `${Math.min(txt.scrollHeight, 140)}px`; send.disabled = S.uploading || (!txt.value.trim() && !S.file); if (cnt) cnt.textContent = txt.value ? `${txt.value.length} симв.` : ''; socket.emit('admin_typing', { ticketId: S.current?.id }); }
+async function sendReply() {
+  const txt = $('reply-txt');
+  if (!txt || !S.current || S.current.status !== 'open' || S.uploading) return;
+  const content = txt.value.trim();
+  const file = S.file;
+  if (!content && !file) return;
+  $('reply-send').disabled = true;
+  let fileUrl = null, fileName = null, fileMime = null, messageType = 'text';
+  if (file) {
+    S.uploading = true;
+    renderReplyFilePreview('Загрузка...');
+    try {
+      const fd = new FormData();
+      fd.append('adminToken', S.token);
+      fd.append('file', file);
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      if (!r.ok) throw 0;
+      const d = await r.json();
+      fileUrl = d.url; fileName = d.name; fileMime = d.mime; messageType = d.type;
+    } catch {
+      S.uploading = false;
+      toast('Ошибка загрузки файла', 'err');
+      onReplyInput();
+      renderReplyFilePreview();
+      return;
+    }
+    S.uploading = false;
+    clearReplyFile();
+  }
+  txt.value = '';
+  txt.style.height = 'auto';
+  $('reply-cnt').textContent = '';
+  socket.emit('admin_reply', { ticketId: S.current.id, content, fileUrl, fileName, fileMime, messageType });
+  onReplyInput();
+}
+function setReplyFile(file) {
+  const maxMb = Number(S.settings?.uploadMaxMb) || 50;
+  if (file.size > maxMb * 1024 * 1024) return toast(`Файл слишком большой (макс. ${maxMb} МБ)`, 'err');
+  S.file = file;
+  renderReplyFilePreview();
+  onReplyInput();
+}
+function clearReplyFile() {
+  S.file = null;
+  renderReplyFilePreview();
+  onReplyInput();
+}
+function renderReplyFilePreview(statusText) {
+  const el = $('admin-file-preview');
+  if (!el) return;
+  if (!S.file && !statusText) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  const name = statusText || S.file?.name || '';
+  el.innerHTML = `<span>${esc(name)}</span>${S.file && !statusText ? '<button id="reply-file-remove" type="button">×</button>' : ''}`;
+  $('reply-file-remove')?.addEventListener('click', clearReplyFile);
+}
 function toggleTicketStatus() { if (!S.current) return; socket.emit(S.current.status === 'open' ? 'admin_close_ticket' : 'admin_reopen_ticket', { ticketId: S.current.id }); }
 
 function showTemplatePicker(event) { event.stopPropagation(); document.querySelectorAll('.pop').forEach(p => p.remove()); const pop = document.createElement('div'); pop.className = 'pop'; pop.innerHTML = S.templates.map((t, i) => `<button data-i="${i}"><b>${esc(t.label)}</b><span>${esc(t.text)}</span></button>`).join('') || '<div class="empty">Шаблонов нет</div>'; document.body.appendChild(pop); const r = $('quick').getBoundingClientRect(); pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 12)}px`; pop.style.top = `${Math.max(74, r.top - pop.offsetHeight - 10)}px`; pop.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => { const item = S.templates[Number(btn.dataset.i)]; const txt = $('reply-txt'); txt.value = item.text; txt.dispatchEvent(new Event('input')); txt.focus(); pop.remove(); })); }
@@ -198,7 +257,7 @@ function renderSettings() {
   const s = S.settings || {};
   $('settings').innerHTML = `<div class="section"><h2>Настройки проекта</h2><p>Все параметры применяются сразу после сохранения. Переменные .env вроде токена бота и ADMIN_TOKEN остаются на сервере.</p>
   <div class="grid">
-    <div class="card"><h3>Чат и график</h3>${input('set-support-name','Имя поддержки в чате',s.supportName || 'Поддержка KV9RU')}${input('set-tz','Часовой пояс',s.timezone || 'Europe/Moscow')}${input('set-work-start','Начало рабочего часа',s.workStartHour ?? 8,'number','min="0" max="23"')}${input('set-work-end','Конец рабочего часа',s.workEndHour ?? 23,'number','min="1" max="24"')}${check('set-offhours-enabled','Блокировать новые сообщения вне графика',s.offhoursEnabled)}${area('set-banner-text','Баннер вне графика',s.offhoursBannerText || '')}${area('set-reject-text','Ответ при попытке написать вне графика',s.offhoursRejectText || '')}</div>
+    <div class="card"><h3>Чат и график</h3>${input('set-support-name','Имя поддержки в чате',s.supportName || 'Поддержка KV9RU')}${input('set-tz','Часовой пояс',s.timezone || 'Europe/Moscow')}${input('set-work-start','Начало рабочего часа',s.workStartHour ?? 8,'number','min="0" max="23"')}${input('set-work-end','Конец рабочего часа',s.workEndHour ?? 23,'number','min="1" max="24"')}${check('set-offhours-enabled','Показывать предупреждение вне графика',s.offhoursEnabled)}${area('set-banner-text','Баннер перед вводом имени вне графика',s.offhoursBannerText || '')}${area('set-reject-text','Резервный текст предупреждения вне графика',s.offhoursRejectText || '')}</div>
     <div class="card"><h3>Приветствие и ограничения</h3>${check('set-welcome-enabled','Отправлять авто-приветствие',s.welcomeEnabled)}${input('set-welcome-delay-1','Задержка первого приветствия, мс',s.welcomeDelayFirstMs ?? 1200,'number','min="0" max="30000"')}${input('set-welcome-delay-2','Задержка второго приветствия, мс',s.welcomeDelaySecondMs ?? 2800,'number','min="0" max="60000"')}${area('set-welcome-1','Первое приветствие',s.welcomeText1 || '',3)}${area('set-welcome-2','Второе приветствие',s.welcomeText2 || '',4)}${input('set-rate','Лимит сообщений в минуту',s.messageRateLimitPerMinute ?? 20,'number','min="1" max="300"')}${input('set-upload','Максимальный файл, МБ',s.uploadMaxMb ?? 50,'number','min="1" max="50"')}</div>
     <div class="card"><h3>Автозакрытие</h3>${check('set-inactivity-enabled','Включить предупреждение и автозакрытие',s.inactivityEnabled)}${input('set-inactivity-warn','Предупредить через, минут',s.inactivityWarnMinutes ?? 45,'number','min="1" max="1440"')}${input('set-inactivity-close','Закрыть через, минут',s.inactivityCloseMinutes ?? 60,'number','min="2" max="2880"')}${area('set-inactivity-warning','Сообщение-предупреждение в чат',s.inactivityWarningText || '',3)}${area('set-inactivity-close-text','Сообщение автозакрытия в чат',s.inactivityCloseText || '',3)}</div>
     <div class="card"><h3>Telegram: поведение</h3>${check('set-tg-enabled','Включить Telegram-интеграцию',s.telegramEnabled)}${check('set-tg-create-topics','Создавать темы для тикетов',s.telegramCreateTopics)}${check('set-tg-forward-user','Пересылать сообщения клиента в Telegram',s.telegramForwardUserMessages)}${check('set-tg-forward-admin','Пересылать ответы из админки в Telegram',s.telegramForwardAdminMessages)}${check('set-tg-forward-operator','Принимать ответы операторов из Telegram в чат',s.telegramForwardOperatorMessages)}${check('set-tg-delete-renames','Удалять сервисные сообщения о переименовании тем',s.telegramDeleteRenameNotices)}${check('set-tg-pin','Закреплять карточку нового тикета',s.telegramPinNewTicketMessage)}${check('set-tg-close-topic','Закрывать тему при закрытии тикета',s.telegramCloseTopicOnClose)}${check('set-tg-reopen-topic','Открывать тему при переоткрытии',s.telegramReopenTopicOnReopen)}${check('set-tg-cleanup','Удалять старые закрытые темы',s.telegramCleanupClosedTopics)}${input('set-tg-cleanup-hours','Удалять закрытые темы через, часов',s.telegramCleanupClosedHours ?? 24,'number','min="1" max="720"')}</div>

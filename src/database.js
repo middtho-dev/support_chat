@@ -76,8 +76,8 @@ const defaultSettings = {
   work_start_hour: '8',
   work_end_hour: '23',
   offhours_enabled: '1',
-  offhours_banner_text: 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.',
-  offhours_reject_text: 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.'
+  offhours_banner_text: 'Сейчас нерабочее время (МСК). Ответим в рабочее время, но сообщение можно оставить сейчас.',
+  offhours_reject_text: 'Сейчас нерабочее время. Ответим в рабочее время, но сообщение можно оставить сейчас.'
 };
 const insertDefaultSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
 for (const [k, v] of Object.entries(defaultSettings)) {

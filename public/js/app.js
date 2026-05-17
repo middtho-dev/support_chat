@@ -295,14 +295,13 @@ function renderMsg(msg){
 /* ── SEND ── */
 async function send(){
   if(S.closed||S.uploading)return;
-  if(CFG.offhoursEnabled&&!CFG.online){showToast(CFG.offhoursRejectText||'Сейчас нерабочее время. Напишите в рабочее время.','info');return;}
   const txt=ti.value.trim(),file=S.file;
   if(!txt&&!file)return;
   sndbtn.disabled=true;
   let fu=null,fn=null,fm=null,mt='text';
   if(file){
     S.uploading=true;showSpin(true);
-    try{const fd=new FormData();fd.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:fd});if(!r.ok)throw 0;const d=await r.json();fu=d.url;fn=d.name;fm=d.mime;mt=d.type}
+    try{const fd=new FormData();fd.append('ticketId',S.tid);fd.append('sessionToken',S.token);fd.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:fd});if(!r.ok)throw 0;const d=await r.json();fu=d.url;fn=d.name;fm=d.mime;mt=d.type}
     catch{showToast('Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
     S.uploading=false;showSpin(false);clearFile();
   }
@@ -336,11 +335,16 @@ mwrap.addEventListener('dragleave',()=>{mwrap.style.outline=''});
 mwrap.addEventListener('drop',e=>{e.preventDefault();mwrap.style.outline='';if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0])});
 document.addEventListener('paste',e=>{if(S.closed)return;for(const it of(e.clipboardData?.items||[])){if(it.kind==='file'){setFile(it.getAsFile());break}}});
 function setFile(f){
-  if(f.size>50*1024*1024){showToast('Файл слишком большой (макс. 50 МБ)','err');return;}
+  const maxMb=Number(CFG.uploadMaxMb)||50;
+  if(f.size>maxMb*1024*1024){showToast(`Файл слишком большой (макс. ${maxMb} МБ)`,'err');return;}
   S.file=f;fp.style.display='block';fpth.innerHTML='';
-  if(f.type.startsWith('image/')){const img=document.createElement('img');img.src=URL.createObjectURL(f);fpth.appendChild(img)}
+  if(canPreviewImage(f)){const img=document.createElement('img');img.src=URL.createObjectURL(f);fpth.appendChild(img)}
   else{const d=document.createElement('div');d.className='fpnm';d.textContent=f.name;fpth.appendChild(d)}
   updSend();
+}
+function canPreviewImage(f){
+  const ext=(f.name.split('.').pop()||'').toLowerCase();
+  return f.type.startsWith('image/')&&['jpg','jpeg','png','gif','webp'].includes(ext);
 }
 function clearFile(){S.file=null;fp.style.display='none';fpth.innerHTML='';updSend()}
 fprm.addEventListener('click',clearFile);
@@ -460,8 +464,10 @@ function supportOpenText(){
 function updateLoginHint(){
   const sub=$('ls')?.querySelector('.lsub');
   if(!sub)return;
-  if(!CFG.offhoursEnabled||CFG.online)sub.textContent='Представьтесь — ответим как можно скорее';
-  else sub.textContent=CFG.offhoursBannerText||`Сейчас не в сети · ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 МСК (${supportOpenText()})`;
+  const offhours = CFG.offhoursEnabled && !CFG.online;
+  sub.classList.toggle('offhours', offhours);
+  if(!offhours)sub.textContent='Представьтесь — ответим как можно скорее';
+  else sub.textContent=CFG.offhoursBannerText||`Сейчас нерабочее время · ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 (${supportOpenText()}). Сообщение можно оставить сейчас.`;
 }
 async function refreshConfig(){
   try{

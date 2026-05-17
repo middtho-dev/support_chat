@@ -15,6 +15,7 @@ let io = null;
 let reconnectTimer = null;
 let connected = false;
 const topicStatus = new Map();
+const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 
 function cfg() { return loadSettings(); }
 function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID; }
@@ -40,6 +41,33 @@ function topicName(ticket, emoji) {
 function isThreadNotFound(e) {
   const msg = String(e?.message || e?.response?.body?.description || '').toLowerCase();
   return msg.includes('thread not found') || msg.includes('topic_deleted') || msg.includes('topic_closed') || msg.includes('chat not found');
+}
+
+function publicUploadPath(fileUrl) {
+  if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.startsWith('/uploads/')) return null;
+  let relative;
+  try {
+    relative = path.normalize(decodeURIComponent(fileUrl).replace(/^\/+/, ''));
+  } catch {
+    return null;
+  }
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  const fp = path.resolve(__dirname, '../public', relative);
+  const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads'));
+  if (fp !== uploadsDir && !fp.startsWith(uploadsDir + path.sep)) return null;
+  return fp;
+}
+
+async function sendWithDocumentFallback(sendPrimary, fp, opts) {
+  try {
+    return await sendPrimary();
+  } catch (e) {
+    const msg = String(e?.message || e?.response?.body?.description || '').toLowerCase();
+    if (msg.includes('wrong file identifier') || msg.includes('photo_invalid') || msg.includes('failed to get http url content') || msg.includes('bad request')) {
+      return bot.sendDocument(GROUP_ID, fp, opts);
+    }
+    throw e;
+  }
 }
 
 function init(socketIo) {
@@ -188,6 +216,7 @@ async function closeTicketFromTelegram(ticket, topicId) {
   const s = cfg();
   db.closeTicket.run(ticket.id);
   io?.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'support' });
+  io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
   await setTopicStatus(topicId, ticket, s.telegramClosedEmoji);
   await safeSend(GROUP_ID, s.telegramClosedBySupportText, { message_thread_id: topicId, reply_markup: kbReopen(topicId) });
   if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, topicId).catch(() => {});
@@ -201,6 +230,7 @@ async function reopenTicketFromTelegram(ticket, topicId) {
   await setTopicStatus(topicId, ticket, s.telegramWaitEmoji);
   await safeSend(GROUP_ID, s.telegramReopenedText, { message_thread_id: topicId, reply_markup: kbClose(topicId) });
   io?.to(`ticket:${ticket.id}`).emit('ticket_reopened');
+  io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'open' });
 }
 
 async function setTopicStatus(topicId, ticket, emoji) {
@@ -226,7 +256,8 @@ async function downloadFile(msg) {
       fileId = msg.video.file_id; fileName = msg.video.file_name || `video_${Date.now()}.mp4`; fileMime = msg.video.mime_type || 'video/mp4'; type = 'video';
     } else if (msg.document) {
       fileId = msg.document.file_id; fileName = msg.document.file_name || `file_${Date.now()}`; fileMime = msg.document.mime_type || 'application/octet-stream';
-      type = fileMime.startsWith('image/') ? 'image' : fileMime.startsWith('video/') ? 'video' : 'file';
+      const ext = path.extname(fileName).toLowerCase();
+      type = fileMime.startsWith('image/') && DISPLAY_IMAGE_EXTS.has(ext) ? 'image' : fileMime.startsWith('video/') ? 'video' : 'file';
     } else if (msg.voice) {
       fileId = msg.voice.file_id; fileName = `voice_${Date.now()}.ogg`; fileMime = 'audio/ogg'; type = 'audio';
     }
@@ -285,13 +316,23 @@ async function forwardMessage(ticket, message) {
   const tid = ticket.telegram_topic_id;
   try {
     let sent;
-    const uploadsDir = path.resolve(__dirname, '../public/uploads');
-    const fp = message.file_url ? path.join(__dirname, '../public', message.file_url) : null;
-    if (fp && !fp.startsWith(uploadsDir + path.sep) && fp !== uploadsDir) return;
+    const fp = publicUploadPath(message.file_url);
     if (message.message_type === 'text') sent = await bot.sendMessage(GROUP_ID, message.content, { message_thread_id: tid });
-    else if (message.message_type === 'image' && fp) sent = await bot.sendPhoto(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined });
-    else if (message.message_type === 'video' && fp) sent = await bot.sendVideo(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined });
-    else if (message.message_type === 'audio' && fp) sent = await bot.sendVoice(GROUP_ID, fp, { message_thread_id: tid });
+    else if (message.message_type === 'image' && fp) sent = await sendWithDocumentFallback(
+      () => bot.sendPhoto(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined }),
+      fp,
+      { message_thread_id: tid, caption: message.content || undefined }
+    );
+    else if (message.message_type === 'video' && fp) sent = await sendWithDocumentFallback(
+      () => bot.sendVideo(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined }),
+      fp,
+      { message_thread_id: tid, caption: message.content || undefined }
+    );
+    else if (message.message_type === 'audio' && fp) sent = await sendWithDocumentFallback(
+      () => bot.sendVoice(GROUP_ID, fp, { message_thread_id: tid }),
+      fp,
+      { message_thread_id: tid, caption: message.content || undefined }
+    );
     else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined });
     if (sent) db.updateTelegramMessageId.run(sent.message_id, message.id);
     await setTopicStatus(tid, ticket, message.sender === 'user' ? s.telegramWaitEmoji : s.telegramOpenEmoji);
