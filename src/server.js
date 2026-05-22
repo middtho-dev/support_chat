@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const db = require('./database');
 const telegram = require('./telegram');
@@ -78,9 +79,23 @@ function isSafeUploadUrl(fileUrl) {
   return fp === uploadsDir || fp.startsWith(uploadsDir + path.sep);
 }
 
+function safeEqualString(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function isAdminToken(token) {
+  return !!ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN);
+}
+
+function isAdminRequest(req) {
+  return isAdminToken(req.body?.adminToken || req.query?.adminToken || req.get('x-admin-token'));
+}
+
 function canUpload(req) {
-  const adminToken = req.body?.adminToken;
-  if (ADMIN_TOKEN && adminToken && adminToken === ADMIN_TOKEN) return true;
+  if (isAdminRequest(req)) return true;
   const { ticketId, sessionToken } = req.body || {};
   if (!ticketId || !sessionToken) return false;
   const ticket = db.getTicketBySessionAny.get(sessionToken);
@@ -167,6 +182,9 @@ app.get('/api/chat-config', (req, res) => res.json(publicConfig()));
 app.get('/api/tickets/:ticketId/messages', (req, res) => {
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (!isAdminRequest(req) && (!req.query.sessionToken || ticket.session_token !== req.query.sessionToken)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   res.json(db.getMessages.all(ticket.id));
 });
 
@@ -372,7 +390,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('[Socket] Disconnected:', socket.id));
 
   socket.on('admin_auth', ({ token }) => {
-    if (!ADMIN_TOKEN || !token || token !== ADMIN_TOKEN) return socket.emit('admin_auth_error', { message: 'Invalid token' });
+    if (!isAdminToken(token)) return socket.emit('admin_auth_error', { message: 'Invalid token' });
     socket.isAdmin = true;
     socket.join('admin');
     socket.emit('admin_auth_ok');
@@ -551,6 +569,15 @@ async function inactivityCheck() {
   }
 }
 setInterval(inactivityCheck, 60 * 1000);
+
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  if (err instanceof multer.MulterError || err.message === 'File type not allowed') {
+    return res.status(400).json({ error: err.message });
+  }
+  console.error('[HTTP]', err);
+  res.status(500).json({ error: 'Server error' });
+});
 
 app.get('/health', (req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
 
