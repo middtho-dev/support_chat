@@ -17,6 +17,7 @@ const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch =
 const linkify = value => value.replace(/https?:\/\/[^\s<>"']+/g, url => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`);
 const fmtTime = date => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = date => date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+const isMobileLayout = () => window.matchMedia('(max-width: 560px)').matches;
 function timeAgo(iso) { const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000)); if (sec < 60) return 'сейчас'; if (sec < 3600) return `${Math.floor(sec / 60)} мин`; if (sec < 86400) return `${Math.floor(sec / 3600)} ч`; return `${Math.floor(sec / 86400)} д`; }
 function avatarColor(name = '') { let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0xffff; return COLORS[h % COLORS.length]; }
 function initials(name = '') { return (name.trim() || '?').slice(0, 2).toUpperCase(); }
@@ -156,6 +157,7 @@ function setView(view) {
   if (S.view === 'chat') {
     $('welcome').style.display = S.current ? 'none' : 'grid';
     $('chat').style.display = S.current ? 'flex' : 'none';
+    if (isMobileLayout() && !S.current) $('main').classList.remove('open');
   } else {
     $('welcome').style.display = 'none';
     $('chat').style.display = 'none';
