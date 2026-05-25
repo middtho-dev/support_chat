@@ -14,7 +14,27 @@ const socket = io({ autoConnect: false });
 const $ = id => document.getElementById(id);
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
-const linkify = value => value.replace(/https?:\/\/[^\s<>"']+/g, url => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`);
+const LINK_RE = /\b((?:https?:\/\/|www\.)[^\s<>"']+|(?:vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|tg):\/\/[^\s<>"']+)/gi;
+function linkify(value) {
+  const text = String(value ?? '');
+  let html = '', last = 0, match;
+  LINK_RE.lastIndex = 0;
+  while ((match = LINK_RE.exec(text))) {
+    const raw = match[0];
+    html += esc(text.slice(last, match.index));
+    let url = raw, tail = '';
+    while (url && /[.,!?;:)\]}]+$/.test(url)) { tail = url.slice(-1) + tail; url = url.slice(0, -1); }
+    if (url) {
+      const href = /^www\./i.test(url) ? `https://${url}` : url;
+      html += `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>${esc(tail)}`;
+    } else {
+      html += esc(raw);
+    }
+    last = match.index + raw.length;
+  }
+  html += esc(text.slice(last));
+  return html;
+}
 const fmtTime = date => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = date => date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 const isMobileLayout = () => window.matchMedia('(max-width: 560px)').matches;
@@ -185,7 +205,7 @@ function composerHtml() { return `<div id="admin-file-preview" class="admin-file
 function wireComposer() { S.file = null; S.uploading = false; $('reply-txt').addEventListener('input', onReplyInput); $('reply-txt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } }); $('reply-send').addEventListener('click', sendReply); $('quick').addEventListener('click', showTemplatePicker); $('reply-attach').addEventListener('click', () => $('reply-file').click()); $('reply-file').addEventListener('change', () => { if ($('reply-file').files[0]) setReplyFile($('reply-file').files[0]); $('reply-file').value = ''; }); }
 function renderConversation() { const box = $('cv-msgs'); box.innerHTML = ''; S.lastDate = ''; if (!S.messages.length) { box.innerHTML = '<div class="empty">Сообщений пока нет</div>'; return; } S.messages.forEach(m => appendMessage(m, false)); scrollBottom(false); }
 function appendMessage(msg, scroll = false) { const box = $('cv-msgs'); if (!box) return; box.querySelector('.empty')?.remove(); if (msg.sender !== 'system') { const ds = fmtDate(new Date(msg.created_at)); if (ds !== S.lastDate) { S.lastDate = ds; box.insertAdjacentHTML('beforeend', `<div class="day">${esc(ds)}</div>`); } } const out = msg.sender === 'support'; const sys = msg.sender === 'system'; const sender = !out && !sys ? `<div class="sender">${esc(msg.sender_name || 'Клиент')}</div>` : ''; box.insertAdjacentHTML('beforeend', `<div class="msg ${sys ? 'sys' : out ? 'out' : 'in'}"><div class="bubble">${sender}${messageBody(msg)}<div class="meta">${fmtTime(new Date(msg.created_at))}</div></div></div>`); if (scroll) scrollBottom(true); }
-function messageBody(msg) { const text = msg.content ? `<div>${linkify(esc(msg.content))}</div>` : ''; if (msg.message_type === 'image' && msg.file_url) return `<img src="${esc(msg.file_url)}" loading="lazy">${text}`; if (msg.message_type === 'video' && msg.file_url) return `<video src="${esc(msg.file_url)}" controls preload="metadata"></video>${text}`; if (msg.message_type === 'audio' && msg.file_url) return `<audio src="${esc(msg.file_url)}" controls></audio>${text}`; if (msg.file_url) return `<a class="file" href="${esc(msg.file_url)}" target="_blank" rel="noopener noreferrer" download="${esc(msg.file_name || 'file')}"><span class="file-ico">↧</span><span>${esc(msg.file_name || 'Файл')}</span></a>${text}`; return text || '<span></span>'; }
+function messageBody(msg) { const text = msg.content ? `<div>${linkify(msg.content)}</div>` : ''; if (msg.message_type === 'image' && msg.file_url) return `<img src="${esc(msg.file_url)}" loading="lazy">${text}`; if (msg.message_type === 'video' && msg.file_url) return `<video src="${esc(msg.file_url)}" controls preload="metadata"></video>${text}`; if (msg.message_type === 'audio' && msg.file_url) return `<audio src="${esc(msg.file_url)}" controls></audio>${text}`; if (msg.file_url) return `<a class="file" href="${esc(msg.file_url)}" target="_blank" rel="noopener noreferrer" download="${esc(msg.file_name || 'file')}"><span class="file-ico">↧</span><span>${esc(msg.file_name || 'Файл')}</span></a>${text}`; return text || '<span></span>'; }
 function scrollBottom(smooth) { const box = $('cv-msgs'); requestAnimationFrame(() => box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })); }
 function onReplyInput() { const txt = $('reply-txt'), send = $('reply-send'), cnt = $('reply-cnt'); if (!txt || !send) return; txt.style.height = 'auto'; txt.style.height = `${Math.min(txt.scrollHeight, 140)}px`; send.disabled = S.uploading || (!txt.value.trim() && !S.file); if (cnt) cnt.textContent = txt.value ? `${txt.value.length} симв.` : ''; socket.emit('admin_typing', { ticketId: S.current?.id }); }
 async function sendReply() {

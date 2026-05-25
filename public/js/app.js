@@ -277,16 +277,16 @@ function renderMsg(msg){
   if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock" data-reply-id="${esc(msg.reply_to_id)}"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
   if(msg.message_type==='image'&&msg.file_url){
     h+=`<img class="mimg" src="${esc(msg.file_url)}" loading="lazy" onclick="openLb(this)">`;
-    if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${esc(msg.content)}</div>`;
+    if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${linkify(msg.content)}</div>`;
   }else if(msg.message_type==='video'&&msg.file_url){
     h+=`<video class="mvid" src="${esc(msg.file_url)}" controls preload="metadata"></video>`;
-    if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${esc(msg.content)}</div>`;
+    if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${linkify(msg.content)}</div>`;
   }else if(msg.message_type==='audio'&&msg.file_url){
     h+=`<audio class="maud" src="${esc(msg.file_url)}" controls></audio>`;
   }else if(msg.file_url){
     h+=`<a class="mfile" href="${esc(msg.file_url)}" download="${esc(msg.file_name||'file')}" target="_blank" rel="noopener noreferrer"><div class="fic">${dico()}</div><div><div class="fnm">${esc(msg.file_name||'Файл')}</div></div></a>`;
-    if(msg.content)h+=`<div class="btxt" style="margin-top:4px">${esc(msg.content)}</div>`;
-  }else{h+=`<div class="btxt">${linkify(esc(msg.content||''))}</div>`}
+    if(msg.content)h+=`<div class="btxt" style="margin-top:4px">${linkify(msg.content)}</div>`;
+  }else{h+=`<div class="btxt">${linkify(msg.content||'')}</div>`}
   const tick=isO?`<svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="rgba(122,178,220,.6)" stroke-width="1.8" stroke-linecap="round"><path d="M1 5.5l3.5 3.5L14 1"/><path d="M6 9L14 1" opacity=".5"/></svg>`:'';
   h+=`<div class="bmeta">${tick}<span class="btime">${fmtTime(dt)}</span></div></div>`;
   w.innerHTML=h;ml.appendChild(w);
@@ -596,7 +596,27 @@ function showBrowserNotif(msg){
 
 /* ── UTILS ── */
 const esc=s=>s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):'';
-const linkify=t=>t.replace(/https?:\/\/[^\s<>"&]+/g,url=>`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+const LINK_RE=/\b((?:https?:\/\/|www\.)[^\s<>"']+|(?:vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|tg):\/\/[^\s<>"']+)/gi;
+function linkify(value){
+  const text=String(value??'');
+  let html='',last=0,match;
+  LINK_RE.lastIndex=0;
+  while((match=LINK_RE.exec(text))){
+    const raw=match[0];
+    html+=esc(text.slice(last,match.index));
+    let url=raw,tail='';
+    while(url&&/[.,!?;:)\]}]+$/.test(url)){tail=url.slice(-1)+tail;url=url.slice(0,-1)}
+    if(url){
+      const href=/^www\./i.test(url)?`https://${url}`:url;
+      html+=`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>${esc(tail)}`;
+    }else{
+      html+=esc(raw);
+    }
+    last=match.index+raw.length;
+  }
+  html+=esc(text.slice(last));
+  return html;
+}
 const fmtTime=d=>d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 function fmtDate(d){const n=new Date(),td=new Date(n.getFullYear(),n.getMonth(),n.getDate()),diff=Math.round((td-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000);if(diff===0)return'Сегодня';if(diff===1)return'Вчера';return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}
 function dico(){return`<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2" y="1" width="14" height="16" rx="2"/><path d="M5 6h8M5 9h8M5 12h5"/></svg>`}
