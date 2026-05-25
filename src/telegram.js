@@ -107,11 +107,19 @@ function startBot() {
   reconnectTimer = null;
   console.log('[TG] Starting...');
   try {
-    bot = new TelegramBot(TOKEN, { polling: { interval: 2000, autoStart: false, params: { timeout: 30 } } });
+    bot = new TelegramBot(TOKEN, {
+      polling: {
+        interval: 2000,
+        autoStart: false,
+        params: { timeout: 30, allowed_updates: ['message', 'callback_query', 'message_reaction', 'message_reaction_count'] }
+      }
+    });
     bot.on('polling_error', err => { if (connected) { connected = false; console.error('[TG] Lost:', err.message); } scheduleReconnect(); });
     bot.on('error', err => { console.error('[TG] Error:', err.message); scheduleReconnect(); });
     bot.on('message', async msg => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessage(msg); });
     bot.on('callback_query', async query => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleCallbackQuery(query); });
+    bot.on('message_reaction', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
+    bot.on('message_reaction_count', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
     bot.startPolling();
   } catch (e) {
     console.error('[TG] Failed to start:', e.message);
@@ -151,6 +159,48 @@ async function handleCallbackQuery(query) {
       await reopenTicketFromTelegram(ticket, topicId);
     }
   } catch (e) { console.error('[TG] handleCallbackQuery:', e.message); }
+}
+
+function reactionLabel(reaction) {
+  if (!reaction) return '';
+  if (reaction.type === 'emoji') return reaction.emoji || '';
+  if (reaction.type === 'custom_emoji') return '💠';
+  if (reaction.type === 'paid') return '⭐';
+  return '';
+}
+
+async function handleMessageReaction(update) {
+  try {
+    if (!tgEnabled()) return;
+    if (String(update.chat?.id) !== String(GROUP_ID)) return;
+    const msg = db.getMessageByTelegramId.get(update.message_id);
+    if (!msg) return;
+    const reactions = (update.new_reaction || []).map(reactionLabel).filter(Boolean);
+    const payload = JSON.stringify(reactions);
+    db.updateMessageReactions.run(payload, msg.id);
+    io?.to(`ticket:${msg.ticket_id}`).emit('message_reactions', { messageId: msg.id, reactions });
+    io?.to('admin').emit('admin_message_reactions', { ticketId: msg.ticket_id, messageId: msg.id, reactions });
+  } catch (e) { console.error('[TG] handleMessageReaction:', e.message); }
+}
+
+async function handleMessageReactionCount(update) {
+  try {
+    if (!tgEnabled()) return;
+    if (String(update.chat?.id) !== String(GROUP_ID)) return;
+    const msg = db.getMessageByTelegramId.get(update.message_id);
+    if (!msg) return;
+    const reactions = (update.reactions || [])
+      .map(item => {
+        const label = reactionLabel(item.type);
+        if (!label) return '';
+        return item.total_count > 1 ? `${label} ${item.total_count}` : label;
+      })
+      .filter(Boolean);
+    const payload = JSON.stringify(reactions);
+    db.updateMessageReactions.run(payload, msg.id);
+    io?.to(`ticket:${msg.ticket_id}`).emit('message_reactions', { messageId: msg.id, reactions });
+    io?.to('admin').emit('admin_message_reactions', { ticketId: msg.ticket_id, messageId: msg.id, reactions });
+  } catch (e) { console.error('[TG] handleMessageReactionCount:', e.message); }
 }
 
 function parseCmd(text) {

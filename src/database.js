@@ -51,6 +51,7 @@ db.exec(`
 // Migration: add reply_to_id column if not exists
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN is_auto INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '[]'`); } catch {}
 
 // Migrations: admin + topic tracking
 try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
@@ -164,6 +165,7 @@ module.exports = {
   getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
 
   updateTelegramMessageId: db.prepare(`UPDATE messages SET telegram_message_id = ? WHERE id = ?`),
+  updateMessageReactions: db.prepare(`UPDATE messages SET reactions = ? WHERE id = ?`),
 
   // Push subscriptions
   savePushSub: db.prepare(`INSERT OR REPLACE INTO push_subscriptions (id, ticket_id, subscription) VALUES (?, ?, ?)`),

@@ -31,13 +31,14 @@ socket.on('message',msg=>{
   saveMsgCache();
   if(b)scrollBot();
   else{S.unread++;updSDB()}
-  if(msg.sender==='support'){playNotifSound();showBrowserNotif(msg);}
+  if(msg.sender==='support'){hideSupportTyping();playNotifSound();showBrowserNotif(msg);}
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто','info')});
 socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';saveMsgCache();showToast('Обращение переоткрыто','ok')});
 socket.on('ticket_orphaned',()=>{markClosedNoReopen();showToast('Тема удалена — начните новый чат','err',5000);});
 socket.on('messages_read',()=>{/* support has opened the ticket */});
 socket.on('typing_support',()=>{showSupportTyping();});
+socket.on('message_reactions',({messageId,reactions})=>{applyMessageReactions(messageId,reactions);});
 socket.on('error',({message})=>{if(message==='Unauthorized'){clearS();clearMsgCache();showLogin();showToast('Сессия истекла — войдите снова','err');}});
 let _socketEverConnected=false;
 socket.on('connect',()=>{
@@ -262,6 +263,28 @@ function renderMsgs(msgs){
 }
 function renderEmpty(){const d=document.createElement('div');d.className='emp';d.innerHTML=`<svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M29 6C16.3 6 6 15.3 6 27c0 6.3 2.9 12 7.6 16L12 52l9.5-2.8A23.5 23.5 0 0029 52c12.7 0 23-9.3 23-21S41.7 6 29 6Z"/><circle cx="20" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="29" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="38" cy="28" r="2" fill="currentColor" stroke="none"/></svg><p>Напишите ваш первый вопрос — ответим быстро</p>`;ml.appendChild(d)}
 function renderSys(txt){ml.querySelector('.emp')?.remove();const d=document.createElement('div');d.className='sysmsg';d.innerHTML=`<span>${esc(txt)}</span>`;ml.appendChild(d)}
+function parseReactions(value){
+  if(!value)return[];
+  if(Array.isArray(value))return value.filter(Boolean);
+  try{
+    const parsed=JSON.parse(value);
+    return Array.isArray(parsed)?parsed.filter(Boolean):[];
+  }catch{return[]}
+}
+function reactionsHtml(msg){
+  const reactions=parseReactions(msg.reactions);
+  if(!reactions.length)return'';
+  return `<div class="rxns">${reactions.map(r=>`<span>${esc(r)}</span>`).join('')}</div>`;
+}
+function applyMessageReactions(messageId,reactions){
+  const msg=S._msgs.find(m=>m.id===messageId);
+  if(!msg)return;
+  msg.reactions=JSON.stringify(Array.isArray(reactions)?reactions:[]);
+  saveMsgCache();
+  const atBottom=isBot();
+  _doRender();
+  if(atBottom)scrollBot(false);
+}
 
 function renderMsg(msg){
   ml.querySelector('.emp')?.remove();
@@ -287,6 +310,7 @@ function renderMsg(msg){
     h+=`<a class="mfile" href="${esc(msg.file_url)}" download="${esc(msg.file_name||'file')}" target="_blank" rel="noopener noreferrer"><div class="fic">${dico()}</div><div><div class="fnm">${esc(msg.file_name||'Файл')}</div></div></a>`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:4px">${linkify(msg.content)}</div>`;
   }else{h+=`<div class="btxt">${linkify(msg.content||'')}</div>`}
+  h+=reactionsHtml(msg);
   const tick=isO?`<svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="rgba(122,178,220,.6)" stroke-width="1.8" stroke-linecap="round"><path d="M1 5.5l3.5 3.5L14 1"/><path d="M6 9L14 1" opacity=".5"/></svg>`:'';
   h+=`<div class="bmeta">${tick}<span class="btime">${fmtTime(dt)}</span></div></div>`;
   w.innerHTML=h;ml.appendChild(w);
@@ -530,6 +554,12 @@ function showSupportTyping(){
   bar.style.display='';
   clearTimeout(_typingHide);
   _typingHide=setTimeout(()=>{bar.style.display='none';},3000);
+}
+function hideSupportTyping(){
+  const bar=$('typing-bar');
+  if(!bar)return;
+  clearTimeout(_typingHide);
+  bar.style.display='none';
 }
 
 /* ── NOTIFICATIONS ── */
