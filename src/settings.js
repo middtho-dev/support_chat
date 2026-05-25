@@ -42,6 +42,10 @@ const DEFAULTS = {
   telegramClosedEmoji: '🗑️',
   telegramCloseButtonText: '🗑️ Закрыть тикет',
   telegramReopenButtonText: '🟢 Переоткрыть',
+  telegramCloseButtonStyle: 'danger',
+  telegramReopenButtonStyle: 'success',
+  telegramCloseButtonEmojiId: '',
+  telegramReopenButtonEmojiId: '',
   telegramNewTicketText: '🎫 *Новое обращение*\n👤 *{name}*\n🆔 `{shortId}`\n📅 {dateTime}',
   telegramClosedByUserText: '🗑️ Закрыто пользователем',
   telegramClosedBySupportText: '🔴 Тикет закрыт',
@@ -90,6 +94,10 @@ const KEY_MAP = {
   telegramClosedEmoji: 'telegram_closed_emoji',
   telegramCloseButtonText: 'telegram_close_button_text',
   telegramReopenButtonText: 'telegram_reopen_button_text',
+  telegramCloseButtonStyle: 'telegram_close_button_style',
+  telegramReopenButtonStyle: 'telegram_reopen_button_style',
+  telegramCloseButtonEmojiId: 'telegram_close_button_emoji_id',
+  telegramReopenButtonEmojiId: 'telegram_reopen_button_emoji_id',
   telegramNewTicketText: 'telegram_new_ticket_text',
   telegramClosedByUserText: 'telegram_closed_by_user_text',
   telegramClosedBySupportText: 'telegram_closed_by_support_text',
@@ -155,6 +163,11 @@ function normalize(input = {}) {
   if (cfg.offhoursRejectText === LEGACY_OFFHOURS_REJECT) cfg.offhoursRejectText = DEFAULTS.offhoursRejectText;
   cfg.inactivityWarningText = sanitizeText(cfg.inactivityWarningText, DEFAULTS.inactivityWarningText, 1000);
   cfg.inactivityCloseText = sanitizeText(cfg.inactivityCloseText, DEFAULTS.inactivityCloseText, 1000);
+  const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
+  cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
+  cfg.telegramReopenButtonStyle = allowedButtonStyles.has(cfg.telegramReopenButtonStyle) ? cfg.telegramReopenButtonStyle : DEFAULTS.telegramReopenButtonStyle;
+  cfg.telegramCloseButtonEmojiId = sanitizeText(cfg.telegramCloseButtonEmojiId, '', 128);
+  cfg.telegramReopenButtonEmojiId = sanitizeText(cfg.telegramReopenButtonEmojiId, '', 128);
 
   return cfg;
 }

@@ -19,8 +19,20 @@ const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 
 function cfg() { return loadSettings(); }
 function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID; }
-function kbClose(tid) { return { inline_keyboard: [[{ text: cfg().telegramCloseButtonText, callback_data: `close:${tid}` }]] }; }
-function kbReopen(tid) { return { inline_keyboard: [[{ text: cfg().telegramReopenButtonText, callback_data: `reopen:${tid}` }]] }; }
+function tgButton(text, callbackData, style, customEmojiId) {
+  const button = { text, callback_data: callbackData };
+  if (style) button.style = style;
+  if (customEmojiId) button.icon_custom_emoji_id = customEmojiId;
+  return button;
+}
+function kbClose(tid) {
+  const s = cfg();
+  return { inline_keyboard: [[tgButton(s.telegramCloseButtonText, `close:${tid}`, s.telegramCloseButtonStyle, s.telegramCloseButtonEmojiId)]] };
+}
+function kbReopen(tid) {
+  const s = cfg();
+  return { inline_keyboard: [[tgButton(s.telegramReopenButtonText, `reopen:${tid}`, s.telegramReopenButtonStyle, s.telegramReopenButtonEmojiId)]] };
+}
 function shortId(ticket) { return String(ticket?.id || '').slice(0, 8); }
 function mdEscape(value) { return String(value ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&'); }
 function values(ticket, extra = {}) {
