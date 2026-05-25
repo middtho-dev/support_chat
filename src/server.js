@@ -221,6 +221,7 @@ app.post('/api/tickets/:ticketId/close', (req, res) => {
   if (!sessionToken || ticket.session_token !== sessionToken) return res.status(403).json({ error: 'Forbidden' });
 
   db.closeTicket.run(ticket.id);
+  cancelOperatorWait(ticket.id);
   telegram.notifyTicketClosed(ticket).catch(e => console.error('[TG] notifyTicketClosed:', e?.message));
   io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'user' });
   io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
@@ -241,6 +242,7 @@ app.post('/api/tickets/:ticketId/reopen', async (req, res) => {
   } catch (e) {
     if (e.topicDeleted) {
       db.closeTicket.run(ticket.id);
+      cancelOperatorWait(ticket.id);
       io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'system' });
       io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
       return res.status(409).json({ error: 'Topic deleted' });
@@ -270,6 +272,7 @@ app.post('/api/push/subscribe', (req, res) => {
 const welcomeSent = new Set();
 const messageRates = new Map();
 const warnedTickets = new Set();
+const operatorWaitTimers = new Map();
 
 function isRateLimited(sessionToken) {
   const cfg = loadSettings();
@@ -286,28 +289,61 @@ function isRateLimited(sessionToken) {
 }
 setInterval(() => { const now = Date.now(); for (const [k, r] of messageRates) if (now > r.resetAt) messageRates.delete(k); }, 5 * 60 * 1000);
 
+function emitSupportAutoMessage(ticketId, content) {
+  const cfg = loadSettings();
+  const ticket = db.getTicketById.get(ticketId);
+  const text = String(content || '').trim();
+  if (!ticket || ticket.status === 'closed' || !text) return null;
+  const id = uuidv4();
+  const created_at = new Date().toISOString();
+  db.saveMessage.run(id, ticketId, 'support', cfg.supportName, text, 'text', null, null, null, null, null);
+  const message = {
+    id, ticket_id: ticketId, sender: 'support', sender_name: cfg.supportName,
+    content: text, message_type: 'text', file_url: null, file_name: null, file_mime: null, created_at
+  };
+  io.to(`ticket:${ticketId}`).emit('message', message);
+  io.to('admin').emit('admin_new_message', { ticketId, message });
+  broadcastAdminTickets();
+  return message;
+}
+
+function cancelOperatorWait(ticketId) {
+  const timer = operatorWaitTimers.get(ticketId);
+  if (timer) clearTimeout(timer);
+  operatorWaitTimers.delete(ticketId);
+}
+
+function scheduleOperatorWaitMessage(ticketId, afterMessageId) {
+  cancelOperatorWait(ticketId);
+  const cfg = loadSettings();
+  if (!cfg.operatorWaitEnabled || !String(cfg.operatorWaitText || '').trim()) return;
+  const timer = setTimeout(() => {
+    operatorWaitTimers.delete(ticketId);
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket || ticket.status === 'closed') return;
+    const messages = db.getMessages.all(ticketId);
+    const userMsgIndex = messages.findIndex(message => message.id === afterMessageId);
+    if (userMsgIndex < 0) return;
+    const supportAnswered = messages.slice(userMsgIndex + 1).some(message => message.sender === 'support');
+    if (supportAnswered) return;
+    emitSupportAutoMessage(ticketId, loadSettings().operatorWaitText);
+  }, cfg.operatorWaitDelayMs);
+  operatorWaitTimers.set(ticketId, timer);
+}
+
 function scheduleWelcomeMessages(ticketId) {
   const cfg = loadSettings();
   if (!cfg.welcomeEnabled || welcomeSent.has(ticketId)) return;
   if (db.getMessages.all(ticketId).length > 0) return;
   welcomeSent.add(ticketId);
 
-  const sendMsg = (content, delayMs) => setTimeout(() => {
-    const freshCfg = loadSettings();
-    const ticket = db.getTicketById.get(ticketId);
-    const text = String(content || '').trim();
-    if (!ticket || ticket.status === 'closed' || !text) return;
-    const id = uuidv4();
-    const created_at = new Date().toISOString();
-    db.saveMessage.run(id, ticketId, 'support', freshCfg.supportName, text, 'text', null, null, null, null, null);
-    io.to(`ticket:${ticketId}`).emit('message', {
-      id, ticket_id: ticketId, sender: 'support', sender_name: freshCfg.supportName,
-      content: text, message_type: 'text', file_url: null, file_name: null, file_mime: null, created_at
-    });
-  }, delayMs);
-
-  sendMsg(cfg.welcomeText1, cfg.welcomeDelayFirstMs);
-  sendMsg(cfg.welcomeText2, cfg.welcomeDelaySecondMs);
+  const sendMsg = (content, delayMs) => setTimeout(() => emitSupportAutoMessage(ticketId, content), delayMs);
+  const messages = [
+    [cfg.welcomeText1Enabled, cfg.welcomeText1, cfg.welcomeDelayFirstMs],
+    [cfg.welcomeText2Enabled, cfg.welcomeText2, cfg.welcomeDelaySecondMs],
+    [cfg.welcomeText3Enabled, cfg.welcomeText3, cfg.welcomeDelayThirdMs]
+  ];
+  messages.forEach(([enabled, content, delayMs]) => { if (enabled) sendMsg(content, delayMs); });
 }
 
 function broadcastAdminTickets() { io.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all()); }
@@ -326,6 +362,7 @@ io.on('connection', (socket) => {
       telegram.checkTopicAlive(ticket).then(alive => {
         if (alive) return;
         db.closeTicket.run(ticketId);
+        cancelOperatorWait(ticketId);
         io.to(`ticket:${ticketId}`).emit('ticket_orphaned');
         io.to('admin').emit('admin_ticket_status', { ticketId, status: 'closed' });
         broadcastAdminTickets();
@@ -379,6 +416,7 @@ io.on('connection', (socket) => {
       io.to(`ticket:${ticketId}`).emit('message', message);
       io.to('admin').emit('admin_new_message', { ticketId, message });
       broadcastAdminTickets();
+      scheduleOperatorWaitMessage(ticketId, msgId);
       telegram.forwardMessage(ticket, message).catch(e => console.error('[TG] forwardMessage:', e?.message));
       ack?.({ ok: true, id: msgId });
     } catch (err) {
@@ -459,6 +497,7 @@ io.on('connection', (socket) => {
     };
     io.to(`ticket:${ticketId}`).emit('message', message);
     io.to('admin').emit('admin_new_message', { ticketId, message });
+    cancelOperatorWait(ticketId);
     broadcastAdminTickets();
     push.send(ticketId, text || fileName || 'Новое сообщение').catch(() => {});
     telegram.forwardMessage(db.getTicketById.get(ticketId), message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
@@ -474,6 +513,7 @@ io.on('connection', (socket) => {
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket || ticket.status === 'closed') return;
     db.closeTicket.run(ticket.id);
+    cancelOperatorWait(ticketId);
     io.to(`ticket:${ticketId}`).emit('ticket_closed', { by: 'support' });
     io.to('admin').emit('admin_ticket_status', { ticketId, status: 'closed' });
     broadcastAdminTickets();
@@ -491,6 +531,7 @@ io.on('connection', (socket) => {
     } catch (e) {
       if (e.topicDeleted) {
         db.closeTicket.run(ticket.id);
+        cancelOperatorWait(ticket.id);
         socket.emit('admin_error', { message: loadSettings().telegramTopicDeletedAdminText });
         return broadcastAdminTickets();
       }
@@ -550,6 +591,7 @@ async function inactivityCheck() {
     const stale = staleTicketsQuery.all(closeCutoff);
     for (const ticket of stale) {
       db.closeTicket.run(ticket.id);
+      cancelOperatorWait(ticket.id);
       warnedTickets.delete(ticket.id);
       const msgId = uuidv4();
       const created_at = new Date().toISOString();

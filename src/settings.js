@@ -10,10 +10,19 @@ const DEFAULTS = {
 
   supportName: 'Поддержка KV9RU',
   welcomeEnabled: true,
+  welcomeText1Enabled: true,
+  welcomeText2Enabled: true,
+  welcomeText3Enabled: false,
   welcomeDelayFirstMs: 1200,
   welcomeDelaySecondMs: 2800,
+  welcomeDelayThirdMs: 6500,
   welcomeText1: 'Добро пожаловать в службу поддержки KV9RU! 👋',
   welcomeText2: 'Чтобы мы могли быстрее разобраться и решить вашу проблему — пожалуйста, прикрепите скриншот из приложения VPN и опишите проблему максимально подробно 📸',
+  welcomeText3: 'Если уже отправили детали — спасибо, оператор скоро подключится к диалогу.',
+
+  operatorWaitEnabled: true,
+  operatorWaitDelayMs: 180000,
+  operatorWaitText: 'Я уже зову оператора на помощь. Ответ может занять чуть больше времени, но мы обязательно вернемся к вам в этом чате.',
 
   messageRateLimitPerMinute: 20,
   uploadMaxMb: 50,
@@ -65,10 +74,18 @@ const KEY_MAP = {
   offhoursRejectText: 'offhours_reject_text',
   supportName: 'support_name',
   welcomeEnabled: 'welcome_enabled',
+  welcomeText1Enabled: 'welcome_text_1_enabled',
+  welcomeText2Enabled: 'welcome_text_2_enabled',
+  welcomeText3Enabled: 'welcome_text_3_enabled',
   welcomeDelayFirstMs: 'welcome_delay_first_ms',
   welcomeDelaySecondMs: 'welcome_delay_second_ms',
+  welcomeDelayThirdMs: 'welcome_delay_third_ms',
   welcomeText1: 'welcome_text_1',
   welcomeText2: 'welcome_text_2',
+  welcomeText3: 'welcome_text_3',
+  operatorWaitEnabled: 'operator_wait_enabled',
+  operatorWaitDelayMs: 'operator_wait_delay_ms',
+  operatorWaitText: 'operator_wait_text',
   messageRateLimitPerMinute: 'message_rate_limit_per_minute',
   uploadMaxMb: 'upload_max_mb',
   inactivityEnabled: 'inactivity_enabled',
@@ -148,6 +165,8 @@ function normalize(input = {}) {
   cfg.workEndHour = clamp(cfg.workEndHour, 1, 24, DEFAULTS.workEndHour);
   cfg.welcomeDelayFirstMs = clamp(cfg.welcomeDelayFirstMs, 0, 30000, DEFAULTS.welcomeDelayFirstMs);
   cfg.welcomeDelaySecondMs = clamp(cfg.welcomeDelaySecondMs, 0, 60000, DEFAULTS.welcomeDelaySecondMs);
+  cfg.welcomeDelayThirdMs = clamp(cfg.welcomeDelayThirdMs, 0, 120000, DEFAULTS.welcomeDelayThirdMs);
+  cfg.operatorWaitDelayMs = clamp(cfg.operatorWaitDelayMs, 10000, 3600000, DEFAULTS.operatorWaitDelayMs);
   cfg.messageRateLimitPerMinute = clamp(cfg.messageRateLimitPerMinute, 1, 300, DEFAULTS.messageRateLimitPerMinute);
   cfg.uploadMaxMb = clamp(cfg.uploadMaxMb, 1, 50, DEFAULTS.uploadMaxMb);
   cfg.inactivityWarnMinutes = clamp(cfg.inactivityWarnMinutes, 1, 1440, DEFAULTS.inactivityWarnMinutes);
@@ -157,6 +176,8 @@ function normalize(input = {}) {
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
   cfg.welcomeText2 = sanitizeText(cfg.welcomeText2, DEFAULTS.welcomeText2, 1500);
+  cfg.welcomeText3 = sanitizeText(cfg.welcomeText3, DEFAULTS.welcomeText3, 1500);
+  cfg.operatorWaitText = sanitizeText(cfg.operatorWaitText, DEFAULTS.operatorWaitText, 1500);
   cfg.offhoursBannerText = sanitizeText(cfg.offhoursBannerText, DEFAULTS.offhoursBannerText, 1000);
   cfg.offhoursRejectText = sanitizeText(cfg.offhoursRejectText, DEFAULTS.offhoursRejectText, 1000);
   if (cfg.offhoursBannerText === LEGACY_OFFHOURS_BANNER) cfg.offhoursBannerText = DEFAULTS.offhoursBannerText;
