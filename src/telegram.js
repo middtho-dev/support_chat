@@ -16,9 +16,17 @@ let reconnectTimer = null;
 let connected = false;
 const topicStatus = new Map();
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+let cleanupTimer = null;
 
 function cfg() { return loadSettings(); }
 function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID; }
+function scheduleCleanupOldTopics(delayMs = 10000) {
+  clearTimeout(cleanupTimer);
+  cleanupTimer = setTimeout(() => {
+    cleanupTimer = null;
+    cleanupOldTopics().catch(() => {});
+  }, delayMs);
+}
 function tgButton(text, callbackData, style, customEmojiId) {
   const button = { text, callback_data: callbackData };
   if (style) button.style = style;
@@ -89,6 +97,7 @@ function init(socketIo) {
     return null;
   }
   startBot();
+  setTimeout(cleanupOldTopics, 15000);
   setInterval(cleanupOldTopics, 60 * 60 * 1000);
   return bot;
 }
@@ -220,6 +229,7 @@ async function handleMessage(msg) {
       reply_to_content: replyToContent || null, reply_to_sender_name: replyToSenderName || null,
       reply_to_type: replyToType || null, reply_to_file_name: replyToFileName || null
     });
+    await setTopicStatus(topicId, ticket, s.telegramOpenEmoji);
     push.send(ticket.id, rawText || 'Новое сообщение').catch(() => {});
   } catch (e) { console.error('[TG] handleMessage:', e.message); }
 }
@@ -232,6 +242,7 @@ async function closeTicketFromTelegram(ticket, topicId) {
   await setTopicStatus(topicId, ticket, s.telegramClosedEmoji);
   await safeSend(GROUP_ID, s.telegramClosedBySupportText, { message_thread_id: topicId, reply_markup: kbReopen(topicId) });
   if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, topicId).catch(() => {});
+  if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
 }
 
 async function reopenTicketFromTelegram(ticket, topicId) {
@@ -362,6 +373,7 @@ async function notifyTicketClosed(ticket) {
     await setTopicStatus(tid, ticket, s.telegramClosedEmoji);
     await safeSend(GROUP_ID, s.telegramClosedByUserText, { message_thread_id: tid, reply_markup: kbReopen(tid) });
     if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, tid).catch(() => {});
+    if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
   } catch (e) { console.error('[TG] notifyTicketClosed:', e.message); }
 }
 
@@ -396,6 +408,7 @@ async function autoCloseTicket(ticket, extra = {}) {
     await setTopicStatus(tid, ticket, s.telegramClosedEmoji);
     await safeSend(GROUP_ID, formatTemplate(s.telegramAutoCloseText, { ...values(ticket), ...extra }), { message_thread_id: tid, reply_markup: kbReopen(tid) });
     if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, tid).catch(() => {});
+    if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
   } catch (e) { console.error('[TG] autoCloseTicket:', e.message); }
 }
 
@@ -430,15 +443,23 @@ async function cleanupOldTopics() {
   const s = cfg();
   if (!tgEnabled() || !s.telegramCleanupClosedTopics) return;
   try {
-    const cutoff = new Date(Date.now() - s.telegramCleanupClosedHours * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - s.telegramCleanupClosedHours * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
     const rows = db.db.prepare(`SELECT * FROM tickets WHERE status='closed' AND closed_at < ? AND telegram_topic_id IS NOT NULL`).all(cutoff);
     for (const t of rows) {
       try {
         await bot.deleteForumTopic(GROUP_ID, t.telegram_topic_id);
-        db.db.prepare(`UPDATE tickets SET telegram_topic_id=NULL WHERE id=?`).run(t.id);
+        db.markTopicDeleted.run(t.id);
         topicStatus.delete(t.telegram_topic_id);
         console.log(`[TG] Cleaned topic ${shortId(t)}`);
-      } catch {}
+      } catch (e) {
+        if (isThreadNotFound(e)) {
+          db.markTopicDeleted.run(t.id);
+          topicStatus.delete(t.telegram_topic_id);
+          console.log(`[TG] Topic already gone ${shortId(t)}`);
+        } else {
+          console.error(`[TG] cleanup topic ${shortId(t)}:`, e.message);
+        }
+      }
       await new Promise(r => setTimeout(r, 600));
     }
   } catch (e) { console.error('[TG] cleanup:', e.message); }

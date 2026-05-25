@@ -50,6 +50,7 @@ db.exec(`
 
 // Migration: add reply_to_id column if not exists
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN is_auto INTEGER DEFAULT 0`); } catch {}
 
 // Migrations: admin + topic tracking
 try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
@@ -111,6 +112,11 @@ module.exports = {
     INSERT INTO messages
       (id, ticket_id, sender, sender_name, content, message_type, file_url, file_name, file_mime, telegram_message_id, reply_to_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  saveAutoMessage: db.prepare(`
+    INSERT INTO messages
+      (id, ticket_id, sender, sender_name, content, message_type, file_url, file_name, file_mime, telegram_message_id, reply_to_id, is_auto)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
   `),
 
   // JOIN to bring reply content alongside each message

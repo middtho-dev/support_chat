@@ -296,7 +296,7 @@ function emitSupportAutoMessage(ticketId, content) {
   if (!ticket || ticket.status === 'closed' || !text) return null;
   const id = uuidv4();
   const created_at = new Date().toISOString();
-  db.saveMessage.run(id, ticketId, 'support', cfg.supportName, text, 'text', null, null, null, null, null);
+  db.saveAutoMessage.run(id, ticketId, 'support', cfg.supportName, text, 'text', null, null, null, null, null);
   const message = {
     id, ticket_id: ticketId, sender: 'support', sender_name: cfg.supportName,
     content: text, message_type: 'text', file_url: null, file_name: null, file_mime: null, created_at
@@ -324,7 +324,7 @@ function scheduleOperatorWaitMessage(ticketId, afterMessageId) {
     const messages = db.getMessages.all(ticketId);
     const userMsgIndex = messages.findIndex(message => message.id === afterMessageId);
     if (userMsgIndex < 0) return;
-    const supportAnswered = messages.slice(userMsgIndex + 1).some(message => message.sender === 'support');
+    const supportAnswered = messages.slice(userMsgIndex + 1).some(message => message.sender === 'support' && !message.is_auto);
     if (supportAnswered) return;
     emitSupportAutoMessage(ticketId, loadSettings().operatorWaitText);
   }, cfg.operatorWaitDelayMs);
@@ -544,25 +544,29 @@ io.on('connection', (socket) => {
 
 const staleTicketsQuery = db.db.prepare(`
   SELECT t.* FROM tickets t
-  LEFT JOIN (
-    SELECT ticket_id, MAX(created_at) AS last_msg
-    FROM messages WHERE sender != 'system'
-    GROUP BY ticket_id
-  ) m ON m.ticket_id = t.id
+  JOIN messages m ON m.id = (
+    SELECT id FROM messages
+    WHERE ticket_id = t.id AND sender != 'system' AND COALESCE(is_auto, 0) = 0
+    ORDER BY created_at DESC LIMIT 1
+  )
   WHERE t.status = 'open'
-  AND COALESCE(m.last_msg, t.created_at) < datetime('now', ?)
+  AND m.sender = 'support'
+  AND m.created_at < datetime('now', ?)
+  AND EXISTS (SELECT 1 FROM messages u WHERE u.ticket_id = t.id AND u.sender = 'user')
 `);
 
 const warnTicketsQuery = db.db.prepare(`
   SELECT t.* FROM tickets t
-  LEFT JOIN (
-    SELECT ticket_id, MAX(created_at) AS last_msg
-    FROM messages WHERE sender != 'system'
-    GROUP BY ticket_id
-  ) m ON m.ticket_id = t.id
+  JOIN messages m ON m.id = (
+    SELECT id FROM messages
+    WHERE ticket_id = t.id AND sender != 'system' AND COALESCE(is_auto, 0) = 0
+    ORDER BY created_at DESC LIMIT 1
+  )
   WHERE t.status = 'open'
-  AND COALESCE(m.last_msg, t.created_at) < datetime('now', ?)
-  AND COALESCE(m.last_msg, t.created_at) >= datetime('now', ?)
+  AND m.sender = 'support'
+  AND m.created_at < datetime('now', ?)
+  AND m.created_at >= datetime('now', ?)
+  AND EXISTS (SELECT 1 FROM messages u WHERE u.ticket_id = t.id AND u.sender = 'user')
 `);
 
 let _inactivityRunning = false;

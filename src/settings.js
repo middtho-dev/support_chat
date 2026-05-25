@@ -171,7 +171,7 @@ function normalize(input = {}) {
   cfg.uploadMaxMb = clamp(cfg.uploadMaxMb, 1, 50, DEFAULTS.uploadMaxMb);
   cfg.inactivityWarnMinutes = clamp(cfg.inactivityWarnMinutes, 1, 1440, DEFAULTS.inactivityWarnMinutes);
   cfg.inactivityCloseMinutes = clamp(cfg.inactivityCloseMinutes, cfg.inactivityWarnMinutes + 1, 2880, DEFAULTS.inactivityCloseMinutes);
-  cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 1, 720, DEFAULTS.telegramCleanupClosedHours);
+  cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
