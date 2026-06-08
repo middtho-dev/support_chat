@@ -10,6 +10,7 @@ const { loadSettings, formatTemplate } = require('./settings');
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const GROUP_ID = process.env.TELEGRAM_GROUP_ID;
 const WEBAPP_URL = adminWebAppUrl();
+const TELEGRAM_ADMIN_IDS = new Set(String(process.env.TELEGRAM_ADMIN_IDS || '').split(',').map(v => v.trim()).filter(Boolean));
 
 let bot = null;
 let io = null;
@@ -81,16 +82,35 @@ function adminWebAppUrl() {
   return `${String(base).replace(/\/+$/, '')}/admin?tg=1`;
 }
 
+function adminWebAppUrlWithCacheBust() {
+  if (!WEBAPP_URL) return '';
+  const separator = WEBAPP_URL.includes('?') ? '&' : '?';
+  return `${WEBAPP_URL}${separator}v=${Date.now().toString(36)}`;
+}
+
+function canOpenAdminWebApp(userId) {
+  return TELEGRAM_ADMIN_IDS.size > 0 && TELEGRAM_ADMIN_IDS.has(String(userId || ''));
+}
+
 function adminWebAppKeyboard() {
   if (!WEBAPP_URL) return null;
   return {
     inline_keyboard: [[
-      { text: 'Открыть админку', web_app: { url: WEBAPP_URL } }
+      { text: 'Открыть админку', web_app: { url: adminWebAppUrlWithCacheBust() } }
     ]]
   };
 }
 
-async function announceAdminWebApp(topicId = null) {
+async function announceAdminWebApp(topicId = null, from = null) {
+  if (!canOpenAdminWebApp(from?.id)) {
+    return safeSend(
+      GROUP_ID,
+      TELEGRAM_ADMIN_IDS.size
+        ? 'Нет доступа к админке.'
+        : 'Mini App закрыт: укажите TELEGRAM_ADMIN_IDS в .env.',
+      topicId ? { message_thread_id: topicId } : {}
+    );
+  }
   if (!WEBAPP_URL) {
     return safeSend(
       GROUP_ID,
@@ -180,7 +200,7 @@ async function configureAdminWebApp() {
     { command: 'reopen', description: 'Переоткрыть тикет в текущей теме' }
   ]).catch(() => {});
   await bot.setChatMenuButton({
-    menu_button: { type: 'web_app', text: 'Админка', web_app: { url: WEBAPP_URL } }
+    menu_button: { type: 'web_app', text: 'Админка', web_app: { url: adminWebAppUrlWithCacheBust() } }
   }).catch(() => {});
   console.log(`[TG] Admin Mini App: ${WEBAPP_URL}`);
 }
@@ -210,6 +230,7 @@ function status() {
     connected,
     miniAppConfigured: !!WEBAPP_URL,
     miniAppUrl: WEBAPP_URL || null,
+    miniAppAllowedAdmins: TELEGRAM_ADMIN_IDS.size,
     pendingTopicCreates: creatingTopics.size,
     openTicketsWithoutTopic
   };
@@ -295,7 +316,7 @@ async function handleMessage(msg) {
     const rootCmd = parseCmd(msg.text || msg.caption || null);
 
     if (rootCmd === '/admin') {
-      await announceAdminWebApp(topicId || null);
+      await announceAdminWebApp(topicId || null, msg.from);
       return;
     }
 

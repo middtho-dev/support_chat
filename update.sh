@@ -29,6 +29,7 @@ set +a
 [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
 [ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
 [ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
+[ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
 info "Проверяю docker-compose.yml и .env..."
 docker compose config >/dev/null
@@ -49,6 +50,7 @@ set +a
 [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
 [ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
 [ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
+[ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
 info "Останавливаю контейнер..."
 docker compose down --remove-orphans

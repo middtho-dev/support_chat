@@ -49,20 +49,41 @@ let toastTimer;
 function toast(text, type = 'info') { const el = $('toast'); clearTimeout(toastTimer); el.textContent = text; el.style.borderColor = type === 'err' ? 'rgba(251,113,133,.45)' : type === 'ok' ? 'rgba(52,211,153,.45)' : ''; el.classList.add('on'); toastTimer = setTimeout(() => el.classList.remove('on'), 2800); }
 function setConn(state) { $('cdot').className = `dot ${state}`; $('ctxt').textContent = state === 'on' ? 'онлайн' : state === 'off' ? 'нет соединения' : 'подключение'; }
 
-function init() {
+async function init() {
   initTelegramMiniApp();
   bindStaticUi();
   renderSettings();
   renderTemplates();
+  setInterval(renderRelativeTimes, 30000);
+  if (IS_TG_MINI) {
+    sessionStorage.removeItem('admin_token');
+    clearMiniAppCache();
+    await loginWithTelegram();
+    return;
+  }
   const saved = sessionStorage.getItem('admin_token');
   if (saved) { S.token = saved; setConn(''); socket.connect(); }
   else setTimeout(() => $('tok')?.focus(), 100);
-  setInterval(renderRelativeTimes, 30000);
+}
+
+function clearMiniAppCache() {
+  if (!('caches' in window)) return;
+  caches.keys()
+    .then(keys => Promise.all(keys.map(key => caches.delete(key))))
+    .catch(() => {});
 }
 
 function initTelegramMiniApp() {
   if (!IS_TG_MINI) return;
   document.body.classList.add('tg-mini');
+  document.title = 'Админка';
+  document.querySelector('.auth-card h1').textContent = 'Админка';
+  document.querySelector('.auth-card p').textContent = 'Вход только через ваш Telegram';
+  document.querySelector('.top h1').textContent = 'Админка';
+  document.querySelector('.top .brand p').textContent = 'Telegram Mini App';
+  $('tok').style.display = 'none';
+  $('lbtn').style.display = 'none';
+  $('lerr').textContent = 'Проверяю Telegram-доступ...';
   document.documentElement.style.setProperty('color-scheme', 'dark');
   if (!TG) return;
 
@@ -72,6 +93,32 @@ function initTelegramMiniApp() {
   applyTelegramTheme();
   TG.onEvent?.('themeChanged', applyTelegramTheme);
   TG.BackButton?.onClick(handleTelegramBack);
+}
+
+async function loginWithTelegram() {
+  if (!TG?.initData) {
+    $('lerr').textContent = 'Откройте админку через Telegram Mini App.';
+    return;
+  }
+  try {
+    const response = await fetch('/api/admin/telegram-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ initData: TG.initData })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.adminSessionToken) {
+      throw new Error(data.error || 'Нет доступа');
+    }
+    S.token = data.adminSessionToken;
+    $('lerr').textContent = '';
+    setConn('');
+    socket.connect();
+  } catch (error) {
+    TG?.HapticFeedback?.notificationOccurred?.('error');
+    $('lerr').textContent = error.message || 'Не удалось войти через Telegram';
+    setConn('off');
+  }
 }
 
 function applyTelegramTheme() {

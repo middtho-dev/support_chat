@@ -23,6 +23,8 @@ telegram.init(io);
 push.init();
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const TELEGRAM_ADMIN_IDS = new Set(String(process.env.TELEGRAM_ADMIN_IDS || '').split(',').map(v => v.trim()).filter(Boolean));
+const miniAdminSessions = new Map();
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -87,7 +89,46 @@ function safeEqualString(a, b) {
 }
 
 function isAdminToken(token) {
-  return !!ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN);
+  if (!token || typeof token !== 'string') return false;
+  if (ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) return true;
+  const session = miniAdminSessions.get(token);
+  if (!session) return false;
+  if (session.expiresAt < Date.now()) {
+    miniAdminSessions.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function cleanupMiniAdminSessions() {
+  const now = Date.now();
+  for (const [token, session] of miniAdminSessions) {
+    if (session.expiresAt < now) miniAdminSessions.delete(token);
+  }
+}
+setInterval(cleanupMiniAdminSessions, 10 * 60 * 1000);
+
+function verifyTelegramInitData(initData) {
+  if (!process.env.TELEGRAM_BOT_TOKEN || !initData || typeof initData !== 'string') return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
+  if (!hash) return null;
+  params.delete('hash');
+  const dataCheckString = [...params.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(process.env.TELEGRAM_BOT_TOKEN).digest();
+  const expected = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+  if (!safeEqualString(hash, expected)) return null;
+  const authDate = Number(params.get('auth_date') || 0);
+  if (!authDate || Date.now() / 1000 - authDate > 24 * 60 * 60) return null;
+  try {
+    const user = JSON.parse(params.get('user') || '{}');
+    return user && user.id ? user : null;
+  } catch {
+    return null;
+  }
 }
 
 function isAdminRequest(req) {
@@ -128,9 +169,30 @@ app.get('/favicon.ico', (req, res) => {
 
 app.get('/admin', (req, res) => {
   if (!ADMIN_TOKEN) return res.status(503).send('<h1>Admin panel disabled</h1><p>Set ADMIN_TOKEN in .env to enable.</p>');
-  res.sendFile(path.join(__dirname, '../public/admin.html'));
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  const htmlPath = path.join(__dirname, '../public/admin.html');
+  fs.readFile(htmlPath, 'utf8', (err, html) => {
+    if (err) return res.sendFile(htmlPath);
+    const v = Date.now().toString(36);
+    res.type('html').send(html
+      .replace('/js/admin-enhance.js', `/js/admin-enhance.js?v=${v}`)
+      .replace('/js/admin.js', `/js/admin.js?v=${v}`));
+  });
 });
 app.use(express.static(path.join(__dirname, '../public')));
+
+app.post('/api/admin/telegram-auth', (req, res) => {
+  const user = verifyTelegramInitData(req.body?.initData);
+  if (!user) return res.status(401).json({ error: 'Telegram auth failed' });
+  if (!TELEGRAM_ADMIN_IDS.size) return res.status(403).json({ error: 'TELEGRAM_ADMIN_IDS is not configured' });
+  if (!TELEGRAM_ADMIN_IDS.has(String(user.id))) return res.status(403).json({ error: 'Access denied' });
+  cleanupMiniAdminSessions();
+  const token = uuidv4();
+  miniAdminSessions.set(token, { userId: String(user.id), expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
+  res.json({ adminSessionToken: token, user: { id: user.id, first_name: user.first_name || '', username: user.username || '' } });
+});
 
 function isWithinWorkHours(cfg = loadSettings()) {
   let hour;
