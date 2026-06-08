@@ -79,7 +79,7 @@ function adminWebAppUrl() {
   if (explicit) return explicit;
   const base = process.env.PUBLIC_URL || process.env.APP_URL || process.env.BASE_URL;
   if (!base) return '';
-  return `${String(base).replace(/\/+$/, '')}/admin?tg=1`;
+  return `${String(base).replace(/\/+$/, '')}/miniapp`;
 }
 
 function adminWebAppUrlWithCacheBust() {

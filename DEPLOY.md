@@ -18,7 +18,7 @@ For Telegram Mini App admin access, set one of these:
 PUBLIC_URL=https://your-domain.example
 TELEGRAM_ADMIN_IDS=123456789
 # or, if the admin panel has a custom URL:
-TELEGRAM_WEBAPP_URL=https://your-domain.example/admin?tg=1
+TELEGRAM_WEBAPP_URL=https://your-domain.example/miniapp
 ```
 
 `TELEGRAM_ADMIN_IDS` is a comma-separated list of Telegram user IDs allowed to open the admin Mini App. Get your ID from @userinfobot. After restart, `/admin` in the Telegram support group opens the admin panel as a Mini App button only for allowed users.

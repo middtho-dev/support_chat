@@ -13,6 +13,17 @@
 <title>Поддержка</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(() => {
+  const tg = window.Telegram?.WebApp;
+  const params = new URLSearchParams(location.search);
+  const start = tg?.initDataUnsafe?.start_param || params.get('startapp') || params.get('start_param');
+  if (start === 'admin' || params.get('admin') === '1') {
+    location.replace(`/miniapp?v=${Date.now().toString(36)}`);
+  }
+})();
+</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#050914;--panel:rgba(10,17,29,.72);--panel2:rgba(18,29,47,.78);--stroke:rgba(226,232,240,.13);--stroke2:rgba(125,211,252,.28);--text:#f4f8fc;--muted:#9aa8ba;--soft:#c7d2df;--blue:#22d3ee;--blue2:#2563eb;--green:#34d399;--red:#fb7185;--shadow:0 24px 90px rgba(0,0,0,.48)}

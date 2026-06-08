@@ -167,6 +167,11 @@ app.get('/favicon.ico', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/logo.png'));
 });
 
+app.get(['/miniapp', '/tg-admin'], (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.redirect(302, `/admin?tg=1&v=${Date.now().toString(36)}`);
+});
+
 app.get('/admin', (req, res) => {
   if (!ADMIN_TOKEN) return res.status(503).send('<h1>Admin panel disabled</h1><p>Set ADMIN_TOKEN in .env to enable.</p>');
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
