@@ -37,6 +37,9 @@ log "Конфигурация Docker Compose корректна"
 if [ -z "${VAPID_PUBLIC_KEY:-}" ] || [ -z "${VAPID_PRIVATE_KEY:-}" ]; then
   warn "VAPID ключи не заданы в .env — приложение сохранит их в Docker volume автоматически"
 fi
+if [ -z "${PUBLIC_URL:-}" ] && [ -z "${TELEGRAM_WEBAPP_URL:-}" ]; then
+  warn "PUBLIC_URL/TELEGRAM_WEBAPP_URL не заданы — Telegram Mini App для админки не будет настроен"
+fi
 
 # Проверка обязательных переменных
 set -a

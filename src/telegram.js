@@ -9,6 +9,7 @@ const { loadSettings, formatTemplate } = require('./settings');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const GROUP_ID = process.env.TELEGRAM_GROUP_ID;
+const WEBAPP_URL = adminWebAppUrl();
 
 let bot = null;
 let io = null;
@@ -72,6 +73,38 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function adminWebAppUrl() {
+  const explicit = process.env.TELEGRAM_WEBAPP_URL || process.env.ADMIN_WEBAPP_URL;
+  if (explicit) return explicit;
+  const base = process.env.PUBLIC_URL || process.env.APP_URL || process.env.BASE_URL;
+  if (!base) return '';
+  return `${String(base).replace(/\/+$/, '')}/admin?tg=1`;
+}
+
+function adminWebAppKeyboard() {
+  if (!WEBAPP_URL) return null;
+  return {
+    inline_keyboard: [[
+      { text: 'Открыть админку', web_app: { url: WEBAPP_URL } }
+    ]]
+  };
+}
+
+async function announceAdminWebApp(topicId = null) {
+  if (!WEBAPP_URL) {
+    return safeSend(
+      GROUP_ID,
+      'Mini App не настроен. Укажите TELEGRAM_WEBAPP_URL или PUBLIC_URL в .env и перезапустите приложение.',
+      topicId ? { message_thread_id: topicId } : {}
+    );
+  }
+  return safeSend(
+    GROUP_ID,
+    'Админка доступна как Telegram Mini App.',
+    { ...(topicId ? { message_thread_id: topicId } : {}), reply_markup: adminWebAppKeyboard() }
+  );
+}
+
 function publicUploadPath(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.startsWith('/uploads/')) return null;
   let relative;
@@ -132,10 +165,24 @@ function startBot() {
     bot.on('message_reaction', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
     bot.on('message_reaction_count', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
     bot.startPolling();
+    configureAdminWebApp().catch(e => console.error('[TG] Mini App setup:', e.message));
   } catch (e) {
     console.error('[TG] Failed to start:', e.message);
     scheduleReconnect();
   }
+}
+
+async function configureAdminWebApp() {
+  if (!bot || !WEBAPP_URL) return;
+  await bot.setMyCommands([
+    { command: 'admin', description: 'Открыть админку' },
+    { command: 'close', description: 'Закрыть тикет в текущей теме' },
+    { command: 'reopen', description: 'Переоткрыть тикет в текущей теме' }
+  ]).catch(() => {});
+  await bot.setChatMenuButton({
+    menu_button: { type: 'web_app', text: 'Админка', web_app: { url: WEBAPP_URL } }
+  }).catch(() => {});
+  console.log(`[TG] Admin Mini App: ${WEBAPP_URL}`);
 }
 
 function scheduleReconnect() {
@@ -161,6 +208,8 @@ function status() {
     createTopics: !!s.telegramCreateTopics,
     botStarted: !!bot,
     connected,
+    miniAppConfigured: !!WEBAPP_URL,
+    miniAppUrl: WEBAPP_URL || null,
     pendingTopicCreates: creatingTopics.size,
     openTicketsWithoutTopic
   };
@@ -243,6 +292,12 @@ async function handleMessage(msg) {
     const s = cfg();
     if (String(msg.chat.id) !== String(GROUP_ID)) return;
     const topicId = msg.message_thread_id;
+    const rootCmd = parseCmd(msg.text || msg.caption || null);
+
+    if (rootCmd === '/admin') {
+      await announceAdminWebApp(topicId || null);
+      return;
+    }
 
     if (msg.forum_topic_edited && topicId) {
       if (s.telegramDeleteRenameNotices) {

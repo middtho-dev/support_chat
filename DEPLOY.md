@@ -12,6 +12,16 @@ sudo bash setup.sh
 
 `ADMIN_TOKEN`, `TELEGRAM_BOT_TOKEN` and `TELEGRAM_GROUP_ID` are required.
 
+For Telegram Mini App admin access, set one of these:
+
+```env
+PUBLIC_URL=https://your-domain.example
+# or, if the admin panel has a custom URL:
+TELEGRAM_WEBAPP_URL=https://your-domain.example/admin?tg=1
+```
+
+After restart, `/admin` in the Telegram support group opens the admin panel as a Mini App button.
+
 ## Safe update
 
 Use this when the server has no local code edits:
@@ -40,6 +50,8 @@ docker exec support-chat sh -lc 'wget -qO- http://localhost:${PORT:-3001}/health
 docker exec support-chat sh -lc 'test -n "$ADMIN_TOKEN" && echo ADMIN_TOKEN_OK'
 docker logs support-chat --tail=40
 ```
+
+In the `/health` JSON, check `telegram.miniAppConfigured: true`. If it is `false`, add `PUBLIC_URL` or `TELEGRAM_WEBAPP_URL` to `.env` and run `sudo bash update.sh`.
 
 ## Notes
 

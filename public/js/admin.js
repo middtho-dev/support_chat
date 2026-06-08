@@ -12,6 +12,8 @@ const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#08
 const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0 };
 const socket = io({ autoConnect: false });
 const $ = id => document.getElementById(id);
+const TG = window.Telegram?.WebApp || null;
+const IS_TG_MINI = !!TG || new URLSearchParams(location.search).get('tg') === '1';
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 const LINK_RE = /\b((?:https?:\/\/|www\.)[^\s<>"']+|(?:vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|tg):\/\/[^\s<>"']+)/gi;
@@ -37,7 +39,7 @@ function linkify(value) {
 }
 const fmtTime = date => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const fmtDate = date => date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-const isMobileLayout = () => window.matchMedia('(max-width: 560px)').matches;
+const isMobileLayout = () => window.matchMedia(IS_TG_MINI ? '(max-width: 720px)' : '(max-width: 560px)').matches;
 function timeAgo(iso) { const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000)); if (sec < 60) return 'сейчас'; if (sec < 3600) return `${Math.floor(sec / 60)} мин`; if (sec < 86400) return `${Math.floor(sec / 3600)} ч`; return `${Math.floor(sec / 86400)} д`; }
 function avatarColor(name = '') { let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0xffff; return COLORS[h % COLORS.length]; }
 function initials(name = '') { return (name.trim() || '?').slice(0, 2).toUpperCase(); }
@@ -48,6 +50,7 @@ function toast(text, type = 'info') { const el = $('toast'); clearTimeout(toastT
 function setConn(state) { $('cdot').className = `dot ${state}`; $('ctxt').textContent = state === 'on' ? 'онлайн' : state === 'off' ? 'нет соединения' : 'подключение'; }
 
 function init() {
+  initTelegramMiniApp();
   bindStaticUi();
   renderSettings();
   renderTemplates();
@@ -57,19 +60,66 @@ function init() {
   setInterval(renderRelativeTimes, 30000);
 }
 
+function initTelegramMiniApp() {
+  if (!IS_TG_MINI) return;
+  document.body.classList.add('tg-mini');
+  document.documentElement.style.setProperty('color-scheme', 'dark');
+  if (!TG) return;
+
+  TG.ready();
+  TG.expand();
+  TG.disableVerticalSwipes?.();
+  applyTelegramTheme();
+  TG.onEvent?.('themeChanged', applyTelegramTheme);
+  TG.BackButton?.onClick(handleTelegramBack);
+}
+
+function applyTelegramTheme() {
+  if (!TG?.themeParams) return;
+  const p = TG.themeParams;
+  const root = document.documentElement.style;
+  if (p.bg_color) root.setProperty('--tg-bg', p.bg_color);
+  if (p.text_color) root.setProperty('--text', p.text_color);
+  if (p.hint_color) root.setProperty('--muted', p.hint_color);
+  if (p.button_color) root.setProperty('--blue2', p.button_color);
+  if (p.button_text_color) root.setProperty('--button-text', p.button_text_color);
+}
+
+function tgImpact(style = 'light') {
+  TG?.HapticFeedback?.impactOccurred?.(style);
+}
+
+function handleTelegramBack() {
+  if ($('main')?.classList.contains('open')) {
+    $('main').classList.remove('open');
+    updateTelegramBackButton();
+    return;
+  }
+  if (S.view !== 'chat') {
+    setView('chat');
+    updateTelegramBackButton();
+  }
+}
+
+function updateTelegramBackButton() {
+  if (!TG?.BackButton) return;
+  const visible = $('main')?.classList.contains('open') || S.view !== 'chat';
+  visible ? TG.BackButton.show() : TG.BackButton.hide();
+}
+
 function bindStaticUi() {
   $('login-form').addEventListener('submit', event => { event.preventDefault(); login(); });
   $('logout-btn').addEventListener('click', logout);
   $('srch').addEventListener('input', () => { S.search = $('srch').value.trim().toLowerCase(); renderSidebar(); });
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => setFilter(btn.dataset.tab)));
   document.querySelectorAll('.navbtn').forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.view)));
-  $('back').addEventListener('click', () => $('main').classList.remove('open'));
+  $('back').addEventListener('click', () => { $('main').classList.remove('open'); updateTelegramBackButton(); });
   $('cv-toggle').addEventListener('click', toggleTicketStatus);
   document.addEventListener('click', event => { if (!event.target.closest('.pop') && event.target !== $('quick')) document.querySelectorAll('.pop').forEach(p => p.remove()); });
 }
 
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
-function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
+function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
 
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
@@ -79,6 +129,7 @@ socket.on('admin_auth_ok', () => {
   sessionStorage.setItem('admin_token', S.token);
   $('login').style.display = 'none';
   $('app').style.display = 'grid';
+  tgImpact('medium');
   socket.emit('admin_get_settings');
 });
 socket.on('admin_settings', s => {
@@ -178,6 +229,7 @@ function setFilter(filter) {
 
 function setView(view) {
   S.view = view || 'chat';
+  tgImpact('light');
   document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
   $('settings').classList.toggle('on', S.view === 'settings');
   $('templates').classList.toggle('on', S.view === 'templates');
@@ -191,6 +243,7 @@ function setView(view) {
     $('chat').style.display = 'none';
     $('main').classList.add('open');
   }
+  updateTelegramBackButton();
 }
 
 function renderSidebar() {
@@ -207,7 +260,7 @@ function ticketHtml(t) { const ts = t.last_activity || t.created_at; const badge
 function preview(t) { if (!t.last_msg && !t.last_msg_type) return '<span>нет сообщений</span>'; const prefix = t.last_sender === 'support' ? 'Вы: ' : ''; if (t.last_msg_type && t.last_msg_type !== 'text') return esc(prefix + (t.last_msg_type === 'image' ? 'Фото' : t.last_msg_type === 'video' ? 'Видео' : t.last_msg_type === 'audio' ? 'Аудио' : 'Файл')); return esc(prefix + (t.last_msg || '').slice(0, 80)); }
 function renderRelativeTimes() { document.querySelectorAll('[data-ts]').forEach(el => { el.textContent = timeAgo(el.dataset.ts); }); }
 
-function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
+function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; tgImpact('medium'); updateTelegramBackButton(); renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
 function renderChatHeader() { if (!S.current) return; const t = S.current; $('cv-av').style.background = avatarColor(t.user_name); $('cv-av').textContent = initials(t.user_name); $('cv-av').className = `avatar ${t.status === 'closed' ? 'closed' : ''}`; $('cv-name').textContent = t.user_name; $('cv-sub').textContent = `#${t.id.slice(0, 8)} · ${fmtDate(new Date(t.created_at))} · ${t.status === 'open' ? 'открыто' : 'закрыто'}`; const btn = $('cv-toggle'); btn.disabled = !!t.telegram_topic_deleted; btn.className = t.status === 'open' ? 'danger' : 'okbtn'; btn.textContent = t.status === 'open' ? 'Закрыть' : (t.telegram_topic_deleted ? 'Тема удалена' : 'Переоткрыть'); $('composer').innerHTML = t.status === 'open' ? composerHtml() : '<div class="closed-note">Обращение закрыто. При необходимости переоткройте его.</div>'; if (t.status === 'open') wireComposer(); }
 function composerHtml() { return `<div id="admin-file-preview" class="admin-file-preview" style="display:none"></div><div class="compose-row"><button id="quick" class="quick" title="Шаблоны">#</button><button id="reply-attach" class="quick" title="Прикрепить файл">+</button><input id="reply-file" type="file" accept="image/*,video/*,audio/*,.heic,.heif,.avif,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" style="display:none"><textarea id="reply-txt" rows="1" placeholder="Ответ оператора..."></textarea><button id="reply-send" class="send" disabled>➤</button></div><div class="hint"><span>Ctrl+Enter — отправить</span><span id="reply-cnt"></span></div>`; }
 function wireComposer() { S.file = null; S.uploading = false; $('reply-txt').addEventListener('input', onReplyInput); $('reply-txt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } }); $('reply-send').addEventListener('click', sendReply); $('quick').addEventListener('click', showTemplatePicker); $('reply-attach').addEventListener('click', () => $('reply-file').click()); $('reply-file').addEventListener('change', () => { if ($('reply-file').files[0]) setReplyFile($('reply-file').files[0]); $('reply-file').value = ''; }); }
@@ -251,6 +304,7 @@ async function sendReply() {
   txt.style.height = 'auto';
   $('reply-cnt').textContent = '';
   socket.emit('admin_reply', { ticketId: S.current.id, content, fileUrl, fileName, fileMime, messageType });
+  tgImpact('light');
   onReplyInput();
 }
 function setReplyFile(file) {
@@ -274,7 +328,7 @@ function renderReplyFilePreview(statusText) {
   el.innerHTML = `<span>${esc(name)}</span>${S.file && !statusText ? '<button id="reply-file-remove" type="button">×</button>' : ''}`;
   $('reply-file-remove')?.addEventListener('click', clearReplyFile);
 }
-function toggleTicketStatus() { if (!S.current) return; socket.emit(S.current.status === 'open' ? 'admin_close_ticket' : 'admin_reopen_ticket', { ticketId: S.current.id }); }
+function toggleTicketStatus() { if (!S.current) return; tgImpact('medium'); socket.emit(S.current.status === 'open' ? 'admin_close_ticket' : 'admin_reopen_ticket', { ticketId: S.current.id }); }
 
 function showTemplatePicker(event) { event.stopPropagation(); document.querySelectorAll('.pop').forEach(p => p.remove()); const pop = document.createElement('div'); pop.className = 'pop'; pop.innerHTML = S.templates.map((t, i) => `<button data-i="${i}"><b>${esc(t.label)}</b><span>${esc(t.text)}</span></button>`).join('') || '<div class="empty">Шаблонов нет</div>'; document.body.appendChild(pop); const r = $('quick').getBoundingClientRect(); pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 12)}px`; pop.style.top = `${Math.max(74, r.top - pop.offsetHeight - 10)}px`; pop.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => { const item = S.templates[Number(btn.dataset.i)]; const txt = $('reply-txt'); txt.value = item.text; txt.dispatchEvent(new Event('input')); txt.focus(); pop.remove(); })); }
 

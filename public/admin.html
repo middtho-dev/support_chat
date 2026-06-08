@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07111d">
 <title>Админка поддержки</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}button,input,textarea,select{font:inherit}button{border:0;cursor:pointer;color:inherit}button:disabled{cursor:not-allowed;opacity:.55}input,textarea,select{border:1px solid var(--line);background:var(--panel2);color:var(--text);outline:none}input:focus,textarea:focus,select:focus{border-color:rgba(56,189,248,.72);box-shadow:0 0 0 3px rgba(56,189,248,.14)}
 :root{--bg:#0b1017;--panel:#111821;--panel2:#17212c;--panel3:#223041;--line:rgba(255,255,255,.09);--text:#eef4fb;--muted:#8b96a6;--soft:#bac5d3;--blue:#38bdf8;--blue2:#0ea5e9;--green:#34d399;--red:#fb7185;--amber:#fbbf24;--violet:#a78bfa;--shadow:0 18px 60px rgba(0,0,0,.36)}
@@ -117,6 +119,24 @@ input:focus,textarea:focus,select:focus{border-color:rgba(34,211,238,.74);box-sh
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 .admin-file-preview{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding:9px 11px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.045);color:var(--soft);font-size:13px}.admin-file-preview span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.admin-file-preview button{width:28px;height:28px;border-radius:9px;background:rgba(251,113,133,.12);color:var(--red);font-weight:900;flex:0 0 auto}
+body.tg-mini{background:var(--tg-bg,#07111d)}
+body.tg-mini::before{display:none}
+body.tg-mini .app{height:100vh;height:100dvh;background:linear-gradient(180deg,rgba(7,17,29,.98),rgba(6,12,22,.99));box-shadow:none}
+body.tg-mini .top{height:calc(58px + env(safe-area-inset-top,0px));padding-top:env(safe-area-inset-top,0px);background:rgba(7,17,29,.96)}
+body.tg-mini .workspace{grid-template-columns:0 minmax(318px,390px) minmax(0,1fr)}
+body.tg-mini .rail{position:fixed;left:0;right:0;bottom:0;height:calc(60px + env(safe-area-inset-bottom,0px));display:flex;justify-content:center;gap:6px;padding:7px 10px calc(7px + env(safe-area-inset-bottom,0px));border-right:0;border-top:1px solid var(--line);background:rgba(7,17,29,.96);backdrop-filter:blur(18px);z-index:40}
+body.tg-mini .navbtn{margin:0;flex:1;max-width:96px;height:46px}
+body.tg-mini .navbtn.on::before{display:none}
+body.tg-mini .side{border-right:1px solid var(--line)}
+body.tg-mini .composer{padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+@media(max-width:720px){
+  body.tg-mini .workspace{display:block}
+  body.tg-mini .side{position:fixed;inset:calc(58px + env(safe-area-inset-top,0px)) 0 calc(60px + env(safe-area-inset-bottom,0px)) 0}
+  body.tg-mini .main{position:fixed;inset:calc(58px + env(safe-area-inset-top,0px)) 0 calc(60px + env(safe-area-inset-bottom,0px)) 0;background:var(--bg);display:none;z-index:25}
+  body.tg-mini .main.open{display:flex}
+  body.tg-mini .back{display:grid}
+  body.tg-mini .top .brand p,body.tg-mini .status span{display:none}
+}
 </style>
 </head>
 <body>
