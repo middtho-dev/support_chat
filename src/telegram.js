@@ -15,6 +15,7 @@ let io = null;
 let reconnectTimer = null;
 let connected = false;
 const topicStatus = new Map();
+const creatingTopics = new Map();
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 let cleanupTimer = null;
 
@@ -63,6 +64,14 @@ function isThreadNotFound(e) {
   return msg.includes('thread not found') || msg.includes('topic_deleted') || msg.includes('topic_closed') || msg.includes('chat not found');
 }
 
+function tgError(e) {
+  return String(e?.response?.body?.description || e?.message || e || 'unknown error');
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function publicUploadPath(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.startsWith('/uploads/')) return null;
   let relative;
@@ -99,6 +108,8 @@ function init(socketIo) {
   startBot();
   setTimeout(cleanupOldTopics, 15000);
   setInterval(cleanupOldTopics, 60 * 60 * 1000);
+  setInterval(retryMissingTopics, 60 * 1000);
+  setTimeout(retryMissingTopics, 10 * 1000);
   return bot;
 }
 
@@ -136,6 +147,23 @@ function scheduleReconnect() {
       else startBot();
     } catch { bot = null; startBot(); }
   }, 5000);
+}
+
+function status() {
+  const s = cfg();
+  let openTicketsWithoutTopic = 0;
+  try {
+    openTicketsWithoutTopic = db.getOpenTicketsWithoutTelegramTopic.all(1000).length;
+  } catch {}
+  return {
+    configured: !!TOKEN && !!GROUP_ID,
+    enabled: !!s.telegramEnabled,
+    createTopics: !!s.telegramCreateTopics,
+    botStarted: !!bot,
+    connected,
+    pendingTopicCreates: creatingTopics.size,
+    openTicketsWithoutTopic
+  };
 }
 
 async function handleCallbackQuery(query) {
@@ -368,24 +396,47 @@ async function safeSend(chatId, text, opts = {}) {
 async function createTopic(ticketId, userName) {
   const s = cfg();
   if (!tgEnabled() || !s.telegramCreateTopics) return null;
-  try {
-    const fakeTicket = { id: ticketId, user_name: userName, created_at: new Date().toISOString() };
-    const topic = await bot.createForumTopic(GROUP_ID, topicName(fakeTicket, s.telegramNewEmoji));
-    const topicId = topic.message_thread_id;
-    db.setTopicId.run(topicId, ticketId);
-    topicStatus.set(topicId, topicName(fakeTicket, s.telegramNewEmoji));
-    const text = formatTemplate(s.telegramNewTicketText, { ...values(fakeTicket), name: mdEscape(userName), shortId: ticketId.slice(0, 8) });
-    const infoMsg = await safeSend(GROUP_ID, text, { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kbClose(topicId) });
-    if (infoMsg && s.telegramPinNewTicketMessage) await bot.pinChatMessage(GROUP_ID, infoMsg.message_id, { message_thread_id: topicId }).catch(() => {});
-    return topicId;
-  } catch (e) { console.error('[TG] createTopic:', e.message); return null; }
+
+  const existing = db.getTicketById.get(ticketId);
+  if (existing?.telegram_topic_id) return existing.telegram_topic_id;
+  if (creatingTopics.has(ticketId)) return creatingTopics.get(ticketId);
+
+  const promise = (async () => {
+    try {
+      const ticket = existing || { id: ticketId, user_name: userName, created_at: new Date().toISOString() };
+      const topic = await bot.createForumTopic(GROUP_ID, topicName(ticket, s.telegramNewEmoji));
+      const topicId = topic.message_thread_id;
+      db.setTopicId.run(topicId, ticketId);
+      topicStatus.set(topicId, topicName(ticket, s.telegramNewEmoji));
+      const text = formatTemplate(s.telegramNewTicketText, { ...values(ticket), name: mdEscape(userName), shortId: ticketId.slice(0, 8) });
+      const infoMsg = await safeSend(GROUP_ID, text, { message_thread_id: topicId, parse_mode: 'Markdown', reply_markup: kbClose(topicId) });
+      if (infoMsg && s.telegramPinNewTicketMessage) await bot.pinChatMessage(GROUP_ID, infoMsg.message_id, { message_thread_id: topicId }).catch(() => {});
+      console.log(`[TG] Created topic ${topicId} for ticket ${ticketId.slice(0, 8)}`);
+      return topicId;
+    } catch (e) {
+      console.error(`[TG] createTopic ${ticketId.slice(0, 8)}:`, tgError(e));
+      return null;
+    } finally {
+      creatingTopics.delete(ticketId);
+    }
+  })();
+
+  creatingTopics.set(ticketId, promise);
+  return promise;
 }
 
-async function forwardMessage(ticket, message) {
+async function forwardMessage(ticket, message, opts = {}) {
   const s = cfg();
-  if (!tgEnabled() || !ticket?.telegram_topic_id) return;
+  if (!tgEnabled()) return;
   if (message.sender === 'user' && !s.telegramForwardUserMessages) return;
   if (message.sender === 'support' && !s.telegramForwardAdminMessages) return;
+
+  if (!ticket?.telegram_topic_id && !opts.skipEnsureTopic && s.telegramCreateTopics) {
+    const topicId = await createTopic(ticket.id, ticket.user_name);
+    if (topicId) ticket = db.getTicketById.get(ticket.id);
+  }
+  if (!ticket?.telegram_topic_id) return;
+
   const tid = ticket.telegram_topic_id;
   try {
     let sent;
@@ -489,6 +540,43 @@ async function checkTopicAlive(ticket) {
   }
 }
 
+async function replayUnsentMessages(ticket, limit = 30) {
+  if (!tgEnabled() || !ticket?.telegram_topic_id) return;
+  const messages = db.getUnsentMessagesForTelegram.all(ticket.id, limit);
+  if (!messages.length) return;
+
+  console.log(`[TG] Replaying ${messages.length} unsent messages for ${shortId(ticket)}`);
+  for (const message of messages) {
+    await forwardMessage(ticket, message, { skipEnsureTopic: true });
+    await wait(350);
+  }
+  if (messages.length === limit) {
+    await safeSend(
+      GROUP_ID,
+      `⚠️ У тикета ${shortId(ticket)} есть еще старые сообщения. Откройте диалог в админке для полной истории.`,
+      { message_thread_id: ticket.telegram_topic_id }
+    );
+  }
+}
+
+async function retryMissingTopics() {
+  if (!tgEnabled() || !cfg().telegramCreateTopics) return;
+  const tickets = db.getOpenTicketsWithoutTelegramTopic.all(10);
+  if (!tickets.length) return;
+
+  console.warn(`[TG] Found ${tickets.length} open tickets without Telegram topic, retrying...`);
+  for (const ticket of tickets) {
+    const topicId = await createTopic(ticket.id, ticket.user_name);
+    if (topicId) {
+      const fresh = db.getTicketById.get(ticket.id);
+      io?.to('admin').emit('admin_ticket_updated', fresh);
+      io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
+      await replayUnsentMessages(fresh);
+    }
+    await wait(1200);
+  }
+}
+
 async function cleanupOldTopics() {
   const s = cfg();
   if (!tgEnabled() || !s.telegramCleanupClosedTopics) return;
@@ -515,4 +603,4 @@ async function cleanupOldTopics() {
   } catch (e) { console.error('[TG] cleanup:', e.message); }
 }
 
-module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened, autoCloseTicket, sendTyping, warnInactivity, checkTopicAlive };
+module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened, autoCloseTicket, sendTyping, warnInactivity, checkTopicAlive, status };

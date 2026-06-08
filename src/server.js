@@ -157,7 +157,9 @@ app.post('/api/session/start', (req, res) => {
   const sessionToken = uuidv4();
   const ticketId = uuidv4();
   db.createTicket.run(ticketId, name, sessionToken);
-  telegram.createTopic(ticketId, name).catch(e => console.error('[TG] createTopic:', e?.message));
+  telegram.createTopic(ticketId, name)
+    .then(topicId => { if (topicId) broadcastAdminTickets(); })
+    .catch(e => console.error('[TG] createTopic:', e?.message));
 
   const newTicket = db.getTicketById.get(ticketId);
   if (newTicket) io.to('admin').emit('admin_new_ticket', newTicket);
@@ -625,7 +627,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Server error' });
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, uptime: Math.floor(process.uptime()) }));
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  uptime: Math.floor(process.uptime()),
+  telegram: typeof telegram.status === 'function' ? telegram.status() : null
+}));
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`[Server] Running on http://localhost:${PORT}`));

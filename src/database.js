@@ -107,6 +107,14 @@ module.exports = {
   getTicketByTopicIdAny: db.prepare(`SELECT * FROM tickets WHERE telegram_topic_id = ?`),
 
   getAllOpenTickets: db.prepare(`SELECT * FROM tickets WHERE status = 'open' ORDER BY updated_at DESC`),
+  getOpenTicketsWithoutTelegramTopic: db.prepare(`
+    SELECT * FROM tickets
+    WHERE status = 'open'
+      AND telegram_topic_id IS NULL
+      AND COALESCE(telegram_topic_deleted, 0) = 0
+    ORDER BY created_at ASC
+    LIMIT ?
+  `),
 
   // Messages
   saveMessage: db.prepare(`
@@ -161,6 +169,15 @@ module.exports = {
   `),
 
   countMessages: db.prepare(`SELECT COUNT(*) AS cnt FROM messages WHERE ticket_id = ?`),
+
+  getUnsentMessagesForTelegram: db.prepare(`
+    SELECT * FROM messages
+    WHERE ticket_id = ?
+      AND sender != 'system'
+      AND telegram_message_id IS NULL
+    ORDER BY created_at ASC
+    LIMIT ?
+  `),
 
   getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
 
