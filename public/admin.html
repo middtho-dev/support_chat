@@ -137,6 +137,89 @@ body.tg-mini .composer{padding-bottom:calc(10px + env(safe-area-inset-bottom,0px
   body.tg-mini .back{display:grid}
   body.tg-mini .top .brand p,body.tg-mini .status span{display:none}
 }
+
+/* Compact operator UI: dense desktop layout, stable Telegram Mini App spacing */
+:root{--radius:8px;--tg-bottom-ui:0px}
+body{font-size:13px;line-height:1.36}
+.app{grid-template-rows:54px minmax(0,1fr)}
+.top{height:54px;padding:0 14px;gap:10px}
+.top .logo{width:32px;height:32px;border-radius:8px;box-shadow:none}
+.top h1{font-size:15px;line-height:1.05}.top p{font-size:11px;margin-top:2px}
+.status{font-size:12px}.dot{width:8px;height:8px}
+.ghost,.danger,.okbtn,.save,.add{height:34px;min-height:34px;padding:0 11px;border-radius:8px;font-size:12px;transform:none!important}
+.workspace{grid-template-columns:56px minmax(300px,340px) minmax(0,1fr)}
+.rail{padding:8px 7px;background:rgba(10,16,27,.94)}
+.navbtn{width:40px;height:40px;border-radius:8px;margin-bottom:6px;transform:none!important}
+.navbtn svg{width:19px;height:19px}.navbtn.on::before{left:-7px;height:18px}
+.side-head{padding:10px}.metrics{gap:6px;margin-bottom:10px}
+.metric{padding:9px;border-radius:8px;transform:none!important}.metric b{font-size:18px}.metric span{font-size:10px}
+.search{height:34px;border-radius:8px;padding:0 10px;margin-bottom:8px;font-size:12px}
+.tabs{gap:5px}.tab{height:30px;border-radius:8px;font-size:11.5px}
+.ticket{grid-template-columns:36px minmax(0,1fr) auto;gap:8px;padding:9px 10px;transform:none!important}
+.avatar{width:36px;height:36px;border-radius:8px;font-size:12px}.avatar::after{width:9px;height:9px;border-width:2px}
+.tname{font-size:12.5px}.tlast{font-size:11px;margin-top:2px}.time{font-size:10px}.badge{height:17px;min-width:17px;font-size:10px}
+.empty{padding:24px 12px;font-size:12px}
+.welcome h2{font-size:22px}.welcome p{font-size:13px;max-width:560px}
+.chat-head{height:54px;padding:0 12px;gap:9px}.chat-title b{font-size:13.5px}.chat-title span{font-size:11px;margin-top:2px}
+.back{width:32px;height:32px;border-radius:8px}
+.msgs{padding:12px;gap:5px}.day{font-size:10.5px;padding:4px 8px;margin:5px 0}
+.msg{max-width:min(620px,70%)}.bubble{padding:8px 10px;border-radius:8px;font-size:12.5px;line-height:1.42;box-shadow:none}
+.sender{font-size:11px;margin-bottom:3px}.meta{font-size:10px;margin-top:3px}.sys .bubble{font-size:11px;padding:5px 9px}
+.bubble img,.bubble video{max-width:240px;max-height:220px;border-radius:8px}.file-ico{width:30px;height:30px;border-radius:8px}
+.composer{padding:9px 12px}.compose-row{gap:7px}.quick,.send{width:36px;height:36px;border-radius:8px}
+.composer textarea{min-height:36px;max-height:112px;border-radius:8px;padding:8px 10px;font-size:12.5px}
+.hint{margin-top:5px;font-size:10px}.typing{font-size:11px;padding:6px 12px}
+.panel{padding:16px}.section{max-width:1080px}.section h2{font-size:20px;margin-bottom:4px}.section p{font-size:12.5px;margin-bottom:12px}
+.grid{gap:10px}.card{border-radius:8px;padding:12px}.card h3{font-size:14px;margin-bottom:9px}
+.field{gap:5px;margin-bottom:9px}.field label,.check{font-size:12px}.field input,.field textarea,.field select{border-radius:8px;padding:8px 10px;font-size:12.5px}.field textarea{min-height:76px}
+.check input{width:15px;height:15px}.tpl{grid-template-columns:140px minmax(0,1fr) 34px;gap:7px}.tpl input{height:34px;border-radius:8px}.tpl button{width:34px;border-radius:8px}
+.pop{border-radius:8px}.pop button{border-radius:7px;padding:8px}.pop span{font-size:12px}.toast{border-radius:8px;font-size:12px;padding:8px 11px}
+.admin-file-preview{border-radius:8px;padding:7px 9px;font-size:12px}.admin-file-preview button{width:24px;height:24px;border-radius:7px}
+@media(min-width:721px){
+  body.tg-mini{--tg-bottom-ui:0px}
+  body.tg-mini .app{grid-template-rows:54px minmax(0,1fr)}
+  body.tg-mini .top{height:54px;padding-top:0}
+  body.tg-mini .workspace{grid-template-columns:56px minmax(300px,340px) minmax(0,1fr)}
+  body.tg-mini .rail{position:static;height:auto;display:block;padding:8px 7px;border-top:0;border-right:1px solid var(--line);background:rgba(10,16,27,.94);backdrop-filter:none}
+  body.tg-mini .navbtn{width:40px;height:40px;max-width:none;display:grid;margin:0 0 6px}
+  body.tg-mini .navbtn.on::before{display:block}
+  body.tg-mini .side{position:static;border-right:1px solid var(--line)}
+  body.tg-mini .main{position:relative;inset:auto;display:flex;background:linear-gradient(180deg,rgba(8,13,22,.7),rgba(7,11,18,.95))}
+  body.tg-mini .back{display:none}
+}
+@media(max-width:980px){
+  .app{grid-template-rows:54px minmax(0,1fr)}.top{height:54px}.workspace{grid-template-columns:54px minmax(280px,1fr)}
+  .main{inset:54px 0 0 54px}.rail{padding:7px}.navbtn{width:40px}
+}
+@media(max-width:720px){
+  body.tg-mini{--tg-bottom-ui:44px}
+  body.tg-mini .app{grid-template-rows:calc(52px + env(safe-area-inset-top,0px)) minmax(0,1fr)}
+  body.tg-mini .top{height:calc(52px + env(safe-area-inset-top,0px));padding-top:env(safe-area-inset-top,0px)}
+  body.tg-mini .rail{height:calc(54px + env(safe-area-inset-bottom,0px));padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));gap:5px}
+  body.tg-mini .navbtn{height:40px;max-width:82px;border-radius:8px}
+  body.tg-mini .side{inset:calc(52px + env(safe-area-inset-top,0px)) 0 calc(54px + env(safe-area-inset-bottom,0px) + var(--tg-bottom-ui)) 0}
+  body.tg-mini .main{inset:calc(52px + env(safe-area-inset-top,0px)) 0 calc(54px + env(safe-area-inset-bottom,0px) + var(--tg-bottom-ui)) 0}
+  body.tg-mini .composer{padding-bottom:calc(9px + env(safe-area-inset-bottom,0px) + var(--tg-bottom-ui))}
+}
+@media(max-width:560px){
+  body{font-size:12.5px}.app{grid-template-rows:52px minmax(0,1fr)}.top{height:52px}
+  .top h1{font-size:14px}.top .logo{width:31px;height:31px}.workspace{display:block}
+  .side{inset:52px 0 58px 0}.main{inset:52px 0 58px 0}.rail{height:58px;padding:6px 7px}.navbtn{height:42px}
+  .side-head{padding:9px}.metrics{gap:5px}.metric{padding:7px}.metric b{font-size:17px}.metric span{font-size:9.5px}
+  .ticket{padding:8px 9px}.msg{max-width:92%}.msgs{padding:9px}.chat-head{height:50px;padding:0 9px}
+  .danger,.okbtn{height:32px;max-width:96px;font-size:11.5px}.quick,.send{width:34px;height:34px}.composer{padding:8px}.composer textarea{min-height:34px;font-size:13px}
+  .panel{padding:10px 8px}.section h2{font-size:18px}.card{padding:10px}
+}
+
+/* KV9 reference skin */
+.auth-card .logo,.top .logo{background:linear-gradient(135deg,#0ef0ff,#2267ff 58%,#7c3aed);color:#020817}
+.auth-card .brand h1,.top h1{letter-spacing:.2px}
+.auth-card button,.send{background:linear-gradient(135deg,#0ef0ff,#2267ff);color:#f8fbff}
+.navbtn.on{background:linear-gradient(180deg,rgba(14,240,255,.14),rgba(34,103,255,.13));box-shadow:inset 0 0 0 1px rgba(14,240,255,.18)}
+.ticket.on{background:linear-gradient(90deg,rgba(14,240,255,.12),rgba(34,103,255,.06))}
+.tab.on{background:rgba(14,240,255,.12);color:#e6fbff}
+.badge{background:#0ef0ff;color:#020817}
+.main,.side,.rail,.top,.composer,.chat-head{background-color:rgba(7,13,24,.92)}
 </style>
 </head>
 <body>
