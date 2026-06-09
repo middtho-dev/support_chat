@@ -46,6 +46,7 @@ function kbReopen(tid) {
 }
 function shortId(ticket) { return String(ticket?.id || '').slice(0, 8); }
 function mdEscape(value) { return String(value ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&'); }
+function htmlEscape(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch])); }
 function values(ticket, extra = {}) {
   const date = ticket?.created_at ? new Date(ticket.created_at) : new Date();
   return {
@@ -59,6 +60,31 @@ function values(ticket, extra = {}) {
 }
 function topicName(ticket, emoji) {
   return formatTemplate(cfg().telegramTopicNameTemplate, { ...values(ticket), emoji }).slice(0, 128);
+}
+
+function singleChatMessage(ticket, message) {
+  const isUser = message.sender === 'user';
+  const title = isUser ? '💬 Новое сообщение клиента' : '↩️ Ответ из админки';
+  const fileLabel = message.file_name ? `\nФайл: ${htmlEscape(message.file_name)}` : '';
+  const body = message.content ? htmlEscape(message.content) : (message.file_name ? 'Файл без текста' : '');
+  const details = [
+    `Тикет: ${shortId(ticket)}`,
+    `Клиент: ${ticket.user_name || ''}`,
+    `Статус: ${ticket.status === 'closed' ? 'закрыт' : 'открыт'}`,
+    `Создан: ${ticket.created_at ? new Date(ticket.created_at).toLocaleString('ru-RU') : 'неизвестно'}`,
+    isUser ? 'Ответьте reply на это сообщение, чтобы написать пользователю.' : 'Сообщение отправлено из админки.'
+  ].join('\n');
+  return `${title}\n<b>${htmlEscape(ticket.user_name || 'Клиент')}</b> · <code>${htmlEscape(shortId(ticket))}</code><tg-spoiler>\n${htmlEscape(details)}${fileLabel}</tg-spoiler>${body ? `\n\n${body}` : ''}`;
+}
+
+function singleChatStatus(ticket, text) {
+  const details = [
+    `Тикет: ${shortId(ticket)}`,
+    `Клиент: ${ticket?.user_name || ''}`,
+    `Статус: ${ticket?.status === 'closed' ? 'закрыт' : 'открыт'}`,
+    'В режиме единого чата отвечайте пользователю reply на его сообщение.'
+  ].join('\n');
+  return `${htmlEscape(text)}\n<tg-spoiler>${htmlEscape(details)}</tg-spoiler>`;
 }
 
 function isThreadNotFound(e) {
@@ -328,26 +354,37 @@ async function handleMessage(msg) {
       return;
     }
 
-    if (!topicId || (msg.from && msg.from.is_bot)) return;
-    const ticket = db.getTicketByTopicIdAny.get(topicId);
-    if (!ticket) return;
+    if (msg.from && msg.from.is_bot) return;
+    let ticket = topicId ? db.getTicketByTopicIdAny.get(topicId) : null;
+    let replyMsg = null;
+    if (!ticket && msg.reply_to_message) {
+      replyMsg = db.getMessageByTelegramId.get(msg.reply_to_message.message_id);
+      if (replyMsg) ticket = db.getTicketById.get(replyMsg.ticket_id);
+    }
+    if (!ticket) {
+      if (!topicId && !rootCmd && (msg.text || msg.caption)) {
+        await safeSend(GROUP_ID, 'Ответьте reply на сообщение тикета, чтобы бот понял, какому пользователю писать.');
+      }
+      return;
+    }
     const rawText = msg.text || msg.caption || null;
     const cmd = parseCmd(rawText);
+    const sendOpts = topicId ? { message_thread_id: topicId } : {};
 
     if (cmd === '/close') {
-      if (ticket.status === 'closed') return safeSend(GROUP_ID, '⚠️ Тикет уже закрыт. /reopen — переоткрыть', { message_thread_id: topicId });
+      if (ticket.status === 'closed') return safeSend(GROUP_ID, 'Тикет уже закрыт. /reopen — переоткрыть', sendOpts);
       await closeTicketFromTelegram(ticket, topicId);
       return;
     }
 
     if (cmd === '/reopen') {
-      if (ticket.status !== 'closed') return safeSend(GROUP_ID, '⚠️ Тикет уже открыт', { message_thread_id: topicId });
+      if (ticket.status !== 'closed') return safeSend(GROUP_ID, 'Тикет уже открыт', sendOpts);
       await reopenTicketFromTelegram(ticket, topicId);
       return;
     }
 
     if (ticket.status === 'closed') {
-      await safeSend(GROUP_ID, '⚠️ Тикет закрыт. /reopen — переоткрыть', { message_thread_id: topicId });
+      await safeSend(GROUP_ID, 'Тикет закрыт. /reopen — переоткрыть', sendOpts);
       return;
     }
 
@@ -362,8 +399,8 @@ async function handleMessage(msg) {
 
     let replyToId = null, replyToContent = null, replyToSenderName = null, replyToType = null, replyToFileName = null;
     if (msg.reply_to_message) {
-      const replyMsg = db.getMessageByTelegramId.get(msg.reply_to_message.message_id);
-      if (replyMsg) {
+      replyMsg = replyMsg || db.getMessageByTelegramId.get(msg.reply_to_message.message_id);
+      if (replyMsg && replyMsg.ticket_id === ticket.id) {
         replyToId = replyMsg.id;
         replyToContent = replyMsg.content;
         replyToSenderName = replyMsg.sender_name;
@@ -383,7 +420,7 @@ async function handleMessage(msg) {
       reply_to_content: replyToContent || null, reply_to_sender_name: replyToSenderName || null,
       reply_to_type: replyToType || null, reply_to_file_name: replyToFileName || null
     });
-    await setTopicStatus(topicId, ticket, s.telegramOpenEmoji);
+    if (topicId) await setTopicStatus(topicId, ticket, s.telegramOpenEmoji);
     push.send(ticket.id, rawText || 'Новое сообщение').catch(() => {});
   } catch (e) { console.error('[TG] handleMessage:', e.message); }
 }
@@ -393,19 +430,19 @@ async function closeTicketFromTelegram(ticket, topicId) {
   db.closeTicket.run(ticket.id);
   io?.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'support' });
   io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
-  await setTopicStatus(topicId, ticket, s.telegramClosedEmoji);
-  await safeSend(GROUP_ID, s.telegramClosedBySupportText, { message_thread_id: topicId, reply_markup: kbReopen(topicId) });
-  if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, topicId).catch(() => {});
+  if (topicId) await setTopicStatus(topicId, ticket, s.telegramClosedEmoji);
+  await safeSend(GROUP_ID, s.telegramClosedBySupportText, topicId ? { message_thread_id: topicId, reply_markup: kbReopen(topicId) } : {});
+  if (topicId && s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, topicId).catch(() => {});
   if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
 }
 
 async function reopenTicketFromTelegram(ticket, topicId) {
   const s = cfg();
   db.reopenTicket.run(ticket.id);
-  if (s.telegramReopenTopicOnReopen) await bot.reopenForumTopic(GROUP_ID, topicId).catch(() => {});
-  topicStatus.delete(topicId);
-  await setTopicStatus(topicId, ticket, s.telegramWaitEmoji);
-  await safeSend(GROUP_ID, s.telegramReopenedText, { message_thread_id: topicId, reply_markup: kbClose(topicId) });
+  if (topicId && s.telegramReopenTopicOnReopen) await bot.reopenForumTopic(GROUP_ID, topicId).catch(() => {});
+  if (topicId) topicStatus.delete(topicId);
+  if (topicId) await setTopicStatus(topicId, ticket, s.telegramWaitEmoji);
+  await safeSend(GROUP_ID, s.telegramReopenedText, topicId ? { message_thread_id: topicId, reply_markup: kbClose(topicId) } : {});
   io?.to(`ticket:${ticket.id}`).emit('ticket_reopened');
   io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'open' });
 }
@@ -511,40 +548,64 @@ async function forwardMessage(ticket, message, opts = {}) {
     const topicId = await createTopic(ticket.id, ticket.user_name);
     if (topicId) ticket = db.getTicketById.get(ticket.id);
   }
-  if (!ticket?.telegram_topic_id) return;
+  if (!ticket?.telegram_topic_id && s.telegramCreateTopics) return;
 
   const tid = ticket.telegram_topic_id;
+  const targetOpts = tid ? { message_thread_id: tid } : {};
   try {
     let sent;
     const fp = publicUploadPath(message.file_url);
-    if (message.message_type === 'text') sent = await bot.sendMessage(GROUP_ID, message.content, { message_thread_id: tid });
+    if (!tid && message.sender === 'user') {
+      const text = singleChatMessage(ticket, message);
+      if (message.message_type === 'text') sent = await bot.sendMessage(GROUP_ID, text.slice(0, 4090), { parse_mode: 'HTML' });
+      else if (message.message_type === 'image' && fp) sent = await sendWithDocumentFallback(
+        () => bot.sendPhoto(GROUP_ID, fp, { caption: text.slice(0, 1000), parse_mode: 'HTML' }),
+        fp,
+        { caption: text.slice(0, 1000), parse_mode: 'HTML' }
+      );
+      else if (message.message_type === 'video' && fp) sent = await sendWithDocumentFallback(
+        () => bot.sendVideo(GROUP_ID, fp, { caption: text.slice(0, 1000), parse_mode: 'HTML' }),
+        fp,
+        { caption: text.slice(0, 1000), parse_mode: 'HTML' }
+      );
+      else if (message.message_type === 'audio' && fp) sent = await bot.sendVoice(GROUP_ID, fp, { caption: text.slice(0, 1000), parse_mode: 'HTML' });
+      else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { caption: text.slice(0, 1000), parse_mode: 'HTML' });
+    } else if (!tid && message.sender === 'support') {
+      const text = singleChatMessage(ticket, message);
+      sent = await bot.sendMessage(GROUP_ID, text.slice(0, 4090), { parse_mode: 'HTML' });
+    } else if (message.message_type === 'text') sent = await bot.sendMessage(GROUP_ID, message.content, targetOpts);
     else if (message.message_type === 'image' && fp) sent = await sendWithDocumentFallback(
-      () => bot.sendPhoto(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined }),
+      () => bot.sendPhoto(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined }),
       fp,
-      { message_thread_id: tid, caption: message.content || undefined }
+      { ...targetOpts, caption: message.content || undefined }
     );
     else if (message.message_type === 'video' && fp) sent = await sendWithDocumentFallback(
-      () => bot.sendVideo(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined }),
+      () => bot.sendVideo(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined }),
       fp,
-      { message_thread_id: tid, caption: message.content || undefined }
+      { ...targetOpts, caption: message.content || undefined }
     );
     else if (message.message_type === 'audio' && fp) sent = await sendWithDocumentFallback(
-      () => bot.sendVoice(GROUP_ID, fp, { message_thread_id: tid }),
+      () => bot.sendVoice(GROUP_ID, fp, targetOpts),
       fp,
-      { message_thread_id: tid, caption: message.content || undefined }
+      { ...targetOpts, caption: message.content || undefined }
     );
-    else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { message_thread_id: tid, caption: message.content || undefined });
+    else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined });
     if (sent) db.updateTelegramMessageId.run(sent.message_id, message.id);
-    await setTopicStatus(tid, ticket, message.sender === 'user' ? s.telegramWaitEmoji : s.telegramOpenEmoji);
+    if (tid) await setTopicStatus(tid, ticket, message.sender === 'user' ? s.telegramWaitEmoji : s.telegramOpenEmoji);
   } catch (e) {
-    if (isThreadNotFound(e)) db.markTopicDeleted.run(ticket.id);
+    if (tid && isThreadNotFound(e)) db.markTopicDeleted.run(ticket.id);
     else console.error('[TG] forwardMessage:', e.message);
   }
 }
 
 async function notifyTicketClosed(ticket) {
   const s = cfg();
-  if (!tgEnabled() || !ticket.telegram_topic_id) return;
+  if (!tgEnabled()) return;
+  if (!ticket.telegram_topic_id && !s.telegramCreateTopics) {
+    await safeSend(GROUP_ID, singleChatStatus(ticket, s.telegramClosedByUserText), { parse_mode: 'HTML' });
+    return;
+  }
+  if (!ticket.telegram_topic_id) return;
   const tid = ticket.telegram_topic_id;
   try {
     await setTopicStatus(tid, ticket, s.telegramClosedEmoji);
@@ -556,7 +617,12 @@ async function notifyTicketClosed(ticket) {
 
 async function notifyTicketReopened(ticket) {
   const s = cfg();
-  if (!tgEnabled() || !ticket.telegram_topic_id) return;
+  if (!tgEnabled()) return;
+  if (!ticket.telegram_topic_id && !s.telegramCreateTopics) {
+    await safeSend(GROUP_ID, singleChatStatus(ticket, s.telegramReopenedByUserText), { parse_mode: 'HTML' });
+    return;
+  }
+  if (!ticket.telegram_topic_id) return;
   const tid = ticket.telegram_topic_id;
   try {
     if (s.telegramReopenTopicOnReopen) {
@@ -578,7 +644,12 @@ async function notifyTicketReopened(ticket) {
 
 async function autoCloseTicket(ticket, extra = {}) {
   const s = cfg();
-  if (!tgEnabled() || !ticket.telegram_topic_id) return;
+  if (!tgEnabled()) return;
+  if (!ticket.telegram_topic_id && !s.telegramCreateTopics) {
+    await safeSend(GROUP_ID, singleChatStatus(ticket, formatTemplate(s.telegramAutoCloseText, { ...values(ticket), ...extra })), { parse_mode: 'HTML' });
+    return;
+  }
+  if (!ticket.telegram_topic_id) return;
   const tid = ticket.telegram_topic_id;
   try {
     topicStatus.delete(tid);
@@ -591,7 +662,12 @@ async function autoCloseTicket(ticket, extra = {}) {
 
 async function warnInactivity(ticket, extra = {}) {
   const s = cfg();
-  if (!tgEnabled() || !ticket.telegram_topic_id) return;
+  if (!tgEnabled()) return;
+  if (!ticket.telegram_topic_id && !s.telegramCreateTopics) {
+    await safeSend(GROUP_ID, singleChatStatus(ticket, formatTemplate(s.telegramWarnInactivityText, { ...values(ticket), ...extra })), { parse_mode: 'HTML' });
+    return;
+  }
+  if (!ticket.telegram_topic_id) return;
   try {
     await safeSend(GROUP_ID, formatTemplate(s.telegramWarnInactivityText, { ...values(ticket), ...extra }), { message_thread_id: ticket.telegram_topic_id });
   } catch (e) { console.error('[TG] warnInactivity:', e.message); }
