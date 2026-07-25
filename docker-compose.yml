@@ -9,6 +9,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=${PORT:-3001}
+      - HOST=127.0.0.1
       - DB_PATH=/app/data/support.db
       - UPLOADS_DIR=/app/public/uploads
       - VAPID_STORE=/app/data/vapid.json
