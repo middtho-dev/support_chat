@@ -22,25 +22,17 @@ echo -e "${NC}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Принудительная работа через IPv4 ──
-info "Настройка IPv4..."
+# Не отключаем IPv6 глобально: это может оборвать SSH-сессию.
+# Вместо этого привязываем все сервисы к IPv4 и принудительно используем IPv4 для загрузок.
+info "Настройка установки через IPv4..."
 
-cat > /etc/sysctl.d/99-disable-ipv6.conf <<'EOF'
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-
-sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
-
-# APT будет скачивать пакеты только через IPv4
 mkdir -p /etc/apt/apt.conf.d
 
 cat > /etc/apt/apt.conf.d/99force-ipv4 <<'EOF'
 Acquire::ForceIPv4 "true";
 EOF
 
-log "IPv6 отключён, APT настроен на IPv4"
+log "APT настроен на IPv4"
 
 # ── Ввод данных ──
 read -p "$(echo -e "${BLUE}")Домен (например helpo.su): $(echo -e "${NC}")" DOMAIN
@@ -55,15 +47,28 @@ read -p "$(echo -e "${BLUE}")Telegram Group ID (-1001234567890): $(echo -e "${NC
 read -p "$(echo -e "${BLUE}")Admin Token для /admin: $(echo -e "${NC}")" ADMIN_TOKEN
 [[ -z "$ADMIN_TOKEN" ]] && err "Admin Token не указан"
 
-# Получаем только публичный IPv4
-SERVER_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
+is_ipv4() {
+    local ip="$1" octet
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -r -a octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        ((10#$octet <= 255)) || return 1
+    done
+}
 
-if [[ ! "$SERVER_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    SERVER_IP="$(hostname -I | tr ' ' '\n' | grep -m1 -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true)"
-fi
+# Получаем именно публичный IPv4. hostname -I здесь не подходит:
+# за NAT он может вернуть частный адрес, который нельзя указывать в DNS.
+SERVER_IP=""
+for IP_SERVICE in https://api.ipify.org https://ipv4.icanhazip.com; do
+    SERVER_IP="$(curl -4 -fsS --max-time 10 "$IP_SERVICE" 2>/dev/null | tr -d '[:space:]' || true)"
+    is_ipv4 "$SERVER_IP" && break
+    SERVER_IP=""
+done
 
-[[ "$SERVER_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
-    || err "Не удалось определить IPv4-адрес сервера"
+[[ -n "$SERVER_IP" ]] \
+    || err "Не удалось определить публичный IPv4. Проверьте, что у VPS есть выход в интернет по IPv4."
+
+DNS_IPV4="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | paste -sd, - || true)"
 
 echo ""
 echo -e "  Домен:      ${GREEN}$DOMAIN${NC}"
@@ -71,8 +76,14 @@ echo -e "  IPv4:       ${GREEN}$SERVER_IP${NC}"
 echo -e "  TG Token:   ${GREEN}${TG_TOKEN:0:12}...${NC}"
 echo -e "  TG Group:   ${GREEN}$TG_GROUP${NC}"
 echo -e "  AdminToken: ${GREEN}${ADMIN_TOKEN:0:6}...${NC}"
+echo -e "  DNS A:      ${GREEN}${DNS_IPV4:-не найдена}${NC}"
 echo ""
-echo -e "${YELLOW}Убедитесь, что DNS A-запись $DOMAIN → $SERVER_IP настроена!${NC}"
+if [[ ",${DNS_IPV4}," == *",${SERVER_IP},"* ]]; then
+    log "DNS A-запись $DOMAIN уже указывает на $SERVER_IP"
+else
+    echo -e "${RED}[!] DNS A-запись $DOMAIN пока не указывает на $SERVER_IP.${NC}"
+    echo -e "${YELLOW}    Исправьте A-запись перед продолжением, иначе HTTPS-сертификат не будет выдан.${NC}"
+fi
 echo -e "${YELLOW}AAAA-запись для домена использовать не нужно.${NC}"
 echo -e "${YELLOW}Порты 80 и 443 должны быть свободны.${NC}"
 echo ""
