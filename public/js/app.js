@@ -55,7 +55,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-05-15-v2';
+const APP_CACHE_VERSION='2026-07-25-v4';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -173,7 +173,8 @@ function runClientCacheMigration(){
 }
 
 function setAppHeight(){
-  // 100dvh не всегда поддерживается, ставим через JS как запасной вариант
+  // visualViewport сжимается при открытии клавиатуры и сдвигает весь чат вверх.
+  // Используем layout viewport, как до добавления visualViewport.
   const h=window.innerHeight;
   document.getElementById('app').style.setProperty('height',h+'px');
 }
@@ -299,10 +300,10 @@ function renderMsg(msg){
   h+='<div class="bub">';
   if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock" data-reply-id="${esc(msg.reply_to_id)}"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
   if(msg.message_type==='image'&&msg.file_url){
-    h+=`<img class="mimg" src="${esc(msg.file_url)}" loading="lazy" onclick="openLb(this)">`;
+    h+=`<img class="mimg" src="${esc(msg.file_url)}" loading="lazy" decoding="async" onclick="openLb(this)" onerror="mediaFailed(this)">`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${linkify(msg.content)}</div>`;
   }else if(msg.message_type==='video'&&msg.file_url){
-    h+=`<video class="mvid" src="${esc(msg.file_url)}" controls preload="metadata"></video>`;
+    h+=`<video class="mvid" src="${esc(msg.file_url)}" controls preload="metadata" playsinline onerror="mediaFailed(this)"></video>`;
     if(msg.content)h+=`<div class="btxt" style="margin-top:5px">${linkify(msg.content)}</div>`;
   }else if(msg.message_type==='audio'&&msg.file_url){
     h+=`<audio class="maud" src="${esc(msg.file_url)}" controls></audio>`;
@@ -325,8 +326,8 @@ async function send(){
   let fu=null,fn=null,fm=null,mt='text';
   if(file){
     S.uploading=true;showSpin(true);
-    try{const fd=new FormData();fd.append('ticketId',S.tid);fd.append('sessionToken',S.token);fd.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:fd});if(!r.ok)throw 0;const d=await r.json();fu=d.url;fn=d.name;fm=d.mime;mt=d.type}
-    catch{showToast('Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
+    try{const fd=new FormData();fd.append('ticketId',S.tid);fd.append('sessionToken',S.token);fd.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:fd});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`Ошибка HTTP ${r.status}`);fu=d.url;fn=d.name;fm=d.mime;mt=d.type}
+    catch(error){showToast(error?.message||'Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
     S.uploading=false;showSpin(false);clearFile();
   }
   ti.value='';resize();updSend();closeEp();clearDraft();
@@ -362,7 +363,7 @@ function setFile(f){
   const maxMb=Number(CFG.uploadMaxMb)||50;
   if(f.size>maxMb*1024*1024){showToast(`Файл слишком большой (макс. ${maxMb} МБ)`,'err');return;}
   S.file=f;fp.style.display='block';fpth.innerHTML='';
-  if(canPreviewImage(f)){const img=document.createElement('img');img.src=URL.createObjectURL(f);fpth.appendChild(img)}
+  if(canPreviewImage(f)){const img=document.createElement('img');const previewUrl=URL.createObjectURL(f);img.src=previewUrl;img.onload=img.onerror=()=>URL.revokeObjectURL(previewUrl);fpth.appendChild(img)}
   else{const d=document.createElement('div');d.className='fpnm';d.textContent=f.name;fpth.appendChild(d)}
   updSend();
 }
@@ -447,6 +448,17 @@ sdwn.addEventListener('click',()=>{scrollBot();S.unread=0;updSDB()});
 
 /* ── LIGHTBOX ── */
 window.openLb=img=>{const lb=document.createElement('div');lb.className='lb';lb.innerHTML=`<img src="${img.src}">`;lb.onclick=()=>lb.remove();document.body.appendChild(lb)};
+window.mediaFailed=el=>{
+  if(!el||el.dataset.failed)return;
+  el.dataset.failed='1';
+  const url=el.currentSrc||el.src;
+  const box=document.createElement('div');box.className='media-fallback';
+  const label=document.createElement('span');label.textContent='Медиа не загрузилось';
+  const retry=document.createElement('button');retry.type='button';retry.textContent='Повторить';
+  const download=document.createElement('a');download.href=url;download.target='_blank';download.rel='noopener noreferrer';download.textContent='Открыть';
+  retry.onclick=()=>{el.dataset.failed='';el.src=url.split('?')[0]+`?retry=${Date.now()}`;box.replaceWith(el);};
+  box.append(label,retry,download);el.replaceWith(box);
+};
 
 /* ── DIALOG ── */
 function dlg(title,msg,cb){
