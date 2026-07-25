@@ -169,18 +169,12 @@ log ".env создан"
 # ── 4. Caddyfile ──
 info "4/5 Настройка Caddy (HTTPS по IPv4)..."
 
-mkdir -p /var/log/caddy
-chown -R caddy:caddy /var/log/caddy 2>/dev/null || true
-
 cat > /etc/caddy/Caddyfile <<CADDY
 ${DOMAIN} {
     bind 0.0.0.0
 
     reverse_proxy 127.0.0.1:3001 {
         header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up Host {host}
     }
 
     encode zstd gzip
@@ -203,15 +197,15 @@ ${DOMAIN} {
     }
 
     log {
-        output file /var/log/caddy/access.log {
-            roll_size 10mb
-            roll_keep 5
-        }
+        # stdout попадает в journald через systemd и не требует прав на /var/log.
+        output stdout
     }
 }
 CADDY
 
-# Проверяем конфигурацию перед перезапуском
+# Форматируем и проверяем конфигурацию перед перезапуском.
+caddy fmt --overwrite /etc/caddy/Caddyfile \
+    || err "Не удалось отформатировать Caddyfile"
 caddy validate --config /etc/caddy/Caddyfile \
     || err "Ошибка в конфигурации Caddy"
 
@@ -225,7 +219,7 @@ if systemctl is-active --quiet caddy; then
 else
     echo ""
     journalctl -u caddy --no-pager -n 30
-    err "Caddy не запустился. Проверьте порты 80 и 443."
+    err "Caddy не запустился. Причина указана в журнале выше; также проверьте порты 80 и 443."
 fi
 
 # ── 5. Приложение ──

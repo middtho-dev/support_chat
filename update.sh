@@ -52,12 +52,19 @@ new = '''
     @uploads path /uploads/*
     header @uploads Cache-Control "public, max-age=604800"'''
 updated, count = old.subn('\n' + new, text)
-if count:
+old_log = re.compile(r'''\n\s*log \{\n\s*output file /var/log/caddy/access\.log \{\n\s*roll_size 10mb\n\s*roll_keep 5\n\s*\}\n\s*\}''')
+updated, log_count = old_log.subn('\n    log {\n        output stdout\n    }', updated)
+if count or log_count:
     path.write_text(updated)
 PY
+  caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null
   caddy validate --config /etc/caddy/Caddyfile >/dev/null
-  systemctl reload caddy
-  log "Caddy перезагружен, кэш интерфейса обновлён"
+  if systemctl is-active --quiet caddy; then
+    systemctl reload caddy
+  else
+    systemctl restart caddy
+  fi
+  log "Конфигурация Caddy обновлена и перезагружена"
 fi
 
 info "Проверяю docker-compose.yml и .env..."
