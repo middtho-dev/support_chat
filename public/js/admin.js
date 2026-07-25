@@ -16,6 +16,18 @@ const TG = window.Telegram?.WebApp || null;
 const IS_TG_MINI = !!TG || new URLSearchParams(location.search).get('tg') === '1';
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
+function adminMediaFailed(el) {
+  if (!el || el.dataset.failed) return;
+  el.dataset.failed = '1';
+  const url = el.currentSrc || el.src;
+  const fallback = document.createElement('a');
+  fallback.className = 'file media-load-error';
+  fallback.href = url;
+  fallback.target = '_blank';
+  fallback.rel = 'noopener noreferrer';
+  fallback.innerHTML = '<span class="file-ico">!</span><span>Медиа не загрузилось — открыть</span>';
+  el.replaceWith(fallback);
+}
 const LINK_RE = /\b((?:https?:\/\/|www\.)[^\s<>"']+|(?:vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic|wireguard|tg):\/\/[^\s<>"']+)/gi;
 function linkify(value) {
   const text = String(value ?? '');
@@ -313,7 +325,7 @@ function composerHtml() { return `<div id="admin-file-preview" class="admin-file
 function wireComposer() { S.file = null; S.uploading = false; $('reply-txt').addEventListener('input', onReplyInput); $('reply-txt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } }); $('reply-send').addEventListener('click', sendReply); $('quick').addEventListener('click', showTemplatePicker); $('reply-attach').addEventListener('click', () => $('reply-file').click()); $('reply-file').addEventListener('change', () => { if ($('reply-file').files[0]) setReplyFile($('reply-file').files[0]); $('reply-file').value = ''; }); }
 function renderConversation() { const box = $('cv-msgs'); box.innerHTML = ''; S.lastDate = ''; if (!S.messages.length) { box.innerHTML = '<div class="empty">Сообщений пока нет</div>'; return; } S.messages.forEach(m => appendMessage(m, false)); scrollBottom(false); }
 function appendMessage(msg, scroll = false) { const box = $('cv-msgs'); if (!box) return; box.querySelector('.empty')?.remove(); if (msg.sender !== 'system') { const ds = fmtDate(new Date(msg.created_at)); if (ds !== S.lastDate) { S.lastDate = ds; box.insertAdjacentHTML('beforeend', `<div class="day">${esc(ds)}</div>`); } } const out = msg.sender === 'support'; const sys = msg.sender === 'system'; const sender = !out && !sys ? `<div class="sender">${esc(msg.sender_name || 'Клиент')}</div>` : ''; box.insertAdjacentHTML('beforeend', `<div class="msg ${sys ? 'sys' : out ? 'out' : 'in'}"><div class="bubble">${sender}${messageBody(msg)}${reactionsHtml(msg)}<div class="meta">${fmtTime(new Date(msg.created_at))}</div></div></div>`); if (scroll) scrollBottom(true); }
-function messageBody(msg) { const text = msg.content ? `<div>${linkify(msg.content)}</div>` : ''; if (msg.message_type === 'image' && msg.file_url) return `<img src="${esc(msg.file_url)}" loading="lazy">${text}`; if (msg.message_type === 'video' && msg.file_url) return `<video src="${esc(msg.file_url)}" controls preload="metadata"></video>${text}`; if (msg.message_type === 'audio' && msg.file_url) return `<audio src="${esc(msg.file_url)}" controls></audio>${text}`; if (msg.file_url) return `<a class="file" href="${esc(msg.file_url)}" target="_blank" rel="noopener noreferrer" download="${esc(msg.file_name || 'file')}"><span class="file-ico">↧</span><span>${esc(msg.file_name || 'Файл')}</span></a>${text}`; return text || '<span></span>'; }
+function messageBody(msg) { const text = msg.content ? `<div>${linkify(msg.content)}</div>` : ''; if (msg.message_type === 'image' && msg.file_url) return `<img src="${esc(msg.file_url)}" loading="lazy" decoding="async" onerror="adminMediaFailed(this)">${text}`; if (msg.message_type === 'video' && msg.file_url) return `<video src="${esc(msg.file_url)}" controls preload="metadata" playsinline onerror="adminMediaFailed(this)"></video>${text}`; if (msg.message_type === 'audio' && msg.file_url) return `<audio src="${esc(msg.file_url)}" controls></audio>${text}`; if (msg.file_url) return `<a class="file" href="${esc(msg.file_url)}" target="_blank" rel="noopener noreferrer" download="${esc(msg.file_name || 'file')}"><span class="file-ico">↧</span><span>${esc(msg.file_name || 'Файл')}</span></a>${text}`; return text || '<span></span>'; }
 function parseReactions(value) { if (!value) return []; if (Array.isArray(value)) return value.filter(Boolean); try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.filter(Boolean) : []; } catch { return []; } }
 function reactionsHtml(msg) { const reactions = parseReactions(msg.reactions); if (!reactions.length) return ''; return `<div class="rxns">${reactions.map(r => `<span>${esc(r)}</span>`).join('')}</div>`; }
 function scrollBottom(smooth) { const box = $('cv-msgs'); requestAnimationFrame(() => box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })); }
@@ -334,12 +346,12 @@ async function sendReply() {
       fd.append('adminToken', S.token);
       fd.append('file', file);
       const r = await fetch('/api/upload', { method: 'POST', body: fd });
-      if (!r.ok) throw 0;
-      const d = await r.json();
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Ошибка HTTP ${r.status}`);
       fileUrl = d.url; fileName = d.name; fileMime = d.mime; messageType = d.type;
-    } catch {
+    } catch (error) {
       S.uploading = false;
-      toast('Ошибка загрузки файла', 'err');
+      toast(error?.message || 'Ошибка загрузки файла', 'err');
       onReplyInput();
       renderReplyFilePreview();
       return;
