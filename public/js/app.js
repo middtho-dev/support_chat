@@ -98,6 +98,8 @@ async function init(){
 
   setAppHeight();
   window.addEventListener('resize',setAppHeight);
+  window.visualViewport?.addEventListener('resize',setAppHeight);
+  window.visualViewport?.addEventListener('scroll',setAppHeight);
 
   // Refresh messages when tab becomes visible again
   document.addEventListener('visibilitychange',()=>{
