@@ -31,6 +31,35 @@ set +a
 [ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
 [ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
+# setup.sh создаёт Caddyfile, но старые установки могут всё ещё кэшировать JS на год.
+# Обновляем только наш известный cache-блок, не перезаписывая пользовательскую конфигурацию Caddy.
+if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
+  info "Обновляю правила кэша Caddy..."
+  python3 - <<'PY'
+from pathlib import Path
+import re
+
+path = Path('/etc/caddy/Caddyfile')
+text = path.read_text()
+old = re.compile(r'\n\s*@static path /css/\* /js/\* /uploads/\*\n\s*header @static Cache-Control "public, max-age=31536000, immutable"')
+new = '''
+    @fresh path / /index.html /admin /admin.html /miniapp /tg-admin /js/* /sw.js /manifest.json
+    header @fresh Cache-Control "no-cache, must-revalidate"
+
+    @static path /css/* /logo.png
+    header @static Cache-Control "public, max-age=86400"
+
+    @uploads path /uploads/*
+    header @uploads Cache-Control "public, max-age=604800"'''
+updated, count = old.subn('\n' + new, text)
+if count:
+    path.write_text(updated)
+PY
+  caddy validate --config /etc/caddy/Caddyfile >/dev/null
+  systemctl reload caddy
+  log "Caddy перезагружен, кэш интерфейса обновлён"
+fi
+
 info "Проверяю docker-compose.yml и .env..."
 docker compose config >/dev/null
 log "Конфигурация Docker Compose корректна"
@@ -41,16 +70,6 @@ fi
 if [ -z "${PUBLIC_URL:-}" ] && [ -z "${TELEGRAM_WEBAPP_URL:-}" ]; then
   warn "PUBLIC_URL/TELEGRAM_WEBAPP_URL не заданы — Telegram Mini App для админки не будет настроен"
 fi
-
-# Проверка обязательных переменных
-set -a
-source .env
-set +a
-
-[ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
-[ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
-[ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
-[ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
 info "Останавливаю контейнер..."
 docker compose down --remove-orphans
@@ -65,7 +84,7 @@ info "Жду готовность приложения..."
 PORT_TO_CHECK="${PORT:-3001}"
 for i in {1..30}; do
   if docker ps --filter "name=^/support-chat$" --filter "status=running" --format '{{.Names}}' | grep -qx "support-chat"; then
-    if docker exec support-chat sh -lc "wget -qO- http://localhost:${PORT_TO_CHECK}/health >/dev/null" 2>/dev/null; then
+    if docker exec support-chat sh -lc "wget -qO- http://127.0.0.1:${PORT_TO_CHECK}/health >/dev/null" 2>/dev/null; then
       log "Контейнер запущен и healthcheck отвечает"
       break
     fi
