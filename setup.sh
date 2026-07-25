@@ -32,6 +32,7 @@ echo -e "${NC}"
 [ "$EUID" -ne 0 ] && err "Нужен root: sudo bash setup.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/scripts/write-caddyfile.sh"
 
 # Не отключаем IPv6 глобально: это может оборвать SSH-сессию.
 # Вместо этого привязываем все сервисы к IPv4 и принудительно используем IPv4 для загрузок.
@@ -169,39 +170,8 @@ log ".env создан"
 # ── 4. Caddyfile ──
 info "4/5 Настройка Caddy (HTTPS по IPv4)..."
 
-cat > /etc/caddy/Caddyfile <<CADDY
-${DOMAIN} {
-    bind 0.0.0.0
-
-    reverse_proxy 127.0.0.1:3001 {
-        header_up X-Real-IP {remote_host}
-    }
-
-    encode zstd gzip
-
-    # JS и HTML не имеют hash в имени: их нельзя кэшировать навсегда,
-    # иначе после update.sh на устройствах остаётся старый интерфейс.
-    @fresh path / /index.html /admin /admin.html /miniapp /tg-admin /js/* /sw.js /manifest.json
-    header @fresh Cache-Control "no-cache, must-revalidate"
-
-    @static path /css/* /logo.png
-    header @static Cache-Control "public, max-age=86400"
-
-    @uploads path /uploads/*
-    header @uploads Cache-Control "public, max-age=604800"
-
-    header {
-        -Server
-        X-Content-Type-Options nosniff
-        X-Frame-Options SAMEORIGIN
-    }
-
-    log {
-        # stdout попадает в journald через systemd и не требует прав на /var/log.
-        output stdout
-    }
-}
-CADDY
+write_caddyfile "$DOMAIN" 3001 /etc/caddy/Caddyfile \
+    || err "Не удалось создать Caddyfile"
 
 # Форматируем и проверяем конфигурацию перед перезапуском.
 caddy fmt --overwrite /etc/caddy/Caddyfile \

@@ -10,6 +10,7 @@ err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/scripts/write-caddyfile.sh"
 
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════╗"
@@ -31,40 +32,26 @@ set +a
 [ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
 [ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
-# setup.sh создаёт Caddyfile, но старые установки могут всё ещё кэшировать JS на год.
-# Обновляем только наш известный cache-блок, не перезаписывая пользовательскую конфигурацию Caddy.
-if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
-  info "Обновляю правила кэша Caddy..."
-  python3 - <<'PY'
-from pathlib import Path
-import re
-
-path = Path('/etc/caddy/Caddyfile')
-text = path.read_text()
-old = re.compile(r'\n\s*@static path /css/\* /js/\* /uploads/\*\n\s*header @static Cache-Control "public, max-age=31536000, immutable"')
-new = '''
-    @fresh path / /index.html /admin /admin.html /miniapp /tg-admin /js/* /sw.js /manifest.json
-    header @fresh Cache-Control "no-cache, must-revalidate"
-
-    @static path /css/* /logo.png
-    header @static Cache-Control "public, max-age=86400"
-
-    @uploads path /uploads/*
-    header @uploads Cache-Control "public, max-age=604800"'''
-updated, count = old.subn('\n' + new, text)
-old_log = re.compile(r'''\n\s*log \{\n\s*output file /var/log/caddy/access\.log \{\n\s*roll_size 10mb\n\s*roll_keep 5\n\s*\}\n\s*\}''')
-updated, log_count = old_log.subn('\n    log {\n        output stdout\n    }', updated)
-if count or log_count:
-    path.write_text(updated)
-PY
-  caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null
-  caddy validate --config /etc/caddy/Caddyfile >/dev/null
-  if systemctl is-active --quiet caddy; then
-    systemctl reload caddy
-  else
-    systemctl restart caddy
+# Не патчим старый Caddyfile регулярками: формат мог измениться.
+# Полностью пересоздаём конфиг из PUBLIC_URL, но сохраняем backup до успешной проверки.
+if command -v caddy >/dev/null 2>&1 && [ -n "${PUBLIC_URL:-}" ]; then
+  info "Пересоздаю конфигурацию Caddy..."
+  CADDY_DOMAIN="${PUBLIC_URL#*://}"
+  CADDY_DOMAIN="${CADDY_DOMAIN%%/*}"
+  CADDY_BACKUP="/etc/caddy/Caddyfile.update-backup"
+  [ ! -f /etc/caddy/Caddyfile ] || cp -a /etc/caddy/Caddyfile "$CADDY_BACKUP"
+  if ! write_caddyfile "$CADDY_DOMAIN" "${PORT:-3001}" /etc/caddy/Caddyfile \
+      || ! caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null \
+      || ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+    [ ! -f "$CADDY_BACKUP" ] || cp -a "$CADDY_BACKUP" /etc/caddy/Caddyfile
+    err "Новый Caddyfile не прошёл проверку; прежний конфиг восстановлен."
   fi
-  log "Конфигурация Caddy обновлена и перезагружена"
+  if ! systemctl restart caddy || ! systemctl is-active --quiet caddy; then
+    journalctl -u caddy --no-pager -n 30 || true
+    err "Caddy не запустился после обновления; причина показана выше."
+  fi
+  rm -f "$CADDY_BACKUP"
+  log "Конфигурация Caddy пересоздана, Caddy запущен"
 fi
 
 info "Проверяю docker-compose.yml и .env..."
