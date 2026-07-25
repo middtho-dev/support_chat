@@ -701,4 +701,5 @@ app.get('/health', (req, res) => res.json({
 }));
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`[Server] Running on http://localhost:${PORT}`));
+const HOST = process.env.HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => console.log(`[Server] Running on http://${HOST}:${PORT}`));

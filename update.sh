@@ -10,6 +10,7 @@ err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/scripts/write-caddyfile.sh"
 
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════╗"
@@ -31,6 +32,28 @@ set +a
 [ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
 [ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
+# Не патчим старый Caddyfile регулярками: формат мог измениться.
+# Полностью пересоздаём конфиг из PUBLIC_URL, но сохраняем backup до успешной проверки.
+if command -v caddy >/dev/null 2>&1 && [ -n "${PUBLIC_URL:-}" ]; then
+  info "Пересоздаю конфигурацию Caddy..."
+  CADDY_DOMAIN="${PUBLIC_URL#*://}"
+  CADDY_DOMAIN="${CADDY_DOMAIN%%/*}"
+  CADDY_BACKUP="/etc/caddy/Caddyfile.update-backup"
+  [ ! -f /etc/caddy/Caddyfile ] || cp -a /etc/caddy/Caddyfile "$CADDY_BACKUP"
+  if ! write_caddyfile "$CADDY_DOMAIN" "${PORT:-3001}" /etc/caddy/Caddyfile \
+      || ! caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null \
+      || ! caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+    [ ! -f "$CADDY_BACKUP" ] || cp -a "$CADDY_BACKUP" /etc/caddy/Caddyfile
+    err "Новый Caddyfile не прошёл проверку; прежний конфиг восстановлен."
+  fi
+  if ! systemctl restart caddy || ! systemctl is-active --quiet caddy; then
+    journalctl -u caddy --no-pager -n 30 || true
+    err "Caddy не запустился после обновления; причина показана выше."
+  fi
+  rm -f "$CADDY_BACKUP"
+  log "Конфигурация Caddy пересоздана, Caddy запущен"
+fi
+
 info "Проверяю docker-compose.yml и .env..."
 docker compose config >/dev/null
 log "Конфигурация Docker Compose корректна"
@@ -41,16 +64,6 @@ fi
 if [ -z "${PUBLIC_URL:-}" ] && [ -z "${TELEGRAM_WEBAPP_URL:-}" ]; then
   warn "PUBLIC_URL/TELEGRAM_WEBAPP_URL не заданы — Telegram Mini App для админки не будет настроен"
 fi
-
-# Проверка обязательных переменных
-set -a
-source .env
-set +a
-
-[ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
-[ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
-[ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
-[ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
 
 info "Останавливаю контейнер..."
 docker compose down --remove-orphans
@@ -65,7 +78,7 @@ info "Жду готовность приложения..."
 PORT_TO_CHECK="${PORT:-3001}"
 for i in {1..30}; do
   if docker ps --filter "name=^/support-chat$" --filter "status=running" --format '{{.Names}}' | grep -qx "support-chat"; then
-    if docker exec support-chat sh -lc "wget -qO- http://localhost:${PORT_TO_CHECK}/health >/dev/null" 2>/dev/null; then
+    if docker exec support-chat sh -lc "wget -qO- http://127.0.0.1:${PORT_TO_CHECK}/health >/dev/null" 2>/dev/null; then
       log "Контейнер запущен и healthcheck отвечает"
       break
     fi
