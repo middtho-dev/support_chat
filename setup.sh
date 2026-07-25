@@ -11,6 +11,17 @@ log()  { echo -e "${GREEN}[✓]${NC} $1"; }
 info() { echo -e "${BLUE}[→]${NC} $1"; }
 err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
+APT_LOCK_TIMEOUT=600
+apt_run() {
+    # unattended-upgrades часто запущен сразу после старта VPS.
+    # Не удаляем lock-файлы: это может повредить dpkg. APT сам дождётся освобождения.
+    if ! DEBIAN_FRONTEND=noninteractive apt-get \
+        -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT}" \
+        "$@"; then
+        err "APT не смог выполнить команду за ${APT_LOCK_TIMEOUT} с. Дождитесь завершения unattended-upgrades и повторите setup.sh."
+    fi
+}
+
 clear
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════╗"
@@ -109,9 +120,10 @@ systemctl start docker
 info "2/5 Caddy..."
 
 if ! command -v caddy &>/dev/null; then
-    apt-get update -qq
+    info "Проверяю APT (если идёт unattended-upgrades, жду освобождения до 10 минут)..."
+    apt_run update -qq
 
-    apt-get install -y \
+    apt_run install -y \
         debian-keyring \
         debian-archive-keyring \
         apt-transport-https \
@@ -130,8 +142,8 @@ if ! command -v caddy &>/dev/null; then
         'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
         | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 
-    apt-get update -qq
-    apt-get install -y caddy -qq
+    apt_run update -qq
+    apt_run install -y caddy -qq
 
     log "Caddy установлен"
 else
