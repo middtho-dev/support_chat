@@ -55,7 +55,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-07-25-v3';
+const APP_CACHE_VERSION='2026-07-25-v4';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -175,8 +175,9 @@ function runClientCacheMigration(){
 }
 
 function setAppHeight(){
-  // visualViewport учитывает клавиатуру и панели Safari/Telegram без скачков композера.
-  const h=Math.round(window.visualViewport?.height||window.innerHeight);
+  // visualViewport сжимается при открытии клавиатуры и сдвигает весь чат вверх.
+  // Используем layout viewport, как до добавления visualViewport.
+  const h=window.innerHeight;
   document.getElementById('app').style.setProperty('height',h+'px');
 }
 
