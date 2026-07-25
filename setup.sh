@@ -11,6 +11,17 @@ log()  { echo -e "${GREEN}[✓]${NC} $1"; }
 info() { echo -e "${BLUE}[→]${NC} $1"; }
 err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
+APT_LOCK_TIMEOUT=600
+apt_run() {
+    # unattended-upgrades часто запущен сразу после старта VPS.
+    # Не удаляем lock-файлы: это может повредить dpkg. APT сам дождётся освобождения.
+    if ! DEBIAN_FRONTEND=noninteractive apt-get \
+        -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT}" \
+        "$@"; then
+        err "APT не смог выполнить команду за ${APT_LOCK_TIMEOUT} с. Дождитесь завершения unattended-upgrades и повторите setup.sh."
+    fi
+}
+
 clear
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════╗"
@@ -22,25 +33,17 @@ echo -e "${NC}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Принудительная работа через IPv4 ──
-info "Настройка IPv4..."
+# Не отключаем IPv6 глобально: это может оборвать SSH-сессию.
+# Вместо этого привязываем все сервисы к IPv4 и принудительно используем IPv4 для загрузок.
+info "Настройка установки через IPv4..."
 
-cat > /etc/sysctl.d/99-disable-ipv6.conf <<'EOF'
-net.ipv6.conf.all.disable_ipv6 = 1
-net.ipv6.conf.default.disable_ipv6 = 1
-net.ipv6.conf.lo.disable_ipv6 = 1
-EOF
-
-sysctl -p /etc/sysctl.d/99-disable-ipv6.conf >/dev/null 2>&1 || true
-
-# APT будет скачивать пакеты только через IPv4
 mkdir -p /etc/apt/apt.conf.d
 
 cat > /etc/apt/apt.conf.d/99force-ipv4 <<'EOF'
 Acquire::ForceIPv4 "true";
 EOF
 
-log "IPv6 отключён, APT настроен на IPv4"
+log "APT настроен на IPv4"
 
 # ── Ввод данных ──
 read -p "$(echo -e "${BLUE}")Домен (например helpo.su): $(echo -e "${NC}")" DOMAIN
@@ -55,15 +58,28 @@ read -p "$(echo -e "${BLUE}")Telegram Group ID (-1001234567890): $(echo -e "${NC
 read -p "$(echo -e "${BLUE}")Admin Token для /admin: $(echo -e "${NC}")" ADMIN_TOKEN
 [[ -z "$ADMIN_TOKEN" ]] && err "Admin Token не указан"
 
-# Получаем только публичный IPv4
-SERVER_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
+is_ipv4() {
+    local ip="$1" octet
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -r -a octets <<< "$ip"
+    for octet in "${octets[@]}"; do
+        ((10#$octet <= 255)) || return 1
+    done
+}
 
-if [[ ! "$SERVER_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    SERVER_IP="$(hostname -I | tr ' ' '\n' | grep -m1 -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true)"
-fi
+# Получаем именно публичный IPv4. hostname -I здесь не подходит:
+# за NAT он может вернуть частный адрес, который нельзя указывать в DNS.
+SERVER_IP=""
+for IP_SERVICE in https://api.ipify.org https://ipv4.icanhazip.com; do
+    SERVER_IP="$(curl -4 -fsS --max-time 10 "$IP_SERVICE" 2>/dev/null | tr -d '[:space:]' || true)"
+    is_ipv4 "$SERVER_IP" && break
+    SERVER_IP=""
+done
 
-[[ "$SERVER_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
-    || err "Не удалось определить IPv4-адрес сервера"
+[[ -n "$SERVER_IP" ]] \
+    || err "Не удалось определить публичный IPv4. Проверьте, что у VPS есть выход в интернет по IPv4."
+
+DNS_IPV4="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | paste -sd, - || true)"
 
 echo ""
 echo -e "  Домен:      ${GREEN}$DOMAIN${NC}"
@@ -71,8 +87,14 @@ echo -e "  IPv4:       ${GREEN}$SERVER_IP${NC}"
 echo -e "  TG Token:   ${GREEN}${TG_TOKEN:0:12}...${NC}"
 echo -e "  TG Group:   ${GREEN}$TG_GROUP${NC}"
 echo -e "  AdminToken: ${GREEN}${ADMIN_TOKEN:0:6}...${NC}"
+echo -e "  DNS A:      ${GREEN}${DNS_IPV4:-не найдена}${NC}"
 echo ""
-echo -e "${YELLOW}Убедитесь, что DNS A-запись $DOMAIN → $SERVER_IP настроена!${NC}"
+if [[ ",${DNS_IPV4}," == *",${SERVER_IP},"* ]]; then
+    log "DNS A-запись $DOMAIN уже указывает на $SERVER_IP"
+else
+    echo -e "${RED}[!] DNS A-запись $DOMAIN пока не указывает на $SERVER_IP.${NC}"
+    echo -e "${YELLOW}    Исправьте A-запись перед продолжением, иначе HTTPS-сертификат не будет выдан.${NC}"
+fi
 echo -e "${YELLOW}AAAA-запись для домена использовать не нужно.${NC}"
 echo -e "${YELLOW}Порты 80 и 443 должны быть свободны.${NC}"
 echo ""
@@ -98,9 +120,10 @@ systemctl start docker
 info "2/5 Caddy..."
 
 if ! command -v caddy &>/dev/null; then
-    apt-get update -qq
+    info "Проверяю APT (если идёт unattended-upgrades, жду освобождения до 10 минут)..."
+    apt_run update -qq
 
-    apt-get install -y \
+    apt_run install -y \
         debian-keyring \
         debian-archive-keyring \
         apt-transport-https \
@@ -119,8 +142,8 @@ if ! command -v caddy &>/dev/null; then
         'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
         | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
 
-    apt-get update -qq
-    apt-get install -y caddy -qq
+    apt_run update -qq
+    apt_run install -y caddy -qq
 
     log "Caddy установлен"
 else
@@ -146,24 +169,26 @@ log ".env создан"
 # ── 4. Caddyfile ──
 info "4/5 Настройка Caddy (HTTPS по IPv4)..."
 
-mkdir -p /var/log/caddy
-chown -R caddy:caddy /var/log/caddy 2>/dev/null || true
-
 cat > /etc/caddy/Caddyfile <<CADDY
 ${DOMAIN} {
     bind 0.0.0.0
 
     reverse_proxy 127.0.0.1:3001 {
         header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up Host {host}
     }
 
     encode zstd gzip
 
-    @static path /css/* /js/* /uploads/*
-    header @static Cache-Control "public, max-age=31536000, immutable"
+    # JS и HTML не имеют hash в имени: их нельзя кэшировать навсегда,
+    # иначе после update.sh на устройствах остаётся старый интерфейс.
+    @fresh path / /index.html /admin /admin.html /miniapp /tg-admin /js/* /sw.js /manifest.json
+    header @fresh Cache-Control "no-cache, must-revalidate"
+
+    @static path /css/* /logo.png
+    header @static Cache-Control "public, max-age=86400"
+
+    @uploads path /uploads/*
+    header @uploads Cache-Control "public, max-age=604800"
 
     header {
         -Server
@@ -172,15 +197,15 @@ ${DOMAIN} {
     }
 
     log {
-        output file /var/log/caddy/access.log {
-            roll_size 10mb
-            roll_keep 5
-        }
+        # stdout попадает в journald через systemd и не требует прав на /var/log.
+        output stdout
     }
 }
 CADDY
 
-# Проверяем конфигурацию перед перезапуском
+# Форматируем и проверяем конфигурацию перед перезапуском.
+caddy fmt --overwrite /etc/caddy/Caddyfile \
+    || err "Не удалось отформатировать Caddyfile"
 caddy validate --config /etc/caddy/Caddyfile \
     || err "Ошибка в конфигурации Caddy"
 
@@ -194,7 +219,7 @@ if systemctl is-active --quiet caddy; then
 else
     echo ""
     journalctl -u caddy --no-pager -n 30
-    err "Caddy не запустился. Проверьте порты 80 и 443."
+    err "Caddy не запустился. Причина указана в журнале выше; также проверьте порты 80 и 443."
 fi
 
 # ── 5. Приложение ──
