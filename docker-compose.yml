@@ -20,7 +20,7 @@ services:
       - TELEGRAM_WEBAPP_URL=${TELEGRAM_WEBAPP_URL:-}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:$$PORT/health || exit 1"]
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:$$PORT/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -173,8 +173,16 @@ ${DOMAIN} {
 
     encode zstd gzip
 
-    @static path /css/* /js/* /uploads/*
-    header @static Cache-Control "public, max-age=31536000, immutable"
+    # JS и HTML не имеют hash в имени: их нельзя кэшировать навсегда,
+    # иначе после update.sh на устройствах остаётся старый интерфейс.
+    @fresh path / /index.html /admin /admin.html /miniapp /tg-admin /js/* /sw.js /manifest.json
+    header @fresh Cache-Control "no-cache, must-revalidate"
+
+    @static path /css/* /logo.png
+    header @static Cache-Control "public, max-age=86400"
+
+    @uploads path /uploads/*
+    header @uploads Cache-Control "public, max-age=604800"
 
     header {
         -Server

@@ -478,7 +478,8 @@ async function downloadFile(msg) {
     if (!fileId) return null;
     const link = await bot.getFileLink(fileId);
     const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 30000);
+    // Видео до 50 МБ на медленном VPS не всегда успевает за прежние 30 секунд.
+    const fetchTimeout = setTimeout(() => controller.abort(), 120000);
     let resp;
     try { resp = await fetch(link, { signal: controller.signal }); }
     finally { clearTimeout(fetchTimeout); }
@@ -487,7 +488,7 @@ async function downloadFile(msg) {
     if (buf.length > cfg().uploadMaxMb * 1024 * 1024) throw new Error('File too large');
     const dir = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const safe = `tg_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const safe = `tg_${uuidv4()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     await fsp.writeFile(path.join(dir, safe), buf);
     return { url: `/uploads/${safe}`, name: fileName, mime: fileMime, type };
   } catch (e) { console.error('[TG] downloadFile:', e.message); return null; }
