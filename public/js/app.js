@@ -55,7 +55,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-07-25-v4';
+const APP_CACHE_VERSION='2026-07-25-v5';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -96,10 +96,11 @@ async function init(){
     navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(APP_CACHE_VERSION)}`).catch(e=>console.warn('[SW] register failed',e));
   }
 
-  setAppHeight();
-  window.addEventListener('resize',setAppHeight);
-  window.visualViewport?.addEventListener('resize',setAppHeight);
-  window.visualViewport?.addEventListener('scroll',setAppHeight);
+  scheduleViewportSync();
+  window.addEventListener('resize',scheduleViewportSync,{passive:true});
+  window.addEventListener('orientationchange',scheduleViewportSync,{passive:true});
+  window.visualViewport?.addEventListener('resize',scheduleViewportSync,{passive:true});
+  window.visualViewport?.addEventListener('scroll',scheduleViewportSync,{passive:true});
 
   // Refresh messages when tab becomes visible again
   document.addEventListener('visibilitychange',()=>{
@@ -174,11 +175,20 @@ function runClientCacheMigration(){
   }
 }
 
-function setAppHeight(){
-  // visualViewport сжимается при открытии клавиатуры и сдвигает весь чат вверх.
-  // Используем layout viewport, как до добавления visualViewport.
-  const h=window.innerHeight;
-  document.getElementById('app').style.setProperty('height',h+'px');
+let viewportFrame=0;
+function scheduleViewportSync(){
+  if(viewportFrame)return;
+  viewportFrame=requestAnimationFrame(()=>{viewportFrame=0;syncViewport();});
+}
+function syncViewport(){
+  const app=$('app'),viewport=window.visualViewport;
+  // Safari/Telegram панорамируют layout viewport к полю ввода. Одной только высоты
+  // недостаточно: нужно компенсировать offsetTop, чтобы шапка не уезжала за экран.
+  const height=Math.round(viewport?.height||window.innerHeight);
+  const top=Math.round(viewport?.offsetTop||0);
+  app.style.height=`${height}px`;
+  app.style.transform=top?`translate3d(0,${top}px,0)`:'none';
+  if(S.tid&&_pinToBottom)scrollBot(false);
 }
 
 /* ── LOGIN ── */
