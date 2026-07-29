@@ -55,12 +55,67 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '[]'`); } 
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_attempts INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_last_error TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_next_retry_at DATETIME`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_chat_id TEXT`); } catch {}
 
 // Migrations: admin + topic tracking
 try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_topic_deleted INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_tags TEXT DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_note TEXT DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN assigned_operator_id TEXT`); } catch {}
+
+// Private Telegram operator inbox. A private topic id is scoped to its chat, so
+// never store or look it up without the operator chat id.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telegram_operators (
+    telegram_user_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    username TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS telegram_ticket_threads (
+    ticket_id TEXT NOT NULL,
+    operator_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    thread_id INTEGER NOT NULL,
+    root_message_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticket_id, operator_id),
+    UNIQUE (chat_id, thread_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (operator_id) REFERENCES telegram_operators(telegram_user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS telegram_ticket_notifications (
+    ticket_id TEXT NOT NULL,
+    operator_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticket_id, operator_id),
+    UNIQUE (chat_id, message_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (operator_id) REFERENCES telegram_operators(telegram_user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_messages_tg_destination
+    ON messages(telegram_chat_id, telegram_message_id);
+  CREATE INDEX IF NOT EXISTS idx_ticket_threads_destination
+    ON telegram_ticket_threads(chat_id, thread_id);
+  CREATE INDEX IF NOT EXISTS idx_ticket_threads_status
+    ON telegram_ticket_threads(status, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_ticket_notifications_destination
+    ON telegram_ticket_notifications(chat_id, message_id);
+  CREATE INDEX IF NOT EXISTS idx_tickets_assigned_operator
+    ON tickets(assigned_operator_id, status);
+`);
 
 // Push subscriptions
 db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -106,7 +161,14 @@ module.exports = {
 
   getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
   getTicketBySession:    db.prepare(`SELECT * FROM tickets WHERE session_token = ? AND status = 'open'`),
-  getTicketById:         db.prepare(`SELECT * FROM tickets WHERE id = ?`),
+  getTicketById: db.prepare(`
+    SELECT t.*, op.display_name AS assigned_operator_name,
+      op.username AS assigned_operator_username
+    FROM tickets t
+    LEFT JOIN telegram_operators op
+      ON op.telegram_user_id = t.assigned_operator_id
+    WHERE t.id = ?
+  `),
 
   setTopicId:   db.prepare(`UPDATE tickets SET telegram_topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
   closeTicket:  db.prepare(`UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
@@ -118,6 +180,25 @@ module.exports = {
   getTicketByTopicIdAny: db.prepare(`SELECT * FROM tickets WHERE telegram_topic_id = ?`),
 
   getAllOpenTickets: db.prepare(`SELECT * FROM tickets WHERE status = 'open' ORDER BY updated_at DESC`),
+  getOpenUnassignedTickets: db.prepare(`
+    SELECT * FROM tickets
+    WHERE status = 'open' AND assigned_operator_id IS NULL
+    ORDER BY created_at ASC
+    LIMIT ?
+  `),
+  assignTicketIfUnassigned: db.prepare(`
+    UPDATE tickets
+    SET assigned_operator_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'open' AND assigned_operator_id IS NULL
+  `),
+  assignTicket: db.prepare(`
+    UPDATE tickets SET assigned_operator_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `),
+  unassignTicket: db.prepare(`
+    UPDATE tickets SET assigned_operator_id = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `),
   getOpenTicketsWithoutTelegramTopic: db.prepare(`
     SELECT * FROM tickets
     WHERE status = 'open'
@@ -192,6 +273,10 @@ module.exports = {
   `),
 
   getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
+  getMessageByTelegramDestination: db.prepare(`
+    SELECT * FROM messages
+    WHERE telegram_chat_id = ? AND telegram_message_id = ?
+  `),
 
   getMessageById: db.prepare(`SELECT * FROM messages WHERE id = ?`),
 
@@ -208,10 +293,27 @@ module.exports = {
     ORDER BY m.created_at ASC
     LIMIT ?
   `),
+  getPendingPrivateTelegramMessages: db.prepare(`
+    SELECT m.*, t.user_name, t.status AS ticket_status, t.telegram_topic_id,
+      t.telegram_topic_deleted
+    FROM messages m
+    JOIN tickets t ON t.id = m.ticket_id
+    WHERE m.sender != 'system'
+      AND COALESCE(m.is_auto, 0) = 0
+      AND m.telegram_message_id IS NULL
+      AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
+    ORDER BY m.created_at ASC
+    LIMIT ?
+  `),
 
   updateTelegramMessageId: db.prepare(`
     UPDATE messages SET telegram_message_id = ?, telegram_last_error = NULL,
       telegram_next_retry_at = NULL WHERE id = ?
+  `),
+  updateTelegramDelivery: db.prepare(`
+    UPDATE messages SET telegram_chat_id = ?, telegram_message_id = ?,
+      telegram_last_error = NULL, telegram_next_retry_at = NULL
+    WHERE id = ?
   `),
   markTelegramAttempt: db.prepare(`
     UPDATE messages SET telegram_attempts = COALESCE(telegram_attempts, 0) + 1,
@@ -219,6 +321,113 @@ module.exports = {
     WHERE id = ? AND telegram_message_id IS NULL
   `),
   updateMessageReactions: db.prepare(`UPDATE messages SET reactions = ? WHERE id = ?`),
+
+  // Telegram private operators, assignment cards, and per-operator topics
+  upsertTelegramOperator: db.prepare(`
+    INSERT INTO telegram_operators
+      (telegram_user_id, display_name, username, active, last_seen_at)
+    VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
+    ON CONFLICT(telegram_user_id) DO UPDATE SET
+      display_name = excluded.display_name,
+      username = excluded.username,
+      active = 1,
+      last_seen_at = CURRENT_TIMESTAMP
+  `),
+  touchTelegramOperator: db.prepare(`
+    UPDATE telegram_operators SET last_seen_at = CURRENT_TIMESTAMP
+    WHERE telegram_user_id = ?
+  `),
+  getTelegramOperator: db.prepare(`
+    SELECT * FROM telegram_operators WHERE telegram_user_id = ?
+  `),
+  getActiveTelegramOperators: db.prepare(`
+    SELECT * FROM telegram_operators WHERE active = 1
+    ORDER BY registered_at ASC
+  `),
+  deactivateTelegramOperator: db.prepare(`
+    UPDATE telegram_operators SET active = 0 WHERE telegram_user_id = ?
+  `),
+  saveTelegramThread: db.prepare(`
+    INSERT INTO telegram_ticket_threads
+      (ticket_id, operator_id, chat_id, thread_id, root_message_id, status)
+    VALUES (?, ?, ?, ?, ?, 'active')
+    ON CONFLICT(ticket_id, operator_id) DO UPDATE SET
+      chat_id = excluded.chat_id,
+      thread_id = excluded.thread_id,
+      root_message_id = excluded.root_message_id,
+      status = 'active',
+      updated_at = CURRENT_TIMESTAMP
+  `),
+  setTelegramThreadRoot: db.prepare(`
+    UPDATE telegram_ticket_threads
+    SET root_message_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE ticket_id = ? AND operator_id = ?
+  `),
+  getTelegramThreadForTicket: db.prepare(`
+    SELECT th.*, op.display_name AS operator_name, op.username AS operator_username
+    FROM telegram_ticket_threads th
+    JOIN telegram_operators op ON op.telegram_user_id = th.operator_id
+    WHERE th.ticket_id = ? AND th.status = 'active'
+    ORDER BY th.updated_at DESC LIMIT 1
+  `),
+  getTelegramThreadForTicketOperator: db.prepare(`
+    SELECT * FROM telegram_ticket_threads
+    WHERE ticket_id = ? AND operator_id = ? AND status = 'active'
+  `),
+  getTelegramThreadForTicketOperatorAny: db.prepare(`
+    SELECT * FROM telegram_ticket_threads
+    WHERE ticket_id = ? AND operator_id = ?
+  `),
+  getTelegramThreadByDestination: db.prepare(`
+    SELECT * FROM telegram_ticket_threads
+    WHERE chat_id = ? AND thread_id = ? AND status = 'active'
+  `),
+  closeTelegramThreadsForTicket: db.prepare(`
+    UPDATE telegram_ticket_threads
+    SET status = 'closed', updated_at = CURRENT_TIMESTAMP
+    WHERE ticket_id = ? AND status = 'active'
+  `),
+  reopenTelegramThread: db.prepare(`
+    UPDATE telegram_ticket_threads
+    SET status = 'active', updated_at = CURRENT_TIMESTAMP
+    WHERE ticket_id = ? AND operator_id = ?
+  `),
+  deleteTelegramThread: db.prepare(`
+    DELETE FROM telegram_ticket_threads WHERE ticket_id = ? AND operator_id = ?
+  `),
+  getClosedTelegramThreadsBefore: db.prepare(`
+    SELECT th.*, t.user_name, t.closed_at
+    FROM telegram_ticket_threads th
+    JOIN tickets t ON t.id = th.ticket_id
+    WHERE th.status = 'closed' AND t.closed_at IS NOT NULL AND t.closed_at < ?
+    ORDER BY t.closed_at ASC
+  `),
+  saveTelegramNotification: db.prepare(`
+    INSERT INTO telegram_ticket_notifications
+      (ticket_id, operator_id, chat_id, message_id, state)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(ticket_id, operator_id) DO UPDATE SET
+      chat_id = excluded.chat_id,
+      message_id = excluded.message_id,
+      state = excluded.state,
+      updated_at = CURRENT_TIMESTAMP
+  `),
+  getTelegramNotification: db.prepare(`
+    SELECT * FROM telegram_ticket_notifications
+    WHERE ticket_id = ? AND operator_id = ?
+  `),
+  getTelegramNotificationByDestination: db.prepare(`
+    SELECT * FROM telegram_ticket_notifications
+    WHERE chat_id = ? AND message_id = ?
+  `),
+  getTelegramNotificationsForTicket: db.prepare(`
+    SELECT * FROM telegram_ticket_notifications WHERE ticket_id = ?
+  `),
+  updateTelegramNotificationState: db.prepare(`
+    UPDATE telegram_ticket_notifications
+    SET state = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE ticket_id = ?
+  `),
 
   // Push subscriptions
   savePushSub: db.prepare(`
@@ -240,6 +449,8 @@ module.exports = {
   updateTicketMeta: db.prepare(`UPDATE tickets SET admin_tags = ?, admin_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
   getTicketsForAdmin: db.prepare(`
     SELECT t.*,
+      op.display_name AS assigned_operator_name,
+      op.username AS assigned_operator_username,
       m.content        AS last_msg,
       m.sender         AS last_sender,
       m.message_type   AS last_msg_type,
@@ -248,6 +459,8 @@ module.exports = {
        WHERE ticket_id = t.id AND sender = 'user'
          AND created_at > COALESCE(t.support_read_at, '1970-01-01')) AS unread_count
     FROM tickets t
+    LEFT JOIN telegram_operators op
+      ON op.telegram_user_id = t.assigned_operator_id
     LEFT JOIN messages m ON m.id = (
       SELECT id FROM messages WHERE ticket_id = t.id ORDER BY created_at DESC LIMIT 1
     )

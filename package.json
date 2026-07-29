@@ -8,14 +8,14 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/telegram.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js && node --check public/js/admin-enhance.js"
+    "check": "node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/telegram.js && node --check src/telegram-private.js && node --check src/telegram-legacy.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js && node --check public/js/admin-enhance.js"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
-    "multer": "^1.4.5-lts.1",
-    "node-telegram-bot-api": "^0.65.1",
+    "multer": "^2.2.0",
+    "node-telegram-bot-api": "^1.2.0",
     "socket.io": "^4.7.2",
     "uuid": "^9.0.0",
     "web-push": "^3.6.7"

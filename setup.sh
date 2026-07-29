@@ -53,8 +53,8 @@ read -p "$(echo -e "${BLUE}")Домен (например helpo.su): $(echo -e "
 read -p "$(echo -e "${BLUE}")Telegram Bot Token: $(echo -e "${NC}")" TG_TOKEN
 [[ -z "$TG_TOKEN" ]] && err "Токен не указан"
 
-read -p "$(echo -e "${BLUE}")Telegram Group ID (-1001234567890): $(echo -e "${NC}")" TG_GROUP
-[[ -z "$TG_GROUP" ]] && err "Group ID не указан"
+read -p "$(echo -e "${BLUE}")Telegram ID операторов через запятую (например 123456789,987654321): $(echo -e "${NC}")" TG_ADMINS
+[[ -z "$TG_ADMINS" ]] && err "Telegram ID операторов не указаны"
 
 read -p "$(echo -e "${BLUE}")Admin Token для /admin: $(echo -e "${NC}")" ADMIN_TOKEN
 [[ -z "$ADMIN_TOKEN" ]] && err "Admin Token не указан"
@@ -86,7 +86,7 @@ echo ""
 echo -e "  Домен:      ${GREEN}$DOMAIN${NC}"
 echo -e "  IPv4:       ${GREEN}$SERVER_IP${NC}"
 echo -e "  TG Token:   ${GREEN}${TG_TOKEN:0:12}...${NC}"
-echo -e "  TG Group:   ${GREEN}$TG_GROUP${NC}"
+echo -e "  TG Admins:  ${GREEN}$TG_ADMINS${NC}"
 echo -e "  AdminToken: ${GREEN}${ADMIN_TOKEN:0:6}...${NC}"
 echo -e "  DNS A:      ${GREEN}${DNS_IPV4:-не найдена}${NC}"
 echo ""
@@ -156,8 +156,8 @@ info "3/5 Конфигурация..."
 
 cat > "$SCRIPT_DIR/.env" <<ENV
 TELEGRAM_BOT_TOKEN=${TG_TOKEN}
-TELEGRAM_GROUP_ID=${TG_GROUP}
-TELEGRAM_ADMIN_IDS=
+TELEGRAM_MODE=private
+TELEGRAM_ADMIN_IDS=${TG_ADMINS}
 ADMIN_TOKEN=${ADMIN_TOKEN}
 PUBLIC_URL=https://${DOMAIN}
 PORT=3001
@@ -228,6 +228,8 @@ echo ""
 echo -e "  🌐  ${GREEN}https://${DOMAIN}${NC}"
 echo -e "  🌍  IPv4: ${GREEN}${SERVER_IP}${NC}"
 echo -e "  🔒  Сертификат Let's Encrypt автоматически"
+echo -e "  🤖  Включите Threaded Mode у бота через @BotFather"
+echo -e "  👤  Каждый оператор должен открыть бота и нажать /start"
 echo ""
 echo "  Проверка портов:"
 echo -e "  ${BLUE}ss -lntp | grep -E ':80|:443|:3001'${NC}"

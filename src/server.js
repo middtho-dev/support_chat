@@ -136,6 +136,10 @@ function isAdminRequest(req) {
   return isAdminToken(req.body?.adminToken || req.query?.adminToken || req.get('x-admin-token'));
 }
 
+function usesLegacyTelegramTopics() {
+  return typeof telegram.status === 'function' && telegram.status()?.mode !== 'private';
+}
+
 function canUpload(req) {
   if (isAdminRequest(req)) return true;
   const { ticketId, sessionToken } = req.body || {};
@@ -175,7 +179,10 @@ app.get('/favicon.ico', (req, res) => {
 
 app.get(['/miniapp', '/tg-admin'], (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.redirect(302, `/admin?tg=1&v=${Date.now().toString(36)}`);
+  const params = new URLSearchParams({ tg: '1', v: Date.now().toString(36) });
+  const ticketId = String(req.query?.ticket || '');
+  if (/^[a-f0-9-]{16,64}$/i.test(ticketId)) params.set('ticket', ticketId);
+  res.redirect(302, `/admin?${params.toString()}`);
 });
 
 app.get('/admin', (req, res) => {
@@ -245,7 +252,9 @@ app.post('/api/session/resume', (req, res) => {
   if (!sessionToken || typeof sessionToken !== 'string') return res.status(400).json({ error: 'Token required' });
   const ticket = db.getTicketBySessionAny.get(sessionToken);
   if (!ticket) return res.status(404).json({ error: 'No active ticket' });
-  if (ticket.status === 'closed' && ticket.telegram_topic_deleted) return res.json({ orphaned: true });
+  if (usesLegacyTelegramTopics() && ticket.status === 'closed' && ticket.telegram_topic_deleted) {
+    return res.json({ orphaned: true });
+  }
 
   const PAGE = 100;
   const total = db.countMessages.get(ticket.id)?.cnt || 0;
@@ -315,7 +324,9 @@ app.post('/api/tickets/:ticketId/reopen', async (req, res) => {
   const ticket = db.getTicketById.get(req.params.ticketId);
   if (!ticket) return res.status(404).json({ error: 'Not found' });
   if (!sessionToken || ticket.session_token !== sessionToken) return res.status(403).json({ error: 'Forbidden' });
-  if (ticket.telegram_topic_deleted) return res.status(409).json({ error: 'Topic deleted' });
+  if (usesLegacyTelegramTopics() && ticket.telegram_topic_deleted) {
+    return res.status(409).json({ error: 'Topic deleted' });
+  }
 
   db.reopenTicket.run(ticket.id);
   try {
@@ -439,7 +450,10 @@ io.on('connection', (socket) => {
     socket.ticketId = ticketId;
     scheduleWelcomeMessages(ticketId);
 
-    if (ticket.status === 'open' && ticket.telegram_topic_id && !ticket.telegram_topic_deleted) {
+    if (usesLegacyTelegramTopics() &&
+        ticket.status === 'open' &&
+        ticket.telegram_topic_id &&
+        !ticket.telegram_topic_deleted) {
       telegram.checkTopicAlive(ticket).then(alive => {
         if (alive) return;
         db.closeTicket.run(ticketId);
@@ -563,14 +577,21 @@ io.on('connection', (socket) => {
 
   socket.on('admin_get_settings', () => {
     if (!socket.isAdmin) return;
-    socket.emit('admin_settings', loadSettings());
+    socket.emit('admin_settings', {
+      ...loadSettings(),
+      telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
+    });
   });
 
   socket.on('admin_update_settings', (payload = {}) => {
     if (!socket.isAdmin) return;
     const cfg = saveSettings(payload);
-    socket.emit('admin_settings', cfg);
-    io.to('admin').emit('admin_settings_updated', cfg);
+    const visibleCfg = {
+      ...cfg,
+      telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
+    };
+    socket.emit('admin_settings', visibleCfg);
+    io.to('admin').emit('admin_settings_updated', visibleCfg);
   });
 
   socket.on('admin_reply', async (data = {}, ack) => {
@@ -635,7 +656,9 @@ io.on('connection', (socket) => {
     if (!socket.isAdmin) return;
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket || ticket.status !== 'closed') return;
-    if (ticket.telegram_topic_deleted) return socket.emit('admin_error', { message: loadSettings().telegramTopicDeletedAdminText });
+    if (usesLegacyTelegramTopics() && ticket.telegram_topic_deleted) {
+      return socket.emit('admin_error', { message: loadSettings().telegramTopicDeletedAdminText });
+    }
     db.reopenTicket.run(ticket.id);
     try {
       await telegram.notifyTicketReopened(ticket);
