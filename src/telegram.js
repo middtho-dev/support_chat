@@ -173,14 +173,14 @@ function publicUploadPath(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.startsWith('/uploads/')) return null;
   let relative;
   try {
-    relative = path.normalize(decodeURIComponent(fileUrl).replace(/^\/+/, ''));
+    relative = decodeURIComponent(fileUrl.slice('/uploads/'.length));
   } catch {
     return null;
   }
-  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
-  const fp = path.resolve(__dirname, '../public', relative);
+  if (!relative || relative !== path.basename(relative) || relative.includes('\0')) return null;
   const uploadsDir = path.resolve(process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads'));
-  if (fp !== uploadsDir && !fp.startsWith(uploadsDir + path.sep)) return null;
+  const fp = path.resolve(uploadsDir, relative);
+  if (!fp.startsWith(uploadsDir + path.sep)) return null;
   return fp;
 }
 
@@ -432,7 +432,7 @@ async function handleMessage(msg) {
     claimedIncoming = true;
 
     let type = 'text', fileUrl = null, fileName = null, fileMime = null;
-    if (msg.photo || msg.video || msg.document || msg.voice) {
+    if (msg.photo || msg.video || msg.document || msg.voice || msg.audio || msg.animation || msg.video_note) {
       const f = await downloadFile(msg);
       if (f) { fileUrl = f.url; fileName = f.name; fileMime = f.mime; type = f.type; }
       else {
@@ -459,13 +459,15 @@ async function handleMessage(msg) {
     const senderName = msg.from.first_name || s.supportName || 'Support';
     db.saveMessage.run(id, ticket.id, 'support', senderName, rawText, type, fileUrl, fileName, fileMime, msg.message_id, replyToId);
 
-    io?.to(`ticket:${ticket.id}`).emit('message', {
+    const message = {
       id, ticket_id: ticket.id, sender: 'support', sender_name: senderName,
       content: rawText, message_type: type, file_url: fileUrl, file_name: fileName, file_mime: fileMime,
       created_at: new Date().toISOString(), reply_to_id: replyToId || null,
       reply_to_content: replyToContent || null, reply_to_sender_name: replyToSenderName || null,
       reply_to_type: replyToType || null, reply_to_file_name: replyToFileName || null
-    });
+    };
+    io?.to(`ticket:${ticket.id}`).emit('message', message);
+    io?.to('admin').emit('admin_new_message', { ticketId: ticket.id, message });
     if (topicId) await setTopicStatus(topicId, ticket, s.telegramOpenEmoji);
     push.send(ticket.id, rawText || 'Новое сообщение').catch(() => {});
   } catch (e) { console.error('[TG] handleMessage:', e.message); }
@@ -519,9 +521,15 @@ async function downloadFile(msg) {
     } else if (msg.document) {
       fileId = msg.document.file_id; fileName = msg.document.file_name || `file_${Date.now()}`; fileMime = msg.document.mime_type || 'application/octet-stream';
       const ext = path.extname(fileName).toLowerCase();
-      type = fileMime.startsWith('image/') && DISPLAY_IMAGE_EXTS.has(ext) ? 'image' : fileMime.startsWith('video/') ? 'video' : 'file';
+      type = fileMime.startsWith('image/') && DISPLAY_IMAGE_EXTS.has(ext) ? 'image' : fileMime.startsWith('video/') ? 'video' : fileMime.startsWith('audio/') ? 'audio' : 'file';
     } else if (msg.voice) {
-      fileId = msg.voice.file_id; fileName = `voice_${Date.now()}.ogg`; fileMime = 'audio/ogg'; type = 'audio';
+      fileId = msg.voice.file_id; fileName = `voice_${Date.now()}.ogg`; fileMime = msg.voice.mime_type || 'audio/ogg'; type = 'audio';
+    } else if (msg.audio) {
+      fileId = msg.audio.file_id; fileName = msg.audio.file_name || `audio_${Date.now()}.mp3`; fileMime = msg.audio.mime_type || 'audio/mpeg'; type = 'audio';
+    } else if (msg.animation) {
+      fileId = msg.animation.file_id; fileName = msg.animation.file_name || `animation_${Date.now()}.mp4`; fileMime = msg.animation.mime_type || 'video/mp4'; type = 'video';
+    } else if (msg.video_note) {
+      fileId = msg.video_note.file_id; fileName = `video_note_${Date.now()}.mp4`; fileMime = 'video/mp4'; type = 'video';
     }
     if (!fileId) return null;
     const link = await bot.getFileLink(fileId);
@@ -536,9 +544,10 @@ async function downloadFile(msg) {
     if (buf.length > cfg().uploadMaxMb * 1024 * 1024) throw new Error('File too large');
     const dir = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const safe = `tg_${uuidv4()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    await fsp.writeFile(path.join(dir, safe), buf);
-    return { url: `/uploads/${safe}`, name: fileName, mime: fileMime, type };
+    const cleanName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_').slice(-160) || 'file';
+    const safe = `tg_${uuidv4()}_${cleanName}`;
+    await fsp.writeFile(path.join(dir, safe), buf, { flag: 'wx' });
+    return { url: `/uploads/${safe}`, name: String(fileName).slice(0, 255), mime: fileMime, type };
   } catch (e) {
     lastError = e;
     console.error(`[TG] downloadFile attempt ${attempt}:`, e.message);
@@ -630,23 +639,23 @@ async function forwardMessage(ticket, message, opts = {}) {
     } else if (!tid && message.sender === 'support') {
       const text = singleChatMessage(ticket, message);
       sent = await bot.sendMessage(GROUP_ID, text.slice(0, 4090), { parse_mode: 'HTML' });
-    } else if (message.message_type === 'text') sent = await bot.sendMessage(GROUP_ID, message.content, targetOpts);
+    } else if (message.message_type === 'text') sent = await bot.sendMessage(GROUP_ID, String(message.content || '').slice(0, 4000), targetOpts);
     else if (message.message_type === 'image' && fp) sent = await sendWithDocumentFallback(
-      () => bot.sendPhoto(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined }),
+      () => bot.sendPhoto(GROUP_ID, fp, { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined }),
       fp,
-      { ...targetOpts, caption: message.content || undefined }
+      { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined }
     );
     else if (message.message_type === 'video' && fp) sent = await sendWithDocumentFallback(
-      () => bot.sendVideo(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined }),
+      () => bot.sendVideo(GROUP_ID, fp, { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined }),
       fp,
-      { ...targetOpts, caption: message.content || undefined }
+      { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined }
     );
     else if (message.message_type === 'audio' && fp) sent = await sendWithDocumentFallback(
-      () => bot.sendVoice(GROUP_ID, fp, targetOpts),
+      () => bot.sendAudio(GROUP_ID, fp, { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined }),
       fp,
-      { ...targetOpts, caption: message.content || undefined }
+      { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined }
     );
-    else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined });
+    else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { ...targetOpts, caption: message.content ? String(message.content).slice(0, 1000) : undefined });
     if (!sent) throw new Error('Telegram did not confirm delivery');
     db.updateTelegramMessageId.run(sent.message_id, message.id);
     deliveryStats.delivered++;
@@ -846,4 +855,16 @@ async function cleanupOldTopics() {
   } catch (e) { console.error('[TG] cleanup:', e.message); }
 }
 
-module.exports = { init, createTopic, forwardMessage, notifyTicketClosed, notifyTicketReopened, autoCloseTicket, sendTyping, warnInactivity, checkTopicAlive, status };
+module.exports = {
+  init,
+  createTopic,
+  forwardMessage,
+  notifyTicketClosed,
+  notifyTicketReopened,
+  autoCloseTicket,
+  sendTyping,
+  warnInactivity,
+  checkTopicAlive,
+  status,
+  notifyOperationalIssue: operationalAlert
+};

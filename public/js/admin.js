@@ -231,6 +231,7 @@ socket.on('admin_new_message', ({ ticketId, message }) => {
   }
   renderSidebar();
   if (ticketId === S.current?.id) {
+    if (message?.id && S.messages.some(existing => existing.id === message.id)) return;
     S.messages.push(message);
     appendMessage(message, true);
   }
@@ -330,13 +331,16 @@ function messageBody(msg) { const text = msg.content ? `<div>${linkify(msg.conte
 function parseReactions(value) { if (!value) return []; if (Array.isArray(value)) return value.filter(Boolean); try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.filter(Boolean) : []; } catch { return []; } }
 function reactionsHtml(msg) { const reactions = parseReactions(msg.reactions); if (!reactions.length) return ''; return `<div class="rxns">${reactions.map(r => `<span>${esc(r)}</span>`).join('')}</div>`; }
 function scrollBottom(smooth) { const box = $('cv-msgs'); requestAnimationFrame(() => box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })); }
-function onReplyInput() { const txt = $('reply-txt'), send = $('reply-send'), cnt = $('reply-cnt'); if (!txt || !send) return; txt.style.height = 'auto'; txt.style.height = `${Math.min(txt.scrollHeight, 140)}px`; send.disabled = S.uploading || (!txt.value.trim() && !S.file); if (cnt) cnt.textContent = txt.value ? `${txt.value.length} симв.` : ''; const now = Date.now(); if (S.current?.id && now - S.lastTyping > 1800) { S.lastTyping = now; socket.emit('admin_typing', { ticketId: S.current.id }); } }
+function onReplyInput() { const txt = $('reply-txt'), send = $('reply-send'), cnt = $('reply-cnt'); if (!txt || !send) return; if (S.pendingReply && S.pendingReply.content !== txt.value.trim()) S.pendingReply = null; txt.style.height = 'auto'; txt.style.height = `${Math.min(txt.scrollHeight, 140)}px`; send.disabled = S.uploading || (!txt.value.trim() && !S.file); if (cnt) cnt.textContent = txt.value ? `${txt.value.length} симв.` : ''; const now = Date.now(); if (S.current?.id && now - S.lastTyping > 1800) { S.lastTyping = now; socket.emit('admin_typing', { ticketId: S.current.id }); } }
 async function sendReply() {
   const txt = $('reply-txt');
   if (!txt || !S.current || S.current.status !== 'open' || S.uploading) return;
   const content = txt.value.trim();
   const file = S.file;
   if (!content && !file) return;
+  const maxLength = file ? 1000 : 4000;
+  if (content.length > maxLength) return toast(`Слишком длинное сообщение — максимум ${maxLength} символов`, 'err');
+  if (!socket.connected) return toast('Нет соединения — попробуйте позже', 'err');
   $('reply-send').disabled = true;
   let fileUrl = S.pendingReply?.fileUrl || null, fileName = S.pendingReply?.fileName || null, fileMime = S.pendingReply?.fileMime || null, messageType = S.pendingReply?.messageType || 'text';
   if (file && !S.pendingReply) {
@@ -363,7 +367,10 @@ async function sendReply() {
   S.pendingReply = payload;
   socket.timeout(15000).emit('admin_reply', payload, (timeoutError, ack) => {
     if (timeoutError || ack?.error) {
-      toast(timeoutError ? 'Нет подтверждения доставки. Повторная отправка не создаст дубль.' : 'Ошибка отправки', 'err');
+      const errorText = ack?.error === 'Message too long'
+        ? `Слишком длинное сообщение — максимум ${ack.maxLength || 4000} символов`
+        : 'Ошибка отправки';
+      toast(timeoutError ? 'Нет подтверждения доставки. Повторная отправка не создаст дубль.' : errorText, 'err');
       onReplyInput();
       return;
     }
@@ -379,11 +386,13 @@ async function sendReply() {
 function setReplyFile(file) {
   const maxMb = Number(S.settings?.uploadMaxMb) || 50;
   if (file.size > maxMb * 1024 * 1024) return toast(`Файл слишком большой (макс. ${maxMb} МБ)`, 'err');
+  S.pendingReply = null;
   S.file = file;
   renderReplyFilePreview();
   onReplyInput();
 }
 function clearReplyFile() {
+  S.pendingReply = null;
   S.file = null;
   renderReplyFilePreview();
   onReplyInput();

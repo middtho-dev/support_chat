@@ -70,6 +70,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_push_ticket ON push_subscriptions(ticket_id)`);
+db.exec(`
+  DELETE FROM push_subscriptions
+  WHERE rowid NOT IN (
+    SELECT MIN(rowid) FROM push_subscriptions GROUP BY ticket_id, subscription
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_push_ticket_subscription
+  ON push_subscriptions(ticket_id, subscription);
+`);
 
 // Runtime settings
 db.exec(`CREATE TABLE IF NOT EXISTS settings (
@@ -177,6 +185,7 @@ module.exports = {
     SELECT * FROM messages
     WHERE ticket_id = ?
       AND sender != 'system'
+      AND COALESCE(is_auto, 0) = 0
       AND telegram_message_id IS NULL
     ORDER BY created_at ASC
     LIMIT ?
@@ -192,6 +201,7 @@ module.exports = {
     FROM messages m
     JOIN tickets t ON t.id = m.ticket_id
     WHERE m.sender != 'system'
+      AND COALESCE(m.is_auto, 0) = 0
       AND m.telegram_message_id IS NULL
       AND COALESCE(t.telegram_topic_deleted, 0) = 0
       AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
@@ -211,7 +221,12 @@ module.exports = {
   updateMessageReactions: db.prepare(`UPDATE messages SET reactions = ? WHERE id = ?`),
 
   // Push subscriptions
-  savePushSub: db.prepare(`INSERT OR REPLACE INTO push_subscriptions (id, ticket_id, subscription) VALUES (?, ?, ?)`),
+  savePushSub: db.prepare(`
+    INSERT INTO push_subscriptions (id, ticket_id, subscription)
+    VALUES (?, ?, ?)
+    ON CONFLICT(ticket_id, subscription)
+    DO UPDATE SET created_at = CURRENT_TIMESTAMP
+  `),
   getPushSubs: db.prepare(`SELECT * FROM push_subscriptions WHERE ticket_id = ?`),
   delPushSub:  db.prepare(`DELETE FROM push_subscriptions WHERE id = ?`),
 

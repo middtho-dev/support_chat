@@ -32,6 +32,7 @@ const DISPLAY_IMAGE_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.webp']);
 const IMG_EXTS = new Set([...DISPLAY_IMAGE_EXTS,'.heic','.heif','.bmp','.tif','.tiff','.avif']);
 const VID_EXTS = new Set(['.mp4','.mov','.m4v','.avi','.mkv','.webm']);
 const AUD_EXTS = new Set(['.mp3','.m4a','.aac','.ogg','.wav','.flac','.opus']);
+const DOC_EXTS = new Set(['.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.zip','.7z','.rar','.txt','.csv']);
 const ALLOWED_MIMES = new Set([
   'application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -69,16 +70,16 @@ function uploadMetadata(file) {
 function isSafeUploadUrl(fileUrl) {
   if (!fileUrl || typeof fileUrl !== 'string') return false;
   if (!fileUrl.startsWith('/uploads/')) return false;
-  let decoded;
+  let relative;
   try {
-    decoded = path.normalize(decodeURIComponent(fileUrl).replace(/^\/+/, ''));
+    relative = decodeURIComponent(fileUrl.slice('/uploads/'.length));
   } catch {
     return false;
   }
-  if (decoded.startsWith('..') || path.isAbsolute(decoded)) return false;
-  const fp = path.resolve(__dirname, '../public', decoded);
+  if (!relative || relative !== path.basename(relative) || relative.includes('\0')) return false;
   const uploadsDir = path.resolve(UPLOADS_DIR);
-  return fp === uploadsDir || fp.startsWith(uploadsDir + path.sep);
+  const fp = path.resolve(uploadsDir, relative);
+  return fp.startsWith(uploadsDir + path.sep);
 }
 
 function safeEqualString(a, b) {
@@ -155,7 +156,12 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     let mime = file.mimetype;
     if (mime === 'application/octet-stream') mime = mimeFromExt(file.originalname) || mime;
-    const ok = mime.startsWith('image/') || mime.startsWith('video/') || mime.startsWith('audio/') || ALLOWED_MIMES.has(mime);
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const ok =
+      (mime.startsWith('image/') && IMG_EXTS.has(ext)) ||
+      (mime.startsWith('video/') && VID_EXTS.has(ext)) ||
+      (mime.startsWith('audio/') && AUD_EXTS.has(ext)) ||
+      (ALLOWED_MIMES.has(mime) && DOC_EXTS.has(ext));
     ok ? cb(null, true) : cb(new Error('File type not allowed'));
   }
 });
@@ -186,6 +192,7 @@ app.get('/admin', (req, res) => {
       .replace('/js/admin.js', `/js/admin.js?v=${v}`));
   });
 });
+app.use('/uploads', express.static(UPLOADS_DIR, { index: false, maxAge: '1h' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.post('/api/admin/telegram-auth', (req, res) => {
@@ -276,10 +283,11 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   const cfg = loadSettings();
   if (req.file.size > cfg.uploadMaxMb * 1024 * 1024) {
     fs.unlink(req.file.path, () => {});
-    io.to('admin').emit('operational_alert', {
-      key: 'upload-too-large', message: 'Клиенту не удалось загрузить файл',
-      details: `Размер превышает ${cfg.uploadMaxMb} МБ`, createdAt: new Date().toISOString()
-    });
+    telegram.notifyOperationalIssue(
+      'upload-too-large',
+      'Клиенту не удалось загрузить файл',
+      `Размер превышает ${cfg.uploadMaxMb} МБ`
+    ).catch(() => {});
     return res.status(413).json({ error: `File too large. Max ${cfg.uploadMaxMb} MB` });
   }
 
@@ -451,12 +459,19 @@ io.on('connection', (socket) => {
     io.to('admin').emit('admin_user_typing', { ticketId: socket.ticketId });
   });
 
-  socket.on('send_message', async (data, ack) => {
+  socket.on('send_message', async (data = {}, ack) => {
     try {
       const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType, clientMessageId } = data;
       const ticket = db.getTicketBySessionAny.get(sessionToken);
       if (!ticket || ticket.id !== ticketId) {
         if (ack) ack({ error: 'Unauthorized' });
+        return;
+      }
+      const msgId = typeof clientMessageId === 'string' && /^[a-f0-9-]{16,64}$/i.test(clientMessageId) ? clientMessageId : uuidv4();
+      const existingMessage = db.getMessageById.get(msgId);
+      if (existingMessage) {
+        if (existingMessage.ticket_id === ticketId && existingMessage.sender === 'user') ack?.({ ok: true, id: msgId, duplicate: true });
+        else ack?.({ error: 'Invalid message id' });
         return;
       }
       if (ticket.status === 'closed') {
@@ -467,7 +482,13 @@ io.on('connection', (socket) => {
         if (ack) ack({ error: 'Invalid file' });
         return;
       }
-      if (!content && !fileUrl) {
+      const text = String(content || '').trim();
+      const maxLength = fileUrl ? 1000 : 4000;
+      if (text.length > maxLength) {
+        ack?.({ error: 'Message too long', maxLength });
+        return;
+      }
+      if (!text && !fileUrl) {
         if (ack) ack({ error: 'Empty message' });
         return;
       }
@@ -478,19 +499,14 @@ io.on('connection', (socket) => {
       }
 
       warnedTickets.delete(ticket.id);
-      const msgId = typeof clientMessageId === 'string' && /^[a-f0-9-]{16,64}$/i.test(clientMessageId) ? clientMessageId : uuidv4();
-      const existingMessage = db.getMessageById.get(msgId);
-      if (existingMessage) {
-        if (existingMessage.ticket_id === ticketId && existingMessage.sender === 'user') ack?.({ ok: true, id: msgId, duplicate: true });
-        else ack?.({ error: 'Invalid message id' });
-        return;
-      }
-      const msgType = messageType || 'text';
-      db.saveMessage.run(msgId, ticketId, 'user', ticket.user_name, content || null, msgType, fileUrl || null, fileName || null, fileMime || null, null, null);
+      const msgType = fileUrl && ['image', 'video', 'audio', 'file'].includes(messageType) ? messageType : (fileUrl ? 'file' : 'text');
+      const safeFileName = String(fileName || '').slice(0, 255) || null;
+      const safeFileMime = String(fileMime || '').slice(0, 150) || null;
+      db.saveMessage.run(msgId, ticketId, 'user', ticket.user_name, text || null, msgType, fileUrl || null, safeFileName, safeFileMime, null, null);
       const message = {
         id: msgId, ticket_id: ticketId, sender: 'user', sender_name: ticket.user_name,
-        content: content || null, message_type: msgType, file_url: fileUrl || null,
-        file_name: fileName || null, file_mime: fileMime || null, created_at: new Date().toISOString()
+        content: text || null, message_type: msgType, file_url: fileUrl || null,
+        file_name: safeFileName, file_mime: safeFileMime, created_at: new Date().toISOString()
       };
       io.to(`ticket:${ticketId}`).emit('message', message);
       io.to('admin').emit('admin_new_message', { ticketId, message });
@@ -557,14 +573,11 @@ io.on('connection', (socket) => {
     io.to('admin').emit('admin_settings_updated', cfg);
   });
 
-  socket.on('admin_reply', async ({ ticketId, content, fileUrl, fileName, fileMime, messageType, clientMessageId }, ack) => {
-    if (!socket.isAdmin) return;
-    const text = (content || '').trim();
-    if (!text && !fileUrl) return;
-    if (fileUrl && !isSafeUploadUrl(fileUrl)) return socket.emit('admin_error', { message: 'Invalid file' });
+  socket.on('admin_reply', async (data = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    const { ticketId, content, fileUrl, fileName, fileMime, messageType, clientMessageId } = data;
     const ticket = db.getTicketById.get(ticketId);
-    if (!ticket || ticket.status === 'closed') return;
-    const cfg = loadSettings();
+    if (!ticket) return ack?.({ error: 'Ticket not found' });
     const msgId = typeof clientMessageId === 'string' && /^[a-f0-9-]{16,64}$/i.test(clientMessageId) ? clientMessageId : uuidv4();
     const existingMessage = db.getMessageById.get(msgId);
     if (existingMessage) {
@@ -572,19 +585,31 @@ io.on('connection', (socket) => {
       else ack?.({ error: 'Invalid message id' });
       return;
     }
-    const msgType = messageType || (fileUrl ? 'file' : 'text');
-    db.saveMessage.run(msgId, ticketId, 'support', cfg.supportName, text || null, msgType, fileUrl || null, fileName || null, fileMime || null, null, null);
+    if (ticket.status === 'closed') return ack?.({ error: 'Ticket is closed' });
+    const text = (content || '').trim();
+    if (!text && !fileUrl) return ack?.({ error: 'Empty message' });
+    if (fileUrl && !isSafeUploadUrl(fileUrl)) {
+      socket.emit('admin_error', { message: 'Invalid file' });
+      return ack?.({ error: 'Invalid file' });
+    }
+    const maxLength = fileUrl ? 1000 : 4000;
+    if (text.length > maxLength) return ack?.({ error: 'Message too long', maxLength });
+    const cfg = loadSettings();
+    const msgType = fileUrl && ['image', 'video', 'audio', 'file'].includes(messageType) ? messageType : (fileUrl ? 'file' : 'text');
+    const safeFileName = String(fileName || '').slice(0, 255) || null;
+    const safeFileMime = String(fileMime || '').slice(0, 150) || null;
+    db.saveMessage.run(msgId, ticketId, 'support', cfg.supportName, text || null, msgType, fileUrl || null, safeFileName, safeFileMime, null, null);
     db.markSupportRead.run(ticketId);
     const message = {
       id: msgId, ticket_id: ticketId, sender: 'support', sender_name: cfg.supportName,
-      content: text || null, message_type: msgType, file_url: fileUrl || null, file_name: fileName || null, file_mime: fileMime || null,
+      content: text || null, message_type: msgType, file_url: fileUrl || null, file_name: safeFileName, file_mime: safeFileMime,
       created_at: new Date().toISOString()
     };
     io.to(`ticket:${ticketId}`).emit('message', message);
     io.to('admin').emit('admin_new_message', { ticketId, message });
     cancelOperatorWait(ticketId);
     broadcastAdminTickets();
-    push.send(ticketId, text || fileName || 'Новое сообщение').catch(() => {});
+    push.send(ticketId, text || safeFileName || 'Новое сообщение').catch(() => {});
     telegram.forwardMessage(db.getTicketById.get(ticketId), message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
     ack?.({ ok: true, id: msgId });
   });
@@ -705,8 +730,8 @@ setInterval(inactivityCheck, 60 * 1000);
 app.use((err, req, res, next) => {
   if (!err) return next();
   if (err instanceof multer.MulterError || err.message === 'File type not allowed') {
-    io.to('admin').emit('operational_alert', { key: 'upload-failed', message: 'Клиенту не удалось загрузить файл', details: err.message, createdAt: new Date().toISOString() });
-    return res.status(400).json({ error: err.message });
+    telegram.notifyOperationalIssue('upload-failed', 'Клиенту не удалось загрузить файл', err.message).catch(() => {});
+    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.message });
   }
   console.error('[HTTP]', err);
   res.status(500).json({ error: 'Server error' });

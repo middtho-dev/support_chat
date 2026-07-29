@@ -50,9 +50,7 @@ function init() {
     priv = keys.privateKey;
     writeStoredKeys(keys);
     console.warn('[Push] VAPID keys not found in .env — generated and saved to persistent data storage.');
-    console.warn('[Push] You can also add them to .env:');
-    console.warn(`VAPID_PUBLIC_KEY=${publicKey}`);
-    console.warn(`VAPID_PRIVATE_KEY=${priv}`);
+    console.warn(`[Push] Generated keys are stored in ${VAPID_STORE}; the private key is not printed to logs.`);
   }
 
   webpush.setVapidDetails(

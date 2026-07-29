@@ -25,6 +25,7 @@ const newbtn=$('newbtn');
 /* ── SOCKET ── */
 const socket=io({autoConnect:false});
 socket.on('message',msg=>{
+  if(msg?.id&&S._msgs.some(existing=>existing.id===msg.id))return;
   const b=isBot();
   S._msgs.push(msg);
   renderMsg(msg);
@@ -334,6 +335,9 @@ async function send(){
   if(S.closed||S.uploading)return;
   const txt=ti.value.trim(),file=S.file;
   if(!txt&&!file)return;
+  const maxLength=file?1000:4000;
+  if(txt.length>maxLength){showToast(`Слишком длинное сообщение — максимум ${maxLength} символов`,'err');return;}
+  if(!socket.connected){showToast('Нет соединения — попробуйте позже','err');updSend();return;}
   sndbtn.disabled=true;
   let fu=S.pendingSend?.fileUrl||null,fn=S.pendingSend?.fileName||null,fm=S.pendingSend?.fileMime||null,mt=S.pendingSend?.messageType||'text';
   if(file&&!S.pendingSend){
@@ -342,7 +346,6 @@ async function send(){
     catch(error){showToast(error?.message||'Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
     S.uploading=false;showSpin(false);
   }
-  if(!socket.connected){showToast('Нет соединения — попробуйте позже','err');sndbtn.disabled=false;updSend();return;}
   const payload=S.pendingSend||{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt,clientMessageId:crypto.randomUUID()};
   S.pendingSend=payload;
   socket.timeout(15000).emit('send_message',payload,(timeoutError,ack)=>{
@@ -350,6 +353,7 @@ async function send(){
     if(ack?.error){
       if(ack.error==='Rate limit')showToast(`Слишком много сообщений — подождите ${ack.retryAfter||60}с`,'err');
       else if(ack.error==='Ticket is closed')showToast('Обращение закрыто','info');
+      else if(ack.error==='Message too long')showToast(`Слишком длинное сообщение — максимум ${ack.maxLength||4000} символов`,'err');
       else showToast('Ошибка отправки','err');
     }else{S.pendingSend=null;ti.value='';resize();clearFile();closeEp();clearDraft();}
     sndbtn.disabled=false;updSend();
@@ -358,6 +362,7 @@ async function send(){
 sndbtn.addEventListener('click',send);
 ti.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 ti.addEventListener('input',()=>{
+  if(S.pendingSend&&S.pendingSend.content!==(ti.value.trim()||null))S.pendingSend=null;
   resize();updSend();saveDraft();
   if(!S.tid||S.closed)return;
   const now=Date.now();
@@ -376,7 +381,7 @@ document.addEventListener('paste',e=>{if(S.closed)return;for(const it of(e.clipb
 function setFile(f){
   const maxMb=Number(CFG.uploadMaxMb)||50;
   if(f.size>maxMb*1024*1024){showToast(`Файл слишком большой (макс. ${maxMb} МБ)`,'err');return;}
-  S.file=f;fp.style.display='block';fpth.innerHTML='';
+  S.pendingSend=null;S.file=f;fp.style.display='block';fpth.innerHTML='';
   if(canPreviewImage(f)){const img=document.createElement('img');const previewUrl=URL.createObjectURL(f);img.src=previewUrl;img.onload=img.onerror=()=>URL.revokeObjectURL(previewUrl);fpth.appendChild(img)}
   else{const d=document.createElement('div');d.className='fpnm';d.textContent=f.name;fpth.appendChild(d)}
   updSend();
@@ -385,7 +390,7 @@ function canPreviewImage(f){
   const ext=(f.name.split('.').pop()||'').toLowerCase();
   return f.type.startsWith('image/')&&['jpg','jpeg','png','gif','webp'].includes(ext);
 }
-function clearFile(){S.file=null;fp.style.display='none';fpth.innerHTML='';updSend()}
+function clearFile(){S.pendingSend=null;S.file=null;fp.style.display='none';fpth.innerHTML='';updSend()}
 fprm.addEventListener('click',clearFile);
 function showSpin(on){const ex=ia.querySelector('.uspin');if(on&&!ex){const d=document.createElement('div');d.className='uspin';d.innerHTML='<div class="sp"></div><span>Загрузка...</span>';ia.insertBefore(d,ia.firstChild)}else if(!on&&ex)ex.remove()}
 
