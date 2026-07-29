@@ -9,7 +9,7 @@ const ECATS=[
   {i:'❤️',e:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✨','⭐','🌟','💫','🔥','💥','🎉','🎊','🎁','🎈','🌈','☀️','🌤','⛅','🌧','❄️','☃️','⛄','🌊','🌸','🌺','🌻','🌹','🍀','🌿','🍃','🎵','🎶','💤','💬','💭','🔔','💡','🔍','💎','🔑','🧲','🌙','💸','💯']}
 ];
 
-const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0,hasMore:false,oldestTs:null,_msgs:[]};
+const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0,hasMore:false,oldestTs:null,_msgs:[],pendingSend:null};
 const CFG={workStartHour:8,workEndHour:23,offhoursEnabled:true,offhoursBannerText:'',offhoursRejectText:'',timezone:'Europe/Moscow',online:true};
 const $=id=>document.getElementById(id);
 const ni=$('ni'),sb=$('sb'),sl=$('sl');
@@ -335,21 +335,23 @@ async function send(){
   const txt=ti.value.trim(),file=S.file;
   if(!txt&&!file)return;
   sndbtn.disabled=true;
-  let fu=null,fn=null,fm=null,mt='text';
-  if(file){
+  let fu=S.pendingSend?.fileUrl||null,fn=S.pendingSend?.fileName||null,fm=S.pendingSend?.fileMime||null,mt=S.pendingSend?.messageType||'text';
+  if(file&&!S.pendingSend){
     S.uploading=true;showSpin(true);
     try{const fd=new FormData();fd.append('ticketId',S.tid);fd.append('sessionToken',S.token);fd.append('file',file);const r=await fetch('/api/upload',{method:'POST',body:fd});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`Ошибка HTTP ${r.status}`);fu=d.url;fn=d.name;fm=d.mime;mt=d.type}
     catch(error){showToast(error?.message||'Ошибка загрузки','err');S.uploading=false;showSpin(false);sndbtn.disabled=false;return}
-    S.uploading=false;showSpin(false);clearFile();
+    S.uploading=false;showSpin(false);
   }
-  ti.value='';resize();updSend();closeEp();clearDraft();
   if(!socket.connected){showToast('Нет соединения — попробуйте позже','err');sndbtn.disabled=false;updSend();return;}
-  socket.emit('send_message',{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt},ack=>{
+  const payload=S.pendingSend||{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt,clientMessageId:crypto.randomUUID()};
+  S.pendingSend=payload;
+  socket.timeout(15000).emit('send_message',payload,(timeoutError,ack)=>{
+    if(timeoutError){showToast('Нет подтверждения доставки. Нажмите отправить ещё раз — дубля не будет.','err',6000);sndbtn.disabled=false;updSend();return;}
     if(ack?.error){
       if(ack.error==='Rate limit')showToast(`Слишком много сообщений — подождите ${ack.retryAfter||60}с`,'err');
       else if(ack.error==='Ticket is closed')showToast('Обращение закрыто','info');
       else showToast('Ошибка отправки','err');
-    }
+    }else{S.pendingSend=null;ti.value='';resize();clearFile();closeEp();clearDraft();}
     sndbtn.disabled=false;updSend();
   });
 }

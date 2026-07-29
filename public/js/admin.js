@@ -9,7 +9,7 @@ const DEFAULT_TEMPLATES = [
   { label: 'Завершение', text: 'Спасибо за обращение в поддержку KV9RU! Будем рады помочь снова.' }
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
-const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0 };
+const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
 const socket = io({ autoConnect: false });
 const $ = id => document.getElementById(id);
 const TG = window.Telegram?.WebApp || null;
@@ -263,6 +263,7 @@ socket.on('admin_message_reactions', ({ ticketId, messageId, reactions }) => {
 });
 
 socket.on('admin_error', ({ message }) => toast(message, 'err'));
+socket.on('operational_alert', ({ message, details }) => toast(`${message}${details ? `: ${details}` : ''}`, 'err', 8000));
 
 socket.on('admin_user_typing', ({ ticketId }) => {
   if (ticketId !== S.current?.id) return;
@@ -337,8 +338,8 @@ async function sendReply() {
   const file = S.file;
   if (!content && !file) return;
   $('reply-send').disabled = true;
-  let fileUrl = null, fileName = null, fileMime = null, messageType = 'text';
-  if (file) {
+  let fileUrl = S.pendingReply?.fileUrl || null, fileName = S.pendingReply?.fileName || null, fileMime = S.pendingReply?.fileMime || null, messageType = S.pendingReply?.messageType || 'text';
+  if (file && !S.pendingReply) {
     S.uploading = true;
     renderReplyFilePreview('Загрузка...');
     try {
@@ -357,14 +358,23 @@ async function sendReply() {
       return;
     }
     S.uploading = false;
-    clearReplyFile();
   }
-  txt.value = '';
-  txt.style.height = 'auto';
-  $('reply-cnt').textContent = '';
-  socket.emit('admin_reply', { ticketId: S.current.id, content, fileUrl, fileName, fileMime, messageType });
+  const payload = S.pendingReply || { ticketId: S.current.id, content, fileUrl, fileName, fileMime, messageType, clientMessageId: crypto.randomUUID() };
+  S.pendingReply = payload;
+  socket.timeout(15000).emit('admin_reply', payload, (timeoutError, ack) => {
+    if (timeoutError || ack?.error) {
+      toast(timeoutError ? 'Нет подтверждения доставки. Повторная отправка не создаст дубль.' : 'Ошибка отправки', 'err');
+      onReplyInput();
+      return;
+    }
+    S.pendingReply = null;
+    txt.value = '';
+    txt.style.height = 'auto';
+    $('reply-cnt').textContent = '';
+    clearReplyFile();
+    onReplyInput();
+  });
   tgImpact('light');
-  onReplyInput();
 }
 function setReplyFile(file) {
   const maxMb = Number(S.settings?.uploadMaxMb) || 50;
