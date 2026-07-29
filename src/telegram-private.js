@@ -15,6 +15,7 @@ const ADMIN_IDS = new Set(
     .filter(Boolean)
 );
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+const TICKET_LIST_PAGE_SIZE = 8;
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
 const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.opus']);
@@ -84,6 +85,7 @@ const forwardingMessages = new Set();
 const incomingMessages = new Set();
 const alertTimes = new Map();
 const topicStatus = new Map();
+const focusMarkers = new Map();
 const deliveryStats = {
   delivered: 0,
   failed: 0,
@@ -219,14 +221,185 @@ function ticketKeyboard(ticket, state = 'open') {
   return { inline_keyboard: rows };
 }
 
-function dashboardKeyboard() {
+function dashboardKeyboard(counts = {}) {
   const rows = [[
-    { text: '🔄 Обновить', callback_data: 'queue:refresh' },
-    { text: '📥 Очередь', callback_data: 'queue:list' }
+    { text: `🔔 Новые · ${Number(counts.waiting || 0)}`, callback_data: 'list:waiting:0' },
+    { text: `🔵 Мои · ${Number(counts.mine || 0)}`, callback_data: 'list:mine:0' }
+  ], [
+    { text: `✅ Закрытые · ${Number(counts.closed || 0)}`, callback_data: 'list:closed:0' },
+    { text: '🔄 Обновить', callback_data: 'dashboard:refresh' }
   ]];
   const webAppUrl = adminWebAppUrl();
   if (webAppUrl) rows.push([{ text: '🖥 Админка', web_app: { url: webAppUrl } }]);
   return { inline_keyboard: rows };
+}
+
+function dashboardCounts(operator) {
+  return db.db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'open' AND assigned_operator_id IS NULL THEN 1 ELSE 0 END) AS waiting,
+      SUM(CASE WHEN status = 'open' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS mine,
+      SUM(CASE WHEN status = 'closed' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS closed
+    FROM tickets
+  `).get(operator.telegram_user_id, operator.telegram_user_id);
+}
+
+function dashboardModel(operator) {
+  const counts = dashboardCounts(operator);
+  const markdown = [
+    '## 🛟 Панель оператора',
+    `**${markdownEscape(operator.display_name)}**`,
+    '',
+    `- 🔔 Новые без оператора: **${Number(counts.waiting || 0)}**`,
+    `- 🔵 Мои открытые: **${Number(counts.mine || 0)}**`,
+    `- ✅ Мои закрытые: **${Number(counts.closed || 0)}**`,
+    '',
+    threadedModeEnabled
+      ? 'Выберите раздел кнопками ниже.'
+      : '⚠️ Включите **Threaded Mode** у бота через @BotFather.'
+  ].join('\n');
+  const fallback = [
+    '🛟 Панель оператора',
+    operator.display_name,
+    '',
+    `🔔 Новые без оператора: ${Number(counts.waiting || 0)}`,
+    `🔵 Мои открытые: ${Number(counts.mine || 0)}`,
+    `✅ Мои закрытые: ${Number(counts.closed || 0)}`,
+    '',
+    threadedModeEnabled
+      ? 'Выберите раздел кнопками ниже.'
+      : '⚠️ Включите Threaded Mode через @BotFather.'
+  ].join('\n');
+  return { markdown, fallback, replyMarkup: dashboardKeyboard(counts) };
+}
+
+function ticketListQuery(operator, view, page) {
+  const offset = Math.max(0, page) * TICKET_LIST_PAGE_SIZE;
+  if (view === 'waiting') {
+    return {
+      total: Number(db.countOpenUnassignedTickets.get()?.count || 0),
+      tickets: db.getOpenUnassignedTicketsPage.all(TICKET_LIST_PAGE_SIZE, offset)
+    };
+  }
+  if (view === 'closed') {
+    return {
+      total: Number(db.countClosedTicketsForOperator.get(operator.telegram_user_id)?.count || 0),
+      tickets: db.getClosedTicketsForOperator.all(
+        operator.telegram_user_id,
+        TICKET_LIST_PAGE_SIZE,
+        offset
+      )
+    };
+  }
+  return {
+    total: Number(db.countOpenTicketsForOperator.get(operator.telegram_user_id)?.count || 0),
+    tickets: db.getOpenTicketsForOperator.all(
+      operator.telegram_user_id,
+      TICKET_LIST_PAGE_SIZE,
+      offset
+    )
+  };
+}
+
+function listTitle(view) {
+  if (view === 'waiting') return '🔔 Новые обращения';
+  if (view === 'closed') return '✅ Закрытые обращения';
+  return '🔵 Мои открытые';
+}
+
+function listPreview(ticket) {
+  const text = String(ticket.last_msg || '').replace(/\s+/g, ' ').trim();
+  if (text) return text.slice(0, 110);
+  if (ticket.last_msg_type === 'image') return '🖼 Изображение';
+  if (ticket.last_msg_type === 'video') return '🎬 Видео';
+  if (ticket.last_msg_type === 'audio') return '🎤 Аудио';
+  if (ticket.last_file_name) return `📎 ${ticket.last_file_name}`;
+  return 'Сообщений пока нет';
+}
+
+function listTicketButton(ticket, view, page) {
+  const name = String(ticket.user_name || 'Клиент').replace(/\s+/g, ' ').slice(0, 34);
+  if (view === 'waiting') {
+    return tgButton(`🙋 Взять · ${name}`, `claim:${ticket.id}:${page}`, 'primary');
+  }
+  if (view === 'closed') {
+    return tgButton(`🟢 Переоткрыть · ${name}`, `restore:${ticket.id}:${page}`, 'success');
+  }
+  return tgButton(`↗️ Поднять тему · ${name}`, `focus:${ticket.id}:${page}`, 'primary');
+}
+
+function ticketListKeyboard(tickets, view, page, total) {
+  const rows = tickets.map(ticket => [listTicketButton(ticket, view, page)]);
+  const nav = [];
+  if (page > 0) nav.push({ text: '← Назад', callback_data: `list:${view}:${page - 1}` });
+  if ((page + 1) * TICKET_LIST_PAGE_SIZE < total) {
+    nav.push({ text: 'Дальше →', callback_data: `list:${view}:${page + 1}` });
+  }
+  if (nav.length) rows.push(nav);
+  rows.push([{ text: '↩️ Панель оператора', callback_data: 'dashboard:show' }]);
+  const webAppUrl = adminWebAppUrl();
+  if (webAppUrl) rows.push([{ text: '🖥 Открыть админку', web_app: { url: webAppUrl } }]);
+  return { inline_keyboard: rows };
+}
+
+function ticketListModel(operator, view, requestedPage = 0) {
+  let page = Math.max(0, Number(requestedPage) || 0);
+  let result = ticketListQuery(operator, view, page);
+  const maxPage = Math.max(0, Math.ceil(result.total / TICKET_LIST_PAGE_SIZE) - 1);
+  if (page > maxPage) {
+    page = maxPage;
+    result = ticketListQuery(operator, view, page);
+  }
+  const pageLabel = result.total > TICKET_LIST_PAGE_SIZE
+    ? ` · страница ${page + 1}/${maxPage + 1}`
+    : '';
+  const lines = [`## ${listTitle(view)}`, `Всего: **${result.total}**${pageLabel}`, ''];
+  const fallback = [listTitle(view), `Всего: ${result.total}${pageLabel}`, ''];
+  if (!result.tickets.length) {
+    lines.push('_Здесь пока пусто._');
+    fallback.push('Здесь пока пусто.');
+  } else {
+    result.tickets.forEach((ticket, index) => {
+      const number = page * TICKET_LIST_PAGE_SIZE + index + 1;
+      const activity = ticket.last_activity
+        ? new Date(ticket.last_activity).toLocaleString('ru-RU')
+        : '';
+      lines.push(
+        `**${number}. ${markdownEscape(ticket.user_name || 'Клиент')}** · \`${markdownEscape(shortId(ticket))}\``,
+        `> ${markdownEscape(listPreview(ticket))}`,
+        activity ? `_${markdownEscape(activity)}_` : '',
+        ''
+      );
+      fallback.push(
+        `${number}. ${ticket.user_name || 'Клиент'} · ${shortId(ticket)}`,
+        listPreview(ticket),
+        activity,
+        ''
+      );
+    });
+    if (view === 'mine') {
+      lines.push('_Кнопка «Поднять тему» переместит её наверх списка тем Telegram._');
+      fallback.push('Кнопка «Поднять тему» переместит её наверх списка тем Telegram.');
+    }
+  }
+  return {
+    markdown: lines.filter((line, index, source) =>
+      line !== '' || source[index - 1] !== ''
+    ).join('\n'),
+    fallback: fallback.join('\n').trim(),
+    replyMarkup: ticketListKeyboard(result.tickets, view, page, result.total),
+    page
+  };
+}
+
+async function editPanel(message, model) {
+  return editRichOrDisable(
+    String(message.chat.id),
+    message.message_id,
+    model.markdown,
+    model.replyMarkup,
+    model.fallback
+  );
 }
 
 function lastTicketMessage(ticketId) {
@@ -422,7 +595,10 @@ async function configureBot() {
   threadedModeEnabled = !!me.has_topics_enabled;
   await bot.setMyCommands([
     { command: 'start', description: 'Запустить операторскую консоль' },
-    { command: 'queue', description: 'Показать очередь обращений' },
+    { command: 'queue', description: 'Открыть панель оператора' },
+    { command: 'waiting', description: 'Новые обращения' },
+    { command: 'open', description: 'Мои открытые тикеты' },
+    { command: 'closed', description: 'Мои закрытые тикеты' },
     { command: 'admin', description: 'Открыть админку' },
     { command: 'close', description: 'Закрыть текущий тикет' },
     { command: 'reopen', description: 'Переоткрыть текущий тикет' }
@@ -461,39 +637,22 @@ function registerOperator(from) {
 }
 
 async function sendDashboard(operator) {
-  const counts = db.db.prepare(`
-    SELECT
-      SUM(CASE WHEN status = 'open' AND assigned_operator_id IS NULL THEN 1 ELSE 0 END) AS waiting,
-      SUM(CASE WHEN status = 'open' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS mine,
-      SUM(CASE WHEN status = 'closed' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS closed
-    FROM tickets
-  `).get(operator.telegram_user_id, operator.telegram_user_id);
-  const markdown = [
-    '## 🛟 Поддержка',
-    `**${markdownEscape(operator.display_name)}**`,
-    '',
-    `- 🔔 Ждут оператора: **${Number(counts.waiting || 0)}**`,
-    `- 🔵 Мои активные: **${Number(counts.mine || 0)}**`,
-    `- ✅ Мои закрытые: **${Number(counts.closed || 0)}**`,
-    '',
-    threadedModeEnabled
-      ? 'Приватные темы включены.'
-      : '⚠️ Включите **Threaded Mode** у бота через @BotFather.'
-  ].join('\n');
-  const fallback = [
-    '🛟 Поддержка',
-    operator.display_name,
-    '',
-    `🔔 Ждут оператора: ${Number(counts.waiting || 0)}`,
-    `🔵 Мои активные: ${Number(counts.mine || 0)}`,
-    `✅ Мои закрытые: ${Number(counts.closed || 0)}`,
-    threadedModeEnabled ? '' : '⚠️ Включите Threaded Mode через @BotFather.'
-  ].filter(Boolean).join('\n');
+  const model = dashboardModel(operator);
   return sendRichOrText(
     operator.telegram_user_id,
-    markdown,
-    { reply_markup: dashboardKeyboard() },
-    fallback
+    model.markdown,
+    { reply_markup: model.replyMarkup },
+    model.fallback
+  );
+}
+
+async function sendTicketList(operator, view, page = 0) {
+  const model = ticketListModel(operator, view, page);
+  return sendRichOrText(
+    operator.telegram_user_id,
+    model.markdown,
+    { reply_markup: model.replyMarkup },
+    model.fallback
   );
 }
 
@@ -509,15 +668,9 @@ async function handleStart(msg) {
 
 async function reconcileOperator(operator) {
   const tickets = db.getOpenUnassignedTickets.all(50);
-  if (ADMIN_IDS.size === 1) {
-    for (const ticket of tickets) {
-      await claimAndOpenTicket(ticket.id, operator.telegram_user_id).catch(() => {});
-      await wait(250);
-    }
-    return;
-  }
+  if (!cfg().telegramAutoAssignSingleOperator || ADMIN_IDS.size !== 1) return;
   for (const ticket of tickets) {
-    await sendAssignmentNotification(ticket, operator, { forceNew: false });
+    await claimAndOpenTicket(ticket.id, operator.telegram_user_id).catch(() => {});
     await wait(150);
   }
 }
@@ -539,7 +692,7 @@ async function reconcileUnassignedTickets() {
   }
   const tickets = db.getOpenUnassignedTickets.all(50);
   for (const ticket of tickets) {
-    if (ADMIN_IDS.size === 1) {
+    if (cfg().telegramAutoAssignSingleOperator && ADMIN_IDS.size === 1) {
       await claimAndOpenTicket(ticket.id, operators[0].telegram_user_id).catch(() => {});
     } else {
       for (const operator of operators) {
@@ -714,6 +867,35 @@ async function setTopicStatus(thread, ticket, emoji) {
   topicStatus.set(key, name);
 }
 
+async function focusTicketTopic(ticket, operator) {
+  if (!ticket || ticket.status !== 'open') throw new Error('Ticket is not open');
+  if (String(ticket.assigned_operator_id || '') !== String(operator.telegram_user_id)) {
+    const error = new Error('Тикет назначен другому оператору');
+    error.alreadyAssigned = true;
+    throw error;
+  }
+  const thread = db.getTelegramThreadForTicketOperator.get(
+    ticket.id,
+    operator.telegram_user_id
+  );
+  if (!thread) throw new Error('Private topic is unavailable');
+  const key = topicKey(thread.chat_id, thread.thread_id);
+  const previousMessageId = focusMarkers.get(key);
+  if (previousMessageId) {
+    await bot.deleteMessage(thread.chat_id, previousMessageId).catch(() => {});
+  }
+  const sent = await bot.sendMessage(
+    thread.chat_id,
+    '🔎 Тема поднята из панели оператора',
+    {
+      message_thread_id: thread.thread_id,
+      disable_notification: true
+    }
+  );
+  focusMarkers.set(key, sent.message_id);
+  return thread;
+}
+
 async function handleCallbackQuery(query) {
   if (!tgEnabled()) return;
   const userId = String(query.from?.id || '');
@@ -724,22 +906,67 @@ async function handleCallbackQuery(query) {
   const operator = registerOperator(query.from);
   const data = String(query.data || '');
   try {
-    if (data === 'queue:refresh') {
-      await bot.answerCallbackQuery(query.id, { text: 'Обновлено' });
-      await sendDashboard(operator);
+    if (data === 'dashboard:refresh' || data === 'dashboard:show' || data === 'queue:refresh') {
+      await editPanel(query.message, dashboardModel(operator));
+      await bot.answerCallbackQuery(query.id, {
+        text: data === 'dashboard:refresh' || data === 'queue:refresh'
+          ? 'Данные обновлены'
+          : 'Панель оператора'
+      });
       return;
     }
     if (data === 'queue:list') {
-      await bot.answerCallbackQuery(query.id);
-      await reconcileOperator(operator);
+      await editPanel(query.message, ticketListModel(operator, 'waiting', 0));
+      await bot.answerCallbackQuery(query.id, { text: 'Очередь открыта' });
       return;
     }
-    const separator = data.indexOf(':');
-    const action = separator > 0 ? data.slice(0, separator) : '';
-    const ticketId = separator > 0 ? data.slice(separator + 1) : '';
+    const listMatch = data.match(/^list:(waiting|mine|closed):(\d+)$/);
+    if (listMatch) {
+      await editPanel(
+        query.message,
+        ticketListModel(operator, listMatch[1], Number(listMatch[2]))
+      );
+      await bot.answerCallbackQuery(query.id);
+      return;
+    }
+    const parts = data.split(':');
+    const action = parts[0] || '';
+    const ticketId = parts[1] || '';
+    const sourcePage = Math.max(0, Number(parts[2]) || 0);
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket) {
       await bot.answerCallbackQuery(query.id, { text: 'Тикет не найден', show_alert: true });
+      return;
+    }
+    if (action === 'claim') {
+      const thread = await claimAndOpenTicket(ticket.id, userId);
+      await editPanel(query.message, ticketListModel(operator, 'waiting', sourcePage));
+      await bot.answerCallbackQuery(query.id, {
+        text: thread ? 'Тикет взят — тема создана' : 'Не удалось создать тему',
+        show_alert: !thread
+      });
+      return;
+    }
+    if (action === 'focus') {
+      await focusTicketTopic(ticket, operator);
+      await bot.answerCallbackQuery(query.id, {
+        text: 'Тема поднята наверх списка'
+      });
+      return;
+    }
+    if (action === 'restore') {
+      if (String(ticket.assigned_operator_id || '') !== userId) {
+        await bot.answerCallbackQuery(query.id, {
+          text: 'Тикет назначен другому оператору',
+          show_alert: true
+        });
+        return;
+      }
+      if (ticket.status === 'closed') {
+        await reopenTicketFromTelegram(ticket, operator);
+      }
+      await editPanel(query.message, ticketListModel(operator, 'closed', sourcePage));
+      await bot.answerCallbackQuery(query.id, { text: 'Тикет переоткрыт' });
       return;
     }
     if (action === 'take') {
@@ -808,9 +1035,11 @@ async function handleMessage(msg) {
     });
   }
   if (command === '/queue') {
-    await sendDashboard(operator);
-    return reconcileOperator(operator);
+    return sendDashboard(operator);
   }
+  if (command === '/waiting') return sendTicketList(operator, 'waiting');
+  if (command === '/open') return sendTicketList(operator, 'mine');
+  if (command === '/closed') return sendTicketList(operator, 'closed');
   if (msg.forum_topic_created || msg.forum_topic_edited || msg.forum_topic_closed || msg.forum_topic_reopened) return;
 
   const threadId = msg.message_thread_id;
@@ -1046,7 +1275,9 @@ async function forwardMessage(ticket, message, options = {}) {
   if (!fresh.assigned_operator_id) {
     const operators = db.getActiveTelegramOperators.all()
       .filter(operator => isAuthorized(operator.telegram_user_id));
-    if (ADMIN_IDS.size === 1 && operators.length === 1) {
+    if (settings.telegramAutoAssignSingleOperator &&
+        ADMIN_IDS.size === 1 &&
+        operators.length === 1) {
       await claimAndOpenTicket(fresh.id, operators[0].telegram_user_id);
       fresh = db.getTicketById.get(fresh.id);
       const deliveredDuringAssignment = db.getMessageById.get(message.id);
@@ -1058,7 +1289,7 @@ async function forwardMessage(ticket, message, options = {}) {
       if (message.sender === 'user') {
         for (const operator of operators) {
           await sendAssignmentNotification(fresh, operator, {
-            forceNew: !options.fromQueue,
+            forceNew: false,
             message
           });
         }
@@ -1333,8 +1564,14 @@ async function cleanupOldTopics() {
         continue;
       }
     }
+    const notifications = db.getTelegramNotificationsForTicket.all(thread.ticket_id);
+    for (const notification of notifications) {
+      await bot.deleteMessage(notification.chat_id, notification.message_id).catch(() => {});
+    }
+    db.deleteTelegramNotificationsForTicket.run(thread.ticket_id);
     db.deleteTelegramThread.run(thread.ticket_id, thread.operator_id);
     topicStatus.delete(topicKey(thread.chat_id, thread.thread_id));
+    focusMarkers.delete(topicKey(thread.chat_id, thread.thread_id));
     await wait(350);
   }
 }
@@ -1518,7 +1755,9 @@ async function createTopic(ticketId) {
     );
     return null;
   }
-  if (ADMIN_IDS.size === 1 && operators.length === 1) {
+  if (cfg().telegramAutoAssignSingleOperator &&
+      ADMIN_IDS.size === 1 &&
+      operators.length === 1) {
     const thread = await claimAndOpenTicket(ticket.id, operators[0].telegram_user_id);
     return thread?.thread_id || null;
   }

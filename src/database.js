@@ -186,6 +186,66 @@ module.exports = {
     ORDER BY created_at ASC
     LIMIT ?
   `),
+  countOpenUnassignedTickets: db.prepare(`
+    SELECT COUNT(*) AS count FROM tickets
+    WHERE status = 'open' AND assigned_operator_id IS NULL
+  `),
+  getOpenUnassignedTicketsPage: db.prepare(`
+    SELECT t.*,
+      m.content AS last_msg,
+      m.message_type AS last_msg_type,
+      m.file_name AS last_file_name,
+      COALESCE(m.created_at, t.created_at) AS last_activity
+    FROM tickets t
+    LEFT JOIN messages m ON m.id = (
+      SELECT id FROM messages
+      WHERE ticket_id = t.id
+      ORDER BY created_at DESC LIMIT 1
+    )
+    WHERE t.status = 'open' AND t.assigned_operator_id IS NULL
+    ORDER BY last_activity DESC
+    LIMIT ? OFFSET ?
+  `),
+  countOpenTicketsForOperator: db.prepare(`
+    SELECT COUNT(*) AS count FROM tickets
+    WHERE status = 'open' AND assigned_operator_id = ?
+  `),
+  getOpenTicketsForOperator: db.prepare(`
+    SELECT t.*,
+      m.content AS last_msg,
+      m.message_type AS last_msg_type,
+      m.file_name AS last_file_name,
+      COALESCE(m.created_at, t.created_at) AS last_activity
+    FROM tickets t
+    LEFT JOIN messages m ON m.id = (
+      SELECT id FROM messages
+      WHERE ticket_id = t.id
+      ORDER BY created_at DESC LIMIT 1
+    )
+    WHERE t.status = 'open' AND t.assigned_operator_id = ?
+    ORDER BY last_activity DESC
+    LIMIT ? OFFSET ?
+  `),
+  countClosedTicketsForOperator: db.prepare(`
+    SELECT COUNT(*) AS count FROM tickets
+    WHERE status = 'closed' AND assigned_operator_id = ?
+  `),
+  getClosedTicketsForOperator: db.prepare(`
+    SELECT t.*,
+      m.content AS last_msg,
+      m.message_type AS last_msg_type,
+      m.file_name AS last_file_name,
+      COALESCE(m.created_at, t.created_at) AS last_activity
+    FROM tickets t
+    LEFT JOIN messages m ON m.id = (
+      SELECT id FROM messages
+      WHERE ticket_id = t.id
+      ORDER BY created_at DESC LIMIT 1
+    )
+    WHERE t.status = 'closed' AND t.assigned_operator_id = ?
+    ORDER BY COALESCE(t.closed_at, m.created_at, t.created_at) DESC
+    LIMIT ? OFFSET ?
+  `),
   assignTicketIfUnassigned: db.prepare(`
     UPDATE tickets
     SET assigned_operator_id = ?, updated_at = CURRENT_TIMESTAMP
@@ -427,6 +487,9 @@ module.exports = {
     UPDATE telegram_ticket_notifications
     SET state = ?, updated_at = CURRENT_TIMESTAMP
     WHERE ticket_id = ?
+  `),
+  deleteTelegramNotificationsForTicket: db.prepare(`
+    DELETE FROM telegram_ticket_notifications WHERE ticket_id = ?
   `),
 
   // Push subscriptions

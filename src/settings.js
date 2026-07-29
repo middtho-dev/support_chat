@@ -35,6 +35,7 @@ const DEFAULTS = {
 
   telegramEnabled: true,
   telegramCreateTopics: true,
+  telegramAutoAssignSingleOperator: false,
   telegramForwardUserMessages: true,
   telegramForwardAdminMessages: true,
   telegramForwardOperatorMessages: true,
@@ -95,6 +96,7 @@ const KEY_MAP = {
   inactivityCloseText: 'inactivity_close_text',
   telegramEnabled: 'telegram_enabled',
   telegramCreateTopics: 'telegram_create_topics',
+  telegramAutoAssignSingleOperator: 'telegram_auto_assign_single_operator',
   telegramForwardUserMessages: 'telegram_forward_user_messages',
   telegramForwardAdminMessages: 'telegram_forward_admin_messages',
   telegramForwardOperatorMessages: 'telegram_forward_operator_messages',
