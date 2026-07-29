@@ -20,6 +20,14 @@ const POLLING_INTERVAL_MS = Math.max(
   100,
   Math.min(2000, Number(process.env.TELEGRAM_POLL_INTERVAL_MS) || 300)
 );
+const TOPIC_CREATE_ATTEMPTS = Math.max(
+  1,
+  Math.min(8, Number(process.env.TELEGRAM_TOPIC_CREATE_ATTEMPTS) || 4)
+);
+const TOPIC_CREATE_RETRY_MS = Math.max(
+  100,
+  Math.min(10000, Number(process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS) || 1000)
+);
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
 const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.opus']);
@@ -461,24 +469,8 @@ async function editPanel(message, model) {
   );
 }
 
-function lastTicketMessage(ticketId) {
-  const messages = db.getMessagesRecent.all(ticketId, 1);
-  return messages[0] || null;
-}
-
-function messagePreview(message) {
-  if (!message) return 'Клиент открыл новое обращение.';
-  const text = String(message.content || '').trim();
-  if (text) return text.slice(0, 1200);
-  if (message.message_type === 'image') return `🖼 Изображение${message.file_name ? `: ${message.file_name}` : ''}`;
-  if (message.message_type === 'video') return `🎬 Видео${message.file_name ? `: ${message.file_name}` : ''}`;
-  if (message.message_type === 'audio') return `🎤 Аудио${message.file_name ? `: ${message.file_name}` : ''}`;
-  return `📎 Файл${message.file_name ? `: ${message.file_name}` : ''}`;
-}
-
 function ticketRichMarkdown(ticket, state = 'unassigned', extra = {}) {
   const current = db.getTicketById.get(ticket.id) || ticket;
-  const lastMessage = extra.message || lastTicketMessage(current.id);
   const stateLabel = state === 'closed'
     ? '✅ Закрыт'
     : state === 'assigned'
@@ -491,12 +483,13 @@ function ticketRichMarkdown(ticket, state = 'unassigned', extra = {}) {
   return [
     `## ${stateLabel}`,
     `**${markdownEscape(current.user_name || 'Клиент')}** · \`${markdownEscape(shortId(current))}\``,
-    '',
-    `> ${markdownEscape(messagePreview(lastMessage)).replace(/\n/g, '\n> ')}`,
+    state === 'assigned' && extra.operatorName
+      ? `👤 Оператор: **${markdownEscape(extra.operatorName)}**`
+      : '👤 Оператор: _не назначен_',
+    `🕒 Создан: ${markdownEscape(created)}`,
     '',
     `<details><summary>Детали тикета</summary>`,
     '',
-    `- Создан: ${markdownEscape(created)}`,
     `- Статус: ${markdownEscape(current.status || 'open')}`,
     `- ID: \`${markdownEscape(current.id)}\``,
     '',
@@ -506,7 +499,6 @@ function ticketRichMarkdown(ticket, state = 'unassigned', extra = {}) {
 
 function ticketFallbackText(ticket, state = 'unassigned', extra = {}) {
   const current = db.getTicketById.get(ticket.id) || ticket;
-  const lastMessage = extra.message || lastTicketMessage(current.id);
   const status = state === 'closed'
     ? '✅ Закрыт'
     : state === 'assigned'
@@ -515,9 +507,10 @@ function ticketFallbackText(ticket, state = 'unassigned', extra = {}) {
   return [
     status,
     `${current.user_name || 'Клиент'} · ${shortId(current)}`,
-    '',
-    messagePreview(lastMessage),
-    '',
+    state === 'assigned' && extra.operatorName
+      ? `Оператор: ${extra.operatorName}`
+      : 'Оператор: не назначен',
+    `Создан: ${current.created_at || '—'}`,
     `ID: ${current.id}`
   ].join('\n');
 }
@@ -874,7 +867,9 @@ async function autoAssignTicket(ticket, operator, options = {}) {
         replay: options.replay
       });
     } catch (error) {
-      await reportAssignmentFailure(ticket, operator, error);
+      if (!options.suppressFailureReport) {
+        await reportAssignmentFailure(ticket, operator, error);
+      }
       throw error;
     }
   })().finally(() => assigningTickets.delete(ticket.id));
@@ -906,6 +901,20 @@ async function reconcileUnassignedTickets() {
       );
     }
     return;
+  }
+  const stranded = db.getOpenAssignedTicketsWithoutPrivateThread.all(50);
+  for (const ticket of stranded) {
+    const operator = operators.find(item =>
+      String(item.telegram_user_id) === String(ticket.assigned_operator_id)
+    );
+    if (!operator) {
+      db.unassignTicket.run(ticket.id);
+      continue;
+    }
+    await claimAndOpenTicket(ticket.id, operator.telegram_user_id).catch(error => {
+      console.warn(`[TG private] restore thread ${shortId(ticket)}:`, tgError(error));
+    });
+    await wait(150);
   }
   const tickets = db.getOpenUnassignedTickets.all(50);
   for (const ticket of tickets) {
@@ -995,7 +1004,8 @@ async function claimAndOpenTicket(ticketId, operatorId, options = {}) {
   }
   const before = db.getTicketById.get(ticketId);
   if (!before || before.status !== 'open') throw new Error('Ticket is not open');
-  if (!before.assigned_operator_id) {
+  const assignedHere = !before.assigned_operator_id;
+  if (assignedHere) {
     db.assignTicketIfUnassigned.run(operator.telegram_user_id, ticketId);
   }
   const ticket = db.getTicketById.get(ticketId);
@@ -1005,7 +1015,17 @@ async function claimAndOpenTicket(ticketId, operatorId, options = {}) {
     error.alreadyAssigned = true;
     throw error;
   }
-  const thread = await ensurePrivateThread(ticket, operator);
+  let thread;
+  try {
+    thread = await ensurePrivateThread(ticket, operator);
+  } catch (error) {
+    if (assignedHere) {
+      db.unassignTicket.run(ticket.id);
+      io?.to('admin').emit('admin_ticket_updated', db.getTicketById.get(ticket.id));
+      io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
+    }
+    throw error;
+  }
   updateAssignmentNotifications(ticket, operator).catch(error => {
     console.warn('[TG private] assignment notification update:', tgError(error));
   });
@@ -2030,12 +2050,43 @@ function status() {
 
 async function createTopic(ticketId) {
   if (!tgEnabled()) return null;
-  const ticket = db.getTicketById.get(ticketId);
-  if (!ticket) return null;
   const readyDeadline = Date.now() + 8000;
   while (bot && !connected && Date.now() < readyDeadline) await wait(200);
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= TOPIC_CREATE_ATTEMPTS; attempt++) {
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket || ticket.status !== 'open') return null;
+    try {
+      const operators = await registeredAuthorizedOperators({ discover: true });
+      if (!operators.length) throw new Error('No registered Telegram operator');
+      if (operators.length === 1) {
+        const thread = await autoAssignTicket(ticket, operators[0], {
+          suppressFailureReport: true
+        });
+        return thread?.thread_id || null;
+      }
+      for (const operator of operators) {
+        await sendAssignmentNotification(ticket, operator, { forceNew: false });
+      }
+      return null;
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `[TG private] create topic ${shortId(ticket)} attempt ${attempt}/${TOPIC_CREATE_ATTEMPTS}:`,
+        tgError(error)
+      );
+      if (attempt < TOPIC_CREATE_ATTEMPTS) {
+        await wait(TOPIC_CREATE_RETRY_MS * attempt);
+      }
+    }
+  }
+
+  const ticket = db.getTicketById.get(ticketId);
   const operators = await registeredAuthorizedOperators({ discover: true });
-  if (!operators.length) {
+  if (ticket && operators.length === 1) {
+    await reportAssignmentFailure(ticket, operators[0], lastError);
+  } else if (ticket) {
     await operationalAlert(
       'telegram-no-operators',
       `Тикет ${shortId(ticket)} ждёт регистрации оператора`,
@@ -2048,14 +2099,6 @@ async function createTopic(ticketId) {
         { disable_notification: false }
       ).catch(() => {});
     }
-    return null;
-  }
-  if (operators.length === 1) {
-    const thread = await autoAssignTicket(ticket, operators[0]);
-    return thread?.thread_id || null;
-  }
-  for (const operator of operators) {
-    await sendAssignmentNotification(ticket, operator, { forceNew: false });
   }
   return null;
 }
