@@ -115,6 +115,8 @@ db.exec(`
     ON telegram_ticket_notifications(chat_id, message_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_assigned_operator
     ON tickets(assigned_operator_id, status);
+  CREATE INDEX IF NOT EXISTS idx_messages_pending_telegram
+    ON messages(telegram_message_id, telegram_next_retry_at, created_at);
 `);
 
 // Push subscriptions
@@ -361,6 +363,8 @@ module.exports = {
     WHERE m.sender != 'system'
       AND COALESCE(m.is_auto, 0) = 0
       AND m.telegram_message_id IS NULL
+      AND t.status = 'open'
+      AND t.assigned_operator_id IS NOT NULL
       AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY m.created_at ASC
     LIMIT ?

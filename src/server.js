@@ -28,11 +28,20 @@ const miniAdminSessions = new Map();
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-const DISPLAY_IMAGE_EXTS = new Set(['.jpg','.jpeg','.png','.gif','.webp']);
-const IMG_EXTS = new Set([...DISPLAY_IMAGE_EXTS,'.heic','.heif','.bmp','.tif','.tiff','.avif']);
+const DISPLAY_IMAGE_EXTS = new Set(['.jpg','.jpeg','.jpe','.jfif','.png','.gif','.webp']);
+const IMG_EXTS = new Set([
+  ...DISPLAY_IMAGE_EXTS,
+  '.heic','.heif','.heics','.heifs','.avif','.bmp','.tif','.tiff','.dng'
+]);
 const VID_EXTS = new Set(['.mp4','.mov','.m4v','.avi','.mkv','.webm']);
 const AUD_EXTS = new Set(['.mp3','.m4a','.aac','.ogg','.wav','.flac','.opus']);
 const DOC_EXTS = new Set(['.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.zip','.7z','.rar','.txt','.csv']);
+const IMAGE_MIMES = new Set([
+  'image/jpeg','image/png','image/gif','image/webp','image/heic','image/heif',
+  'image/heic-sequence','image/heif-sequence','image/avif','image/tiff','image/bmp',
+  'image/x-heic','image/x-heif','image/x-canon-cr2','image/x-adobe-dng'
+]);
+const DISPLAY_IMAGE_MIMES = new Set(['image/jpeg','image/png','image/gif','image/webp']);
 const ALLOWED_MIMES = new Set([
   'application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -42,11 +51,27 @@ const ALLOWED_MIMES = new Set([
   'image/heic','image/heif','image/avif','image/tiff','image/bmp'
 ]);
 
+function normalizeMime(value) {
+  const mime = String(value || '').toLowerCase().split(';', 1)[0].trim();
+  const aliases = {
+    'image/jpg': 'image/jpeg',
+    'image/pjpeg': 'image/jpeg',
+    'image/x-heic': 'image/heic',
+    'image/heic-sequence': 'image/heic',
+    'image/x-heif': 'image/heif',
+    'image/heif-sequence': 'image/heif',
+    'image/x-adobe-dng': 'image/tiff'
+  };
+  return aliases[mime] || mime;
+}
+
 function mimeFromExt(filename) {
   const ext = path.extname(filename).toLowerCase();
   const byExt = {
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
-    '.heic': 'image/heic', '.heif': 'image/heif', '.avif': 'image/avif', '.bmp': 'image/bmp', '.tif': 'image/tiff', '.tiff': 'image/tiff',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.jpe': 'image/jpeg', '.jfif': 'image/jpeg',
+    '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+    '.heic': 'image/heic', '.heics': 'image/heic', '.heif': 'image/heif', '.heifs': 'image/heif',
+    '.avif': 'image/avif', '.bmp': 'image/bmp', '.tif': 'image/tiff', '.tiff': 'image/tiff', '.dng': 'image/tiff',
     '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.m4v': 'video/x-m4v', '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
     '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.flac': 'audio/flac', '.opus': 'audio/opus'
   };
@@ -54,13 +79,48 @@ function mimeFromExt(filename) {
   return null;
 }
 
+function detectImageMime(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const head = Buffer.alloc(64);
+    const read = fs.readSync(fd, head, 0, head.length, 0);
+    const bytes = head.subarray(0, read);
+    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+    if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) return 'image/png';
+    if (bytes.length >= 6 && ['GIF87a','GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'))) return 'image/gif';
+    if (bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
+        bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+    if (bytes.length >= 4 &&
+        (bytes.subarray(0, 4).equals(Buffer.from([0x49,0x49,0x2a,0x00])) ||
+         bytes.subarray(0, 4).equals(Buffer.from([0x4d,0x4d,0x00,0x2a])))) return 'image/tiff';
+    if (bytes.length >= 2 && bytes.subarray(0, 2).toString('ascii') === 'BM') return 'image/bmp';
+    if (bytes.length >= 12 && bytes.subarray(4, 8).toString('ascii') === 'ftyp') {
+      const brands = bytes.subarray(8).toString('ascii');
+      if (/(^|.{4})(avif|avis)/.test(brands)) return 'image/avif';
+      if (/(^|.{4})(heic|heix|hevc|hevx|heim|heis|hevm|hevs|heif|mif1|msf1)/.test(brands)) {
+        return 'image/heic';
+      }
+    }
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+  return null;
+}
+
 function uploadMetadata(file) {
   const ext = path.extname(file.originalname || file.filename || '').toLowerCase();
-  let mime = file.mimetype;
+  let mime = normalizeMime(file.mimetype);
   if (!mime || mime === 'application/octet-stream') mime = mimeFromExt(file.originalname) || mime || 'application/octet-stream';
+  const detectedImageMime = detectImageMime(file.path);
+  if (detectedImageMime) mime = detectedImageMime;
 
   let type = 'file';
-  if (mime.startsWith('image/') && DISPLAY_IMAGE_EXTS.has(ext)) type = 'image';
+  if (DISPLAY_IMAGE_MIMES.has(mime) && (DISPLAY_IMAGE_EXTS.has(ext) || !!detectedImageMime)) type = 'image';
   else if (mime.startsWith('video/')) type = 'video';
   else if (mime.startsWith('audio/')) type = 'audio';
 
@@ -158,15 +218,17 @@ const upload = multer({
   }),
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    let mime = file.mimetype;
+    let mime = String(file.mimetype || '').toLowerCase().split(';', 1)[0].trim();
     if (mime === 'application/octet-stream') mime = mimeFromExt(file.originalname) || mime;
     const ext = path.extname(file.originalname || '').toLowerCase();
+    const normalizedMime = normalizeMime(mime);
     const ok =
-      (mime.startsWith('image/') && IMG_EXTS.has(ext)) ||
+      ((IMAGE_MIMES.has(mime) || IMAGE_MIMES.has(normalizedMime)) &&
+        (IMG_EXTS.has(ext) || !ext)) ||
       (mime.startsWith('video/') && VID_EXTS.has(ext)) ||
       (mime.startsWith('audio/') && AUD_EXTS.has(ext)) ||
       (ALLOWED_MIMES.has(mime) && DOC_EXTS.has(ext));
-    ok ? cb(null, true) : cb(new Error('File type not allowed'));
+    ok ? cb(null, true) : cb(new Error('UNSUPPORTED_FILE_TYPE'));
   }
 });
 
@@ -301,6 +363,17 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   }
 
   const meta = uploadMetadata(req.file);
+  const claimedImage = IMAGE_MIMES.has(normalizeMime(req.file.mimetype)) ||
+    IMG_EXTS.has(path.extname(req.file.originalname || '').toLowerCase());
+  if (claimedImage && !detectImageMime(req.file.path)) {
+    fs.unlink(req.file.path, () => {});
+    telegram.notifyOperationalIssue(
+      'upload-invalid-image',
+      'Клиенту не удалось загрузить фото',
+      `Формат файла ${req.file.originalname || 'без имени'} не удалось распознать`
+    ).catch(() => {});
+    return res.status(400).json({ error: 'Не удалось распознать формат изображения' });
+  }
   res.json({ url: `/uploads/${req.file.filename}`, ...meta });
 });
 
@@ -752,9 +825,12 @@ setInterval(inactivityCheck, 60 * 1000);
 
 app.use((err, req, res, next) => {
   if (!err) return next();
-  if (err instanceof multer.MulterError || err.message === 'File type not allowed') {
+  if (err instanceof multer.MulterError || err.message === 'UNSUPPORTED_FILE_TYPE') {
     telegram.notifyOperationalIssue('upload-failed', 'Клиенту не удалось загрузить файл', err.message).catch(() => {});
-    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.message });
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Файл слишком большой'
+      : 'Этот формат файла пока не поддерживается';
+    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: message });
   }
   console.error('[HTTP]', err);
   res.status(500).json({ error: 'Server error' });
