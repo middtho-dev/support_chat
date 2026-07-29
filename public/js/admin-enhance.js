@@ -101,6 +101,7 @@
 
   function openTicketCard() {
     cardOpen = true;
+    if (!currentTicket) return;
     renderTicketMeta();
     setTimeout(() => $('meta-tags')?.focus(), 0);
   }
@@ -214,6 +215,7 @@
 
   wrapSocketFactory();
   observeDom();
+  window.adminOpenTicketCard = openTicketCard;
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && cardOpen) closeTicketCard();
   });

@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#0b141a">
   <title>Админка поддержки</title>
   <link rel="icon" type="image/png" href="/logo.png">
@@ -38,6 +38,16 @@
       <div class="spacer"></div>
       <div class="status"><i id="cdot" class="dot"></i><span id="ctxt">подключение</span></div>
       <button id="logout-btn" class="ghost">Выйти</button>
+      <div id="mobile-ticket-top" class="mobile-ticket-top" aria-hidden="true">
+        <button id="mobile-ticket-back" class="mobile-ticket-back" type="button" aria-label="К списку тикетов">‹</button>
+        <div id="mobile-ticket-avatar" class="avatar"></div>
+        <div class="mobile-ticket-copy">
+          <b id="mobile-ticket-name">—</b>
+          <span id="mobile-ticket-summary">—</span>
+        </div>
+        <button id="mobile-ticket-card" class="mobile-ticket-card" type="button">Карточка</button>
+        <button id="mobile-ticket-toggle" class="mobile-ticket-toggle danger" type="button">Закрыть</button>
+      </div>
     </header>
 
     <div class="workspace">

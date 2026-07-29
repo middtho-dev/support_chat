@@ -63,6 +63,7 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_topic_deleted INTEGER DEF
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_tags TEXT DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_note TEXT DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN assigned_operator_id TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_last_reminded_at DATETIME`); } catch {}
 
 // Private Telegram operator inbox. A private topic id is scoped to its chat, so
 // never store or look it up without the operator chat id.
@@ -268,6 +269,47 @@ module.exports = {
       AND COALESCE(telegram_topic_deleted, 0) = 0
     ORDER BY created_at ASC
     LIMIT ?
+  `),
+  getTicketsAwaitingTelegramReminder: db.prepare(`
+    WITH awaiting AS (
+      SELECT t.*,
+        COALESCE((
+          SELECT m.created_at
+          FROM messages m
+          WHERE m.ticket_id = t.id
+            AND m.sender != 'system'
+            AND COALESCE(m.is_auto, 0) = 0
+          ORDER BY m.created_at DESC, m.rowid DESC
+          LIMIT 1
+        ), t.created_at) AS waiting_since,
+        COALESCE((
+          SELECT m.sender
+          FROM messages m
+          WHERE m.ticket_id = t.id
+            AND m.sender != 'system'
+            AND COALESCE(m.is_auto, 0) = 0
+          ORDER BY m.created_at DESC, m.rowid DESC
+          LIMIT 1
+        ), 'user') AS last_conversation_sender
+      FROM tickets t
+      WHERE t.status = 'open'
+    )
+    SELECT *
+    FROM awaiting
+    WHERE last_conversation_sender = 'user'
+      AND waiting_since <= datetime('now', ?)
+      AND (
+        telegram_last_reminded_at IS NULL
+        OR telegram_last_reminded_at < waiting_since
+        OR telegram_last_reminded_at <= datetime('now', ?)
+      )
+    ORDER BY waiting_since ASC
+    LIMIT ?
+  `),
+  markTelegramTicketReminded: db.prepare(`
+    UPDATE tickets
+    SET telegram_last_reminded_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status = 'open'
   `),
 
   // Messages

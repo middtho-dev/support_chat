@@ -93,6 +93,21 @@ input:focus,textarea:focus,select:focus{
 }
 .ghost:hover{background:rgba(255,255,255,.075)}
 .ghost:active{transform:scale(.97)}
+.mobile-ticket-top{display:none;align-items:center;gap:6px;width:100%;min-width:0}
+.mobile-ticket-back{
+  width:29px;height:36px;flex:0 0 29px;display:grid;place-items:center;border-radius:50%;
+  background:transparent;color:var(--soft);font-size:27px;line-height:1;
+}
+.mobile-ticket-top .avatar{width:34px;height:34px;flex:0 0 34px;font-size:11px}
+.mobile-ticket-copy{min-width:0;flex:1}
+.mobile-ticket-copy b,.mobile-ticket-copy span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mobile-ticket-copy b{font-size:12px}
+.mobile-ticket-copy span{margin-top:2px;color:var(--muted);font-size:9px}
+.mobile-ticket-card{
+  height:32px;padding:0 8px;flex:0 0 auto;border-radius:9px;
+  background:var(--panel2);color:var(--soft);font-size:9.5px;font-weight:700;
+}
+.mobile-ticket-toggle{height:32px!important;padding:0 8px!important;flex:0 0 auto;font-size:9.5px!important}
 
 .workspace{
   grid-row:2;min-height:0;display:grid;
@@ -366,6 +381,13 @@ input:focus,textarea:focus,select:focus{
   .top{height:58px;padding:0 10px;gap:8px}
   .top .logo{width:36px;height:36px}
   .top h1{font-size:14px}.top p,.status span{display:none}
+  body.ticket-open .top>.brand,
+  body.ticket-open .top>.spacer,
+  body.ticket-open .top>.status,
+  body.ticket-open .top>#logout-btn{display:none}
+  body.ticket-open .mobile-ticket-top{display:flex}
+  body.ticket-open .chat-head,
+  body.ticket-open .ticket-meta{display:none}
   .ghost{min-height:34px;padding:0 10px;font-size:11px}
   .workspace{display:block}
   .rail{
@@ -399,6 +421,7 @@ input:focus,textarea:focus,select:focus{
   .compose-row{gap:3px}
   .quick,.send{width:37px;height:37px;flex-basis:37px}
   .composer textarea{min-height:38px;padding:9px 12px}
+  input,textarea,select,.composer textarea,.meta-field input,.meta-field textarea{font-size:16px}
   .hint{display:none}
   .admin-file-preview{margin-left:76px}
   .panel{padding:14px 10px}
@@ -409,7 +432,7 @@ input:focus,textarea:focus,select:focus{
 }
 
 body.tg-mini{--tg-bottom-ui:0px!important;--tg-top-ui:0px!important;background:var(--bg)!important}
-body.tg-mini .app{grid-template-rows:58px minmax(0,1fr)!important;background:var(--bg)!important}
+body.tg-mini .app{grid-template-rows:58px minmax(0,1fr)!important;height:var(--tg-stable-height,100vh)!important;background:var(--bg)!important}
 body.tg-mini .top{display:flex!important;height:58px!important;background:var(--panel3)!important}
 body.tg-mini .workspace{top:auto!important;height:auto!important;background:var(--bg)!important}
 body.tg-mini .side{background:var(--panel)!important}
@@ -417,6 +440,14 @@ body.tg-mini .msgs,body.tg-mini .panel{background:var(--bg)!important}
 body.tg-mini .bubble{border-radius:9px!important;padding:8px 10px!important;background:#202c33!important}
 body.tg-mini .out .bubble{background:#005c4b!important}
 body.tg-mini .composer{background:var(--panel)!important}
+body.tg-mini.ticket-open .top>.brand,
+body.tg-mini.ticket-open .top>.spacer,
+body.tg-mini.ticket-open .top>.status,
+body.tg-mini.ticket-open .top>#logout-btn{display:none!important}
+body.tg-mini.ticket-open .mobile-ticket-top{display:flex!important}
+body.tg-mini.ticket-open .chat-head,
+body.tg-mini.ticket-open .ticket-meta{display:none!important}
+body.tg-mini input,body.tg-mini textarea,body.tg-mini select{font-size:16px!important}
 
 @media(max-width:560px){
   body.tg-mini .side{inset:58px 0 calc(58px + env(safe-area-inset-bottom,0px)) 0!important}
