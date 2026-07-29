@@ -619,12 +619,13 @@ input,textarea{
   width:44px;
   height:44px;
   flex:0 0 auto;
-  overflow:hidden;
+  overflow:visible;
   border-radius:50%;
   display:grid;
   place-items:center;
   transition:background .15s ease,color .15s ease,transform .12s ease;
 }
+.icn svg{display:block;max-width:20px;max-height:20px}
 .icn{background:transparent;color:var(--muted)}
 .icn:hover{background:rgba(255,255,255,.055);color:var(--text)}
 .icn:active,.sndbtn:active{transform:scale(.9)}

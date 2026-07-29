@@ -35,7 +35,7 @@ const DEFAULTS = {
 
   telegramEnabled: true,
   telegramCreateTopics: true,
-  telegramAutoAssignSingleOperator: false,
+  telegramAutoAssignSingleOperator: true,
   telegramForwardUserMessages: true,
   telegramForwardAdminMessages: true,
   telegramForwardOperatorMessages: true,

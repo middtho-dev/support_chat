@@ -718,7 +718,10 @@ async function handleStart(msg) {
 
 async function reconcileOperator(operator) {
   const tickets = db.getOpenUnassignedTickets.all(50);
-  if (!cfg().telegramAutoAssignSingleOperator || ADMIN_IDS.size !== 1) return;
+  const operators = db.getActiveTelegramOperators.all()
+    .filter(item => isAuthorized(item.telegram_user_id));
+  if (operators.length !== 1 ||
+      String(operators[0].telegram_user_id) !== String(operator.telegram_user_id)) return;
   for (const ticket of tickets) {
     await claimAndOpenTicket(ticket.id, operator.telegram_user_id).catch(() => {});
     await wait(150);
@@ -742,7 +745,7 @@ async function reconcileUnassignedTickets() {
   }
   const tickets = db.getOpenUnassignedTickets.all(50);
   for (const ticket of tickets) {
-    if (cfg().telegramAutoAssignSingleOperator && ADMIN_IDS.size === 1) {
+    if (operators.length === 1) {
       await claimAndOpenTicket(ticket.id, operators[0].telegram_user_id).catch(() => {});
     } else {
       for (const operator of operators) {
@@ -1345,9 +1348,7 @@ async function forwardMessage(ticket, message, options = {}) {
   if (!fresh.assigned_operator_id) {
     const operators = db.getActiveTelegramOperators.all()
       .filter(operator => isAuthorized(operator.telegram_user_id));
-    if (settings.telegramAutoAssignSingleOperator &&
-        ADMIN_IDS.size === 1 &&
-        operators.length === 1) {
+    if (operators.length === 1) {
       await claimAndOpenTicket(fresh.id, operators[0].telegram_user_id, { replay: false });
       fresh = db.getTicketById.get(fresh.id);
       const deliveredDuringAssignment = db.getMessageById.get(message.id);
@@ -1431,6 +1432,7 @@ async function processDeliveryQueue() {
       await forwardMessage(ticket, message, { fromQueue: true }).catch(() => {});
       await wait(250);
     }
+    if (messages.length === 20) scheduleDeliveryQueue(250);
   } catch (error) {
     deliveryStats.lastError = tgError(error);
     console.error('[TG private] delivery queue:', tgError(error));
@@ -1454,6 +1456,7 @@ async function replayUnsentMessages(ticket, limit = 30) {
         { message_thread_id: thread.thread_id }
       ).catch(() => {});
     }
+    scheduleDeliveryQueue(250);
   }
 }
 
@@ -1812,6 +1815,7 @@ function status() {
       FROM messages m
       JOIN tickets t ON t.id = m.ticket_id
       WHERE t.status = 'open'
+        AND t.assigned_operator_id IS NOT NULL
         AND m.sender != 'system'
         AND COALESCE(m.is_auto, 0) = 0
         AND m.telegram_message_id IS NULL
@@ -1865,9 +1869,7 @@ async function createTopic(ticketId) {
     );
     return null;
   }
-  if (cfg().telegramAutoAssignSingleOperator &&
-      ADMIN_IDS.size === 1 &&
-      operators.length === 1) {
+  if (operators.length === 1) {
     const thread = await claimAndOpenTicket(ticket.id, operators[0].telegram_user_id);
     return thread?.thread_id || null;
   }

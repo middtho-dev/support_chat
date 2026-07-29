@@ -10,61 +10,21 @@
   const $ = id => document.getElementById(id);
   const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
   const tagsArray = ticket => String(ticket?.admin_tags || '').split(',').map(tag => tag.trim()).filter(Boolean);
+  const parseServerDate = value => {
+    const raw = String(value || '');
+    return new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+      ? `${raw.replace(' ', 'T')}Z`
+      : raw);
+  };
   const timeAgo = iso => {
     if (!iso) return '—';
-    const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+    const sec = Math.max(0, Math.floor((Date.now() - parseServerDate(iso).getTime()) / 1000));
     if (sec < 60) return 'сейчас';
     if (sec < 3600) return `${Math.floor(sec / 60)} мин`;
     if (sec < 86400) return `${Math.floor(sec / 3600)} ч`;
     return `${Math.floor(sec / 86400)} д`;
   };
-  const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'нет ответа';
-
-  function injectStyles() {
-    if ($('admin-enhance-style')) return;
-    const style = document.createElement('style');
-    style.id = 'admin-enhance-style';
-    style.textContent = `
-      .ticket{grid-template-columns:44px minmax(0,1fr) auto;align-items:center}
-      .tagline{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
-      .tag-chip{display:inline-flex;align-items:center;max-width:130px;height:21px;padding:0 8px;border:1px solid rgba(125,211,252,.22);border-radius:999px;background:rgba(14,165,233,.10);color:#bae6fd;font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .ticket-meta{padding:13px 18px 14px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(15,23,42,.78),rgba(2,132,199,.10));backdrop-filter:blur(18px);display:grid;gap:12px;flex:0 0 auto}
-      .meta-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
-      .meta-title{min-width:0;color:#e2e8f0;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .meta-toggle{display:none;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.05);color:#dbeafe;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:850;cursor:pointer;white-space:nowrap}
-      .meta-body{display:grid;gap:12px}
-      .meta-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-      .meta-pill{min-height:50px;border:1px solid rgba(148,163,184,.16);border-radius:14px;background:rgba(15,23,42,.52);padding:9px 11px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-      .meta-pill b{display:block;color:#f8fafc;font-size:13px;line-height:1.25}
-      .meta-pill span{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
-      .meta-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) auto;gap:10px;align-items:end}
-      .meta-field{display:grid;gap:6px;min-width:0}
-      .meta-field label{font-size:11px;font-weight:900;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-      .meta-field input,.meta-field textarea,.tpl-search{width:100%;border:1px solid rgba(148,163,184,.18);background:rgba(2,6,23,.42);color:var(--text);border-radius:13px;padding:10px 12px;outline:none}
-      .meta-field textarea{resize:vertical;min-height:42px;max-height:120px}
-      .meta-save{height:42px;border:0;border-radius:13px;background:linear-gradient(135deg,var(--blue),var(--blue2));color:#041018;font-weight:900;padding:0 15px;box-shadow:0 12px 30px rgba(37,99,235,.24);cursor:pointer}
-      .preset-tags{display:flex;gap:7px;flex-wrap:wrap}
-      .preset-tags button{border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.05);color:#dbeafe;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:850;cursor:pointer}
-      .tpl-search{height:38px;margin-bottom:8px}
-      @media (max-width:760px){
-        .ticket-meta{padding:8px 10px;gap:8px;max-height:42vh;overflow:auto}
-        .meta-top{display:flex}
-        .meta-toggle{display:inline-flex;align-items:center}
-        .meta-row{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none}
-        .meta-row::-webkit-scrollbar{display:none}
-        .meta-pill{min-width:112px;min-height:44px;padding:8px 9px;border-radius:12px}
-        .meta-pill b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .meta-pill span{font-size:9.5px}
-        .meta-body{display:none}
-        .ticket-meta.expanded .meta-body{display:grid}
-        .meta-fields{grid-template-columns:1fr;gap:8px}
-        .meta-save{width:100%}
-        .preset-tags{gap:6px}
-        .preset-tags button{padding:7px 9px}
-      }
-    `;
-    document.head.appendChild(style);
-  }
+  const fmtTime = iso => iso ? parseServerDate(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'нет ответа';
 
   function ensureMetaPanel() {
     let el = $('ticket-meta');
@@ -209,7 +169,6 @@
     }
   }
 
-  injectStyles();
   wrapSocketFactory();
   observeDom();
 })();
