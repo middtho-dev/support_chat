@@ -87,6 +87,7 @@ let richMessagesAvailable = true;
 let botUsername = '';
 
 const creatingThreads = new Map();
+const assigningTickets = new Map();
 const forwardingMessages = new Set();
 const incomingMessages = new Set();
 const alertTimes = new Map();
@@ -716,22 +717,81 @@ async function handleStart(msg) {
   await reconcileOperator(operator);
 }
 
+async function registeredAuthorizedOperators({ discover = false } = {}) {
+  let operators = db.getActiveTelegramOperators.all()
+    .filter(operator => isAuthorized(operator.telegram_user_id));
+  if (!discover || operators.length || !bot) return operators;
+
+  for (const telegramUserId of ADMIN_IDS) {
+    try {
+      const chat = await bot.getChat(telegramUserId);
+      if (chat?.type !== 'private') continue;
+      db.upsertTelegramOperator.run(
+        String(telegramUserId),
+        operatorName(chat),
+        chat.username || null
+      );
+    } catch (error) {
+      console.warn(`[TG private] operator discovery ${telegramUserId}:`, tgError(error));
+    }
+  }
+  operators = db.getActiveTelegramOperators.all()
+    .filter(operator => isAuthorized(operator.telegram_user_id));
+  return operators;
+}
+
+async function reportAssignmentFailure(ticket, operator, error) {
+  const details = `Тикет ${shortId(ticket)}, оператор ${operator?.display_name || operator?.telegram_user_id || 'неизвестен'}: ${tgError(error)}`;
+  await operationalAlert(
+    `telegram-autoassign-${ticket.id}`,
+    'Не удалось автоматически назначить новый тикет',
+    details
+  );
+  if (operator?.telegram_user_id) {
+    await bot.sendMessage(
+      operator.telegram_user_id,
+      `⚠️ Новый тикет ${shortId(ticket)} не назначился автоматически.\nОткройте /queue и возьмите его вручную.`,
+      { disable_notification: false }
+    ).catch(() => {});
+  }
+}
+
+async function autoAssignTicket(ticket, operator, options = {}) {
+  if (assigningTickets.has(ticket.id)) return assigningTickets.get(ticket.id);
+  const assignment = (async () => {
+    await sendAssignmentNotification(ticket, operator, {
+      forceNew: false,
+      message: options.message
+    }).catch(error => {
+      console.warn('[TG private] new ticket notification:', tgError(error));
+    });
+    try {
+      return await claimAndOpenTicket(ticket.id, operator.telegram_user_id, {
+        replay: options.replay
+      });
+    } catch (error) {
+      await reportAssignmentFailure(ticket, operator, error);
+      throw error;
+    }
+  })().finally(() => assigningTickets.delete(ticket.id));
+  assigningTickets.set(ticket.id, assignment);
+  return assignment;
+}
+
 async function reconcileOperator(operator) {
   const tickets = db.getOpenUnassignedTickets.all(50);
-  const operators = db.getActiveTelegramOperators.all()
-    .filter(item => isAuthorized(item.telegram_user_id));
+  const operators = await registeredAuthorizedOperators();
   if (operators.length !== 1 ||
       String(operators[0].telegram_user_id) !== String(operator.telegram_user_id)) return;
   for (const ticket of tickets) {
-    await claimAndOpenTicket(ticket.id, operator.telegram_user_id).catch(() => {});
+    await autoAssignTicket(ticket, operator).catch(() => {});
     await wait(150);
   }
 }
 
 async function reconcileUnassignedTickets() {
   if (!tgEnabled()) return;
-  const operators = db.getActiveTelegramOperators.all()
-    .filter(operator => isAuthorized(operator.telegram_user_id));
+  const operators = await registeredAuthorizedOperators({ discover: true });
   if (!operators.length) {
     const waiting = db.getOpenUnassignedTickets.all(1);
     if (waiting.length) {
@@ -746,7 +806,7 @@ async function reconcileUnassignedTickets() {
   const tickets = db.getOpenUnassignedTickets.all(50);
   for (const ticket of tickets) {
     if (operators.length === 1) {
-      await claimAndOpenTicket(ticket.id, operators[0].telegram_user_id).catch(() => {});
+      await autoAssignTicket(ticket, operators[0]).catch(() => {});
     } else {
       for (const operator of operators) {
         await sendAssignmentNotification(ticket, operator, { forceNew: false });
@@ -785,7 +845,10 @@ async function sendAssignmentNotification(ticket, operator, options = {}) {
   const sent = await sendRichOrText(
     operator.telegram_user_id,
     markdown,
-    { reply_markup: ticketKeyboard(fresh, 'unassigned') },
+    {
+      reply_markup: ticketKeyboard(fresh, 'unassigned'),
+      disable_notification: false
+    },
     fallback
   );
   if (sent) {
@@ -1346,10 +1409,9 @@ async function forwardMessage(ticket, message, options = {}) {
   let fresh = db.getTicketById.get(ticket.id);
   if (!fresh || fresh.status === 'closed') return null;
   if (!fresh.assigned_operator_id) {
-    const operators = db.getActiveTelegramOperators.all()
-      .filter(operator => isAuthorized(operator.telegram_user_id));
+    const operators = await registeredAuthorizedOperators({ discover: true });
     if (operators.length === 1) {
-      await claimAndOpenTicket(fresh.id, operators[0].telegram_user_id, { replay: false });
+      await autoAssignTicket(fresh, operators[0], { replay: false, message });
       fresh = db.getTicketById.get(fresh.id);
       const deliveredDuringAssignment = db.getMessageById.get(message.id);
       if (deliveredDuringAssignment?.telegram_message_id) {
@@ -1859,18 +1921,26 @@ async function createTopic(ticketId) {
   if (!tgEnabled()) return null;
   const ticket = db.getTicketById.get(ticketId);
   if (!ticket) return null;
-  const operators = db.getActiveTelegramOperators.all()
-    .filter(operator => isAuthorized(operator.telegram_user_id));
+  const readyDeadline = Date.now() + 8000;
+  while (bot && !connected && Date.now() < readyDeadline) await wait(200);
+  const operators = await registeredAuthorizedOperators({ discover: true });
   if (!operators.length) {
     await operationalAlert(
       'telegram-no-operators',
       `Тикет ${shortId(ticket)} ждёт регистрации оператора`,
       'Откройте личный чат с ботом и выполните /start.'
     );
+    for (const telegramUserId of ADMIN_IDS) {
+      await bot.sendMessage(
+        telegramUserId,
+        `🆕 Новый тикет ${shortId(ticket)} ждёт оператора.\nОтправьте /start, затем откройте /queue.`,
+        { disable_notification: false }
+      ).catch(() => {});
+    }
     return null;
   }
   if (operators.length === 1) {
-    const thread = await claimAndOpenTicket(ticket.id, operators[0].telegram_user_id);
+    const thread = await autoAssignTicket(ticket, operators[0]);
     return thread?.thread_id || null;
   }
   for (const operator of operators) {

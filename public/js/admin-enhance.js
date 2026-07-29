@@ -5,7 +5,7 @@
   let currentTicket = null;
   let currentMessages = [];
   let activeSocket = null;
-  let metaExpanded = false;
+  let cardOpen = false;
 
   const $ = id => document.getElementById(id);
   const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
@@ -43,30 +43,72 @@
     const el = ensureMetaPanel();
     const firstResponse = currentMessages.find(message => message.sender === 'support');
     const pending = currentTicket.status === 'open' && (currentTicket.unread_count > 0 || currentTicket.last_sender === 'user');
-    el.classList.toggle('expanded', metaExpanded);
+    const activityAge = timeAgo(currentTicket.last_activity || currentTicket.created_at);
+    const activityLabel = activityAge === 'сейчас' ? activityAge : `${activityAge} назад`;
     el.innerHTML = `
-      <div class="meta-top">
-        <div class="meta-title">Карточка тикета</div>
-        <button id="meta-toggle" class="meta-toggle" type="button">${metaExpanded ? 'Скрыть детали' : 'Метки и заметка'}</button>
+      <div class="meta-summary">
+        <span class="meta-state ${pending ? 'waiting' : ''}">${esc(pending ? 'Ждёт ответа' : 'На контроле')}</span>
+        <span class="meta-separator"></span>
+        <span class="meta-fact">${esc(activityLabel)}</span>
+        <span class="meta-separator"></span>
+        <span class="meta-fact">Ответ: ${esc(firstResponse ? fmtTime(firstResponse.created_at) : 'нет')}</span>
       </div>
-      <div class="meta-row">
-        <div class="meta-pill"><b>${esc(pending ? 'Ждет ответа' : 'На контроле')}</b><span>Статус</span></div>
-        <div class="meta-pill"><b>${esc(timeAgo(currentTicket.last_activity || currentTicket.created_at))}</b><span>Последняя активность</span></div>
-        <div class="meta-pill"><b>${esc(firstResponse ? fmtTime(firstResponse.created_at) : 'нет ответа')}</b><span>Первый ответ</span></div>
-      </div>
-      <div class="meta-body">
-        <div class="meta-fields">
-          <div class="meta-field"><label>Метки через запятую</label><input id="meta-tags" maxlength="180" value="${esc(tagsArray(currentTicket).join(', '))}" placeholder="vpn, оплата, срочно"></div>
-          <div class="meta-field"><label>Внутренняя заметка</label><textarea id="meta-note" maxlength="1200" rows="1" placeholder="Видно только оператору">${esc(currentTicket.admin_note || '')}</textarea></div>
-          <button id="meta-save" class="meta-save">Сохранить</button>
+      <button id="meta-card-open" class="meta-card-open" type="button">Карточка тикета</button>`;
+    $('meta-card-open')?.addEventListener('click', openTicketCard);
+    renderTicketCardDialog(firstResponse, pending);
+  }
+
+  function renderTicketCardDialog(firstResponse, pending) {
+    let dialog = $('ticket-card-dialog');
+    if (!dialog) {
+      dialog = document.createElement('div');
+      dialog.id = 'ticket-card-dialog';
+      dialog.className = 'ticket-card-dialog';
+      document.body.appendChild(dialog);
+    }
+    dialog.classList.toggle('open', cardOpen);
+    dialog.setAttribute('aria-hidden', cardOpen ? 'false' : 'true');
+    dialog.innerHTML = `
+      <button class="ticket-card-backdrop" type="button" aria-label="Закрыть карточку"></button>
+      <section class="ticket-card-sheet" role="dialog" aria-modal="true" aria-labelledby="ticket-card-title">
+        <div class="ticket-card-head">
+          <div><h3 id="ticket-card-title">Карточка тикета</h3><p>${esc(currentTicket.user_name || 'Клиент')} · #${esc(String(currentTicket.id || '').slice(0, 8))}</p></div>
+          <button id="ticket-card-close" class="ticket-card-close" type="button" aria-label="Закрыть">×</button>
+        </div>
+        <div class="ticket-card-stats">
+          <div><b>${esc(pending ? 'Ждёт ответа' : 'На контроле')}</b><span>Статус</span></div>
+          <div><b>${esc(timeAgo(currentTicket.last_activity || currentTicket.created_at))}</b><span>Активность</span></div>
+          <div><b>${esc(firstResponse ? fmtTime(firstResponse.created_at) : 'нет')}</b><span>Первый ответ</span></div>
+        </div>
+        <div class="ticket-card-fields">
+          <div class="meta-field"><label for="meta-tags">Метки через запятую</label><input id="meta-tags" maxlength="180" value="${esc(tagsArray(currentTicket).join(', '))}" placeholder="vpn, оплата, срочно"></div>
+          <div class="meta-field"><label for="meta-note">Внутренняя заметка</label><textarea id="meta-note" maxlength="1200" rows="4" placeholder="Видно только оператору">${esc(currentTicket.admin_note || '')}</textarea></div>
         </div>
         <div class="preset-tags">
           ${['срочно','оплата','vpn','ios','android','роутер','ждет клиента'].map(tag => `<button type="button" data-tag-preset="${esc(tag)}">${esc(tag)}</button>`).join('')}
         </div>
-      </div>`;
-    $('meta-toggle')?.addEventListener('click', () => { metaExpanded = !metaExpanded; renderTicketMeta(); });
+        <div class="ticket-card-actions">
+          <button id="meta-cancel" class="meta-cancel" type="button">Отмена</button>
+          <button id="meta-save" class="meta-save" type="button">Сохранить</button>
+        </div>
+      </section>`;
+    dialog.querySelector('.ticket-card-backdrop')?.addEventListener('click', closeTicketCard);
+    $('ticket-card-close')?.addEventListener('click', closeTicketCard);
+    $('meta-cancel')?.addEventListener('click', closeTicketCard);
     $('meta-save')?.addEventListener('click', saveTicketMeta);
-    el.querySelectorAll('[data-tag-preset]').forEach(btn => btn.addEventListener('click', () => addPresetTag(btn.dataset.tagPreset)));
+    dialog.querySelectorAll('[data-tag-preset]').forEach(btn => btn.addEventListener('click', () => addPresetTag(btn.dataset.tagPreset)));
+  }
+
+  function openTicketCard() {
+    cardOpen = true;
+    renderTicketMeta();
+    setTimeout(() => $('meta-tags')?.focus(), 0);
+  }
+
+  function closeTicketCard() {
+    cardOpen = false;
+    $('ticket-card-dialog')?.classList.remove('open');
+    $('ticket-card-dialog')?.setAttribute('aria-hidden', 'true');
   }
 
   function addPresetTag(tag) {
@@ -85,6 +127,7 @@
       tags: $('meta-tags')?.value || '',
       note: $('meta-note')?.value || ''
     });
+    closeTicketCard();
   }
 
   function decorateTickets() {
@@ -151,7 +194,7 @@
       decorateTickets();
     }
     if (name === 'admin_ticket_messages') {
-      if (currentTicket?.id !== payload.ticket?.id) metaExpanded = false;
+      if (currentTicket?.id !== payload.ticket?.id) cardOpen = false;
       currentTicket = payload.ticket;
       currentMessages = Array.isArray(payload.messages) ? payload.messages : [];
       ticketMap.set(currentTicket.id, currentTicket);
@@ -171,4 +214,7 @@
 
   wrapSocketFactory();
   observeDom();
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && cardOpen) closeTicketCard();
+  });
 })();
