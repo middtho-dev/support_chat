@@ -20,6 +20,12 @@ const topicStatus = new Map();
 const creatingTopics = new Map();
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 let cleanupTimer = null;
+let deliveryTimer = null;
+let deliveryRunning = false;
+const forwardingMessages = new Set();
+const incomingMessages = new Set();
+const alertTimes = new Map();
+const deliveryStats = { delivered: 0, failed: 0, retried: 0, incomingDuplicates: 0, mediaFailures: 0, lastError: null, lastSuccessAt: null };
 
 function cfg() { return loadSettings(); }
 function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID; }
@@ -94,6 +100,18 @@ function isThreadNotFound(e) {
 
 function tgError(e) {
   return String(e?.response?.body?.description || e?.message || e || 'unknown error');
+}
+
+async function operationalAlert(key, text, details = '') {
+  const now = Date.now();
+  if (now - (alertTimes.get(key) || 0) < 15 * 60 * 1000) return;
+  alertTimes.set(key, now);
+  const message = `🚨 <b>Контроль доставки чата</b>\n${htmlEscape(text)}${details ? `\n<code>${htmlEscape(details).slice(0, 1500)}</code>` : ''}`;
+  console.error(`[Monitor] ${text}`, details);
+  io?.to('admin').emit('operational_alert', { key, message: text, details, createdAt: new Date().toISOString() });
+  if (bot && GROUP_ID) {
+    try { await bot.sendMessage(GROUP_ID, message, { parse_mode: 'HTML' }); } catch (e) { console.error('[Monitor] alert failed:', tgError(e)); }
+  }
 }
 
 function wait(ms) {
@@ -189,6 +207,8 @@ function init(socketIo) {
   setInterval(cleanupOldTopics, 60 * 60 * 1000);
   setInterval(retryMissingTopics, 60 * 1000);
   setTimeout(retryMissingTopics, 10 * 1000);
+  deliveryTimer = setInterval(processDeliveryQueue, 15 * 1000);
+  setTimeout(processDeliveryQueue, 5000);
   return bot;
 }
 
@@ -204,13 +224,22 @@ function startBot() {
         params: { timeout: 30, allowed_updates: ['message', 'callback_query', 'message_reaction', 'message_reaction_count'] }
       }
     });
-    bot.on('polling_error', err => { if (connected) { connected = false; console.error('[TG] Lost:', err.message); } scheduleReconnect(); });
+    bot.on('polling_error', err => {
+      if (connected) { connected = false; console.error('[TG] Lost:', err.message); }
+      operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(err)).catch(() => {});
+      scheduleReconnect();
+    });
     bot.on('error', err => { console.error('[TG] Error:', err.message); scheduleReconnect(); });
     bot.on('message', async msg => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessage(msg); });
     bot.on('callback_query', async query => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleCallbackQuery(query); });
     bot.on('message_reaction', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
     bot.on('message_reaction_count', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
-    bot.startPolling();
+    bot.startPolling().catch(err => {
+      connected = false;
+      console.error('[TG] startPolling:', tgError(err));
+      scheduleReconnect();
+    });
+    connected = true;
     configureAdminWebApp().catch(e => console.error('[TG] Mini App setup:', e.message));
   } catch (e) {
     console.error('[TG] Failed to start:', e.message);
@@ -258,7 +287,8 @@ function status() {
     miniAppUrl: WEBAPP_URL || null,
     miniAppAllowedAdmins: TELEGRAM_ADMIN_IDS.size,
     pendingTopicCreates: creatingTopics.size,
-    openTicketsWithoutTopic
+    openTicketsWithoutTopic,
+    delivery: { ...deliveryStats, inFlight: forwardingMessages.size }
   };
 }
 
@@ -334,6 +364,8 @@ function parseCmd(text) {
 }
 
 async function handleMessage(msg) {
+  const incomingKey = `${msg.chat?.id}:${msg.message_id}`;
+  let claimedIncoming = false;
   try {
     if (!tgEnabled()) return;
     const s = cfg();
@@ -390,10 +422,24 @@ async function handleMessage(msg) {
 
     if (!s.telegramForwardOperatorMessages) return;
 
+    // Telegram may redeliver an update after a polling reconnect. Processing the
+    // same update twice would show two identical operator messages to the client.
+    if (incomingMessages.has(incomingKey) || db.getMessageByTelegramId.get(msg.message_id)) {
+      deliveryStats.incomingDuplicates++;
+      return;
+    }
+    incomingMessages.add(incomingKey);
+    claimedIncoming = true;
+
     let type = 'text', fileUrl = null, fileName = null, fileMime = null;
     if (msg.photo || msg.video || msg.document || msg.voice) {
       const f = await downloadFile(msg);
       if (f) { fileUrl = f.url; fileName = f.name; fileMime = f.mime; type = f.type; }
+      else {
+        deliveryStats.mediaFailures++;
+        await operationalAlert(`tg-media-${ticket.id}`, `Не удалось получить файл из Telegram (тикет ${shortId(ticket)})`, `Telegram message_id=${msg.message_id}`);
+        await safeSend(GROUP_ID, '⚠️ Файл не доставлен клиенту. Попробуйте отправить его ещё раз или как документ.', sendOpts);
+      }
     }
     if (!rawText && !fileUrl) return;
 
@@ -423,6 +469,7 @@ async function handleMessage(msg) {
     if (topicId) await setTopicStatus(topicId, ticket, s.telegramOpenEmoji);
     push.send(ticket.id, rawText || 'Новое сообщение').catch(() => {});
   } catch (e) { console.error('[TG] handleMessage:', e.message); }
+  finally { if (claimedIncoming) incomingMessages.delete(incomingKey); }
 }
 
 async function closeTicketFromTelegram(ticket, topicId) {
@@ -461,7 +508,8 @@ async function setTopicStatus(topicId, ticket, emoji) {
 }
 
 async function downloadFile(msg) {
-  try {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) try {
     let fileId, fileName, fileMime, type;
     if (msg.photo) {
       const p = msg.photo[msg.photo.length - 1];
@@ -491,7 +539,13 @@ async function downloadFile(msg) {
     const safe = `tg_${uuidv4()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     await fsp.writeFile(path.join(dir, safe), buf);
     return { url: `/uploads/${safe}`, name: fileName, mime: fileMime, type };
-  } catch (e) { console.error('[TG] downloadFile:', e.message); return null; }
+  } catch (e) {
+    lastError = e;
+    console.error(`[TG] downloadFile attempt ${attempt}:`, e.message);
+    if (attempt < 3) await wait(attempt * 1000);
+  }
+  deliveryStats.lastError = tgError(lastError);
+  return null;
 }
 
 async function safeSend(chatId, text, opts = {}) {
@@ -553,6 +607,8 @@ async function forwardMessage(ticket, message, opts = {}) {
 
   const tid = ticket.telegram_topic_id;
   const targetOpts = tid ? { message_thread_id: tid } : {};
+  if (message.telegram_message_id || forwardingMessages.has(message.id)) return message.telegram_message_id || null;
+  forwardingMessages.add(message.id);
   try {
     let sent;
     const fp = publicUploadPath(message.file_url);
@@ -591,12 +647,46 @@ async function forwardMessage(ticket, message, opts = {}) {
       { ...targetOpts, caption: message.content || undefined }
     );
     else if (fp) sent = await bot.sendDocument(GROUP_ID, fp, { ...targetOpts, caption: message.content || undefined });
-    if (sent) db.updateTelegramMessageId.run(sent.message_id, message.id);
+    if (!sent) throw new Error('Telegram did not confirm delivery');
+    db.updateTelegramMessageId.run(sent.message_id, message.id);
+    deliveryStats.delivered++;
+    deliveryStats.lastSuccessAt = new Date().toISOString();
     if (tid) await setTopicStatus(tid, ticket, message.sender === 'user' ? s.telegramWaitEmoji : s.telegramOpenEmoji);
+    return sent.message_id;
   } catch (e) {
-    if (tid && isThreadNotFound(e)) db.markTopicDeleted.run(ticket.id);
-    else console.error('[TG] forwardMessage:', e.message);
+    if (tid && isThreadNotFound(e)) {
+      db.markTopicDeleted.run(ticket.id);
+      await operationalAlert(`tg-topic-${ticket.id}`, `Telegram-тема тикета ${shortId(ticket)} недоступна`, tgError(e));
+    }
+    const attempts = Number(message.telegram_attempts || 0) + 1;
+    const delaySeconds = Math.min(300, 5 * (2 ** Math.min(attempts - 1, 6)));
+    db.markTelegramAttempt.run(tgError(e).slice(0, 1000), `+${delaySeconds} seconds`, message.id);
+    deliveryStats.failed++;
+    deliveryStats.lastError = tgError(e);
+    console.error('[TG] forwardMessage:', tgError(e));
+    if (attempts >= 3) await operationalAlert(`tg-delivery-${message.id}`, `Сообщение не доставлено в Telegram после ${attempts} попыток`, `Тикет ${shortId(ticket)}: ${tgError(e)}`);
+    throw e;
+  } finally {
+    forwardingMessages.delete(message.id);
   }
+}
+
+async function processDeliveryQueue() {
+  if (deliveryRunning || !tgEnabled()) return;
+  deliveryRunning = true;
+  try {
+    const messages = db.getPendingTelegramMessages.all(20);
+    for (const message of messages) {
+      const ticket = db.getTicketById.get(message.ticket_id);
+      if (!ticket) continue;
+      if (Number(message.telegram_attempts || 0) > 0) deliveryStats.retried++;
+      await forwardMessage(ticket, message).catch(() => {});
+      await wait(250);
+    }
+  } catch (e) {
+    deliveryStats.lastError = tgError(e);
+    console.error('[TG] delivery queue:', tgError(e));
+  } finally { deliveryRunning = false; }
 }
 
 async function notifyTicketClosed(ticket) {

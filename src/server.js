@@ -276,6 +276,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   const cfg = loadSettings();
   if (req.file.size > cfg.uploadMaxMb * 1024 * 1024) {
     fs.unlink(req.file.path, () => {});
+    io.to('admin').emit('operational_alert', {
+      key: 'upload-too-large', message: 'Клиенту не удалось загрузить файл',
+      details: `Размер превышает ${cfg.uploadMaxMb} МБ`, createdAt: new Date().toISOString()
+    });
     return res.status(413).json({ error: `File too large. Max ${cfg.uploadMaxMb} MB` });
   }
 
@@ -449,7 +453,7 @@ io.on('connection', (socket) => {
 
   socket.on('send_message', async (data, ack) => {
     try {
-      const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType } = data;
+      const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType, clientMessageId } = data;
       const ticket = db.getTicketBySessionAny.get(sessionToken);
       if (!ticket || ticket.id !== ticketId) {
         if (ack) ack({ error: 'Unauthorized' });
@@ -474,7 +478,13 @@ io.on('connection', (socket) => {
       }
 
       warnedTickets.delete(ticket.id);
-      const msgId = uuidv4();
+      const msgId = typeof clientMessageId === 'string' && /^[a-f0-9-]{16,64}$/i.test(clientMessageId) ? clientMessageId : uuidv4();
+      const existingMessage = db.getMessageById.get(msgId);
+      if (existingMessage) {
+        if (existingMessage.ticket_id === ticketId && existingMessage.sender === 'user') ack?.({ ok: true, id: msgId, duplicate: true });
+        else ack?.({ error: 'Invalid message id' });
+        return;
+      }
       const msgType = messageType || 'text';
       db.saveMessage.run(msgId, ticketId, 'user', ticket.user_name, content || null, msgType, fileUrl || null, fileName || null, fileMime || null, null, null);
       const message = {
@@ -547,7 +557,7 @@ io.on('connection', (socket) => {
     io.to('admin').emit('admin_settings_updated', cfg);
   });
 
-  socket.on('admin_reply', async ({ ticketId, content, fileUrl, fileName, fileMime, messageType }) => {
+  socket.on('admin_reply', async ({ ticketId, content, fileUrl, fileName, fileMime, messageType, clientMessageId }, ack) => {
     if (!socket.isAdmin) return;
     const text = (content || '').trim();
     if (!text && !fileUrl) return;
@@ -555,7 +565,13 @@ io.on('connection', (socket) => {
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket || ticket.status === 'closed') return;
     const cfg = loadSettings();
-    const msgId = uuidv4();
+    const msgId = typeof clientMessageId === 'string' && /^[a-f0-9-]{16,64}$/i.test(clientMessageId) ? clientMessageId : uuidv4();
+    const existingMessage = db.getMessageById.get(msgId);
+    if (existingMessage) {
+      if (existingMessage.ticket_id === ticketId && existingMessage.sender === 'support') ack?.({ ok: true, id: msgId, duplicate: true });
+      else ack?.({ error: 'Invalid message id' });
+      return;
+    }
     const msgType = messageType || (fileUrl ? 'file' : 'text');
     db.saveMessage.run(msgId, ticketId, 'support', cfg.supportName, text || null, msgType, fileUrl || null, fileName || null, fileMime || null, null, null);
     db.markSupportRead.run(ticketId);
@@ -570,6 +586,7 @@ io.on('connection', (socket) => {
     broadcastAdminTickets();
     push.send(ticketId, text || fileName || 'Новое сообщение').catch(() => {});
     telegram.forwardMessage(db.getTicketById.get(ticketId), message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
+    ack?.({ ok: true, id: msgId });
   });
 
   socket.on('admin_typing', ({ ticketId }) => {
@@ -688,6 +705,7 @@ setInterval(inactivityCheck, 60 * 1000);
 app.use((err, req, res, next) => {
   if (!err) return next();
   if (err instanceof multer.MulterError || err.message === 'File type not allowed') {
+    io.to('admin').emit('operational_alert', { key: 'upload-failed', message: 'Клиенту не удалось загрузить файл', details: err.message, createdAt: new Date().toISOString() });
     return res.status(400).json({ error: err.message });
   }
   console.error('[HTTP]', err);

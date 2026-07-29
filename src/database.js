@@ -52,6 +52,9 @@ db.exec(`
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN is_auto INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '[]'`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_attempts INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_last_error TEXT`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_next_retry_at DATETIME`); } catch {}
 
 // Migrations: admin + topic tracking
 try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
@@ -181,7 +184,30 @@ module.exports = {
 
   getMessageByTelegramId: db.prepare(`SELECT * FROM messages WHERE telegram_message_id = ?`),
 
-  updateTelegramMessageId: db.prepare(`UPDATE messages SET telegram_message_id = ? WHERE id = ?`),
+  getMessageById: db.prepare(`SELECT * FROM messages WHERE id = ?`),
+
+  getPendingTelegramMessages: db.prepare(`
+    SELECT m.*, t.user_name, t.status AS ticket_status, t.telegram_topic_id,
+      t.telegram_topic_deleted
+    FROM messages m
+    JOIN tickets t ON t.id = m.ticket_id
+    WHERE m.sender != 'system'
+      AND m.telegram_message_id IS NULL
+      AND COALESCE(t.telegram_topic_deleted, 0) = 0
+      AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
+    ORDER BY m.created_at ASC
+    LIMIT ?
+  `),
+
+  updateTelegramMessageId: db.prepare(`
+    UPDATE messages SET telegram_message_id = ?, telegram_last_error = NULL,
+      telegram_next_retry_at = NULL WHERE id = ?
+  `),
+  markTelegramAttempt: db.prepare(`
+    UPDATE messages SET telegram_attempts = COALESCE(telegram_attempts, 0) + 1,
+      telegram_last_error = ?, telegram_next_retry_at = datetime('now', ?)
+    WHERE id = ? AND telegram_message_id IS NULL
+  `),
   updateMessageReactions: db.prepare(`UPDATE messages SET reactions = ? WHERE id = ?`),
 
   // Push subscriptions
