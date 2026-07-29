@@ -270,6 +270,21 @@ module.exports = {
     ORDER BY created_at ASC
     LIMIT ?
   `),
+  getOpenAssignedTicketsWithoutPrivateThread: db.prepare(`
+    SELECT t.*
+    FROM tickets t
+    WHERE t.status = 'open'
+      AND t.assigned_operator_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM telegram_ticket_threads th
+        WHERE th.ticket_id = t.id
+          AND th.operator_id = t.assigned_operator_id
+          AND th.status = 'active'
+      )
+    ORDER BY t.created_at ASC
+    LIMIT ?
+  `),
   getTicketsAwaitingTelegramReminder: db.prepare(`
     WITH awaiting AS (
       SELECT t.*,
