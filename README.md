@@ -78,6 +78,7 @@ sudo bash setup.sh
 | `TELEGRAM_BOT_TOKEN` | Токен бота | обязательно |
 | `TELEGRAM_MODE` | `private` или временный `legacy` | `private` |
 | `TELEGRAM_ADMIN_IDS` | Разрешённые ID операторов через запятую | обязательно |
+| `TELEGRAM_POLL_INTERVAL_MS` | Интервал получения обновлений Telegram, мс | `300` |
 | `ADMIN_TOKEN` | Токен входа в `/admin` | обязательно |
 | `PUBLIC_URL` | Публичный HTTPS URL проекта | — |
 | `TELEGRAM_WEBAPP_URL` | Необязательный URL Mini App вместо `PUBLIC_URL/miniapp` | — |
@@ -130,8 +131,9 @@ docker compose down
 ```
 
 В `/health` Telegram-секция показывает соединение, доступность Rich Messages и
-Threaded Mode, количество зарегистрированных операторов, неназначенные тикеты и
-счётчики доставки.
+Threaded Mode, количество зарегистрированных операторов, неназначенные тикеты,
+возраст очереди и задержки создания темы, доставки, закрытия и переоткрытия
+(`p50`/`p95` по последним 100 операциям).
 
 ## Резервные копии
 

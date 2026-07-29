@@ -56,7 +56,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-07-25-v5';
+const APP_CACHE_VERSION='2026-07-29-v6';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -183,12 +183,10 @@ function scheduleViewportSync(){
 }
 function syncViewport(){
   const app=$('app'),viewport=window.visualViewport;
-  // Safari/Telegram панорамируют layout viewport к полю ввода. Одной только высоты
-  // недостаточно: нужно компенсировать offsetTop, чтобы шапка не уезжала за экран.
   const height=Math.round(viewport?.height||window.innerHeight);
   const top=Math.round(viewport?.offsetTop||0);
-  app.style.height=`${height}px`;
-  app.style.transform=top?`translate3d(0,${top}px,0)`:'none';
+  app.style.setProperty('--app-height',`${height}px`);
+  app.style.setProperty('--app-top',`${top}px`);
   if(S.tid&&_pinToBottom)scrollBot(false);
 }
 
@@ -308,9 +306,8 @@ function renderMsg(msg){
   const isO=msg.sender==='user';
   const w=document.createElement('div');w.className='msg '+(isO?'o':'i');
   if(msg.id)w.dataset.msgId=msg.id;
-  let h='';
+  let h='<div class="bub">';
   if(!isO)h+=`<div class="bsnm">${esc(msg.sender_name)}</div>`;
-  h+='<div class="bub">';
   if(msg.reply_to_id){const qname=esc(msg.reply_to_sender_name||'');const qt=msg.reply_to_type&&msg.reply_to_type!=='text'?(msg.reply_to_file_name?`📎 ${esc(msg.reply_to_file_name)}`:'📎 Медиа'):esc((msg.reply_to_content||'').slice(0,80));h+=`<div class="qblock" data-reply-id="${esc(msg.reply_to_id)}"><div class="qname">${qname}</div><div class="qtxt">${qt}</div></div>`;}
   if(msg.message_type==='image'&&msg.file_url){
     h+=`<img class="mimg" src="${esc(msg.file_url)}" loading="lazy" decoding="async" onclick="openLb(this)" onerror="mediaFailed(this)">`;
@@ -518,11 +515,18 @@ function supportOpenText(){
 }
 function updateLoginHint(){
   const sub=$('ls')?.querySelector('.lsub');
+  const status=$('ls')?.querySelector('.lstatus');
   if(!sub)return;
   const offhours = CFG.offhoursEnabled && !CFG.online;
   sub.classList.toggle('offhours', offhours);
-  if(!offhours)sub.textContent='Представьтесь — ответим как можно скорее';
-  else sub.textContent=CFG.offhoursBannerText||`Сейчас нерабочее время · ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 (${supportOpenText()}). Сообщение можно оставить сейчас.`;
+  status?.classList.toggle('offhours', offhours);
+  if(!offhours){
+    sub.textContent='Представьтесь — и напишите вопрос в защищённом чате';
+    if(status)status.textContent='Операторы на связи';
+  }else{
+    sub.textContent=CFG.offhoursBannerText||`Сейчас нерабочее время · ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 (${supportOpenText()}). Сообщение можно оставить сейчас.`;
+    if(status)status.textContent=`Ответим с ${String(CFG.workStartHour).padStart(2,'0')}:00 МСК`;
+  }
 }
 async function refreshConfig(){
   try{

@@ -1,140 +1,168 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#08111e">
-<link rel="manifest" href="/manifest.json">
-<link rel="icon" type="image/png" href="/logo.png">
-<link rel="apple-touch-icon" href="/logo.png">
-<title>Поддержка</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>
-(() => {
-  const tg = window.Telegram?.WebApp;
-  const params = new URLSearchParams(location.search);
-  const start = tg?.initDataUnsafe?.start_param || params.get('startapp') || params.get('start_param');
-  if (start === 'admin' || params.get('admin') === '1') {
-    location.replace(`/miniapp?v=${Date.now().toString(36)}`);
-  }
-})();
-</script>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#050914;--panel:rgba(10,17,29,.72);--panel2:rgba(18,29,47,.78);--stroke:rgba(226,232,240,.13);--stroke2:rgba(125,211,252,.28);--text:#f4f8fc;--muted:#9aa8ba;--soft:#c7d2df;--blue:#22d3ee;--blue2:#2563eb;--green:#34d399;--red:#fb7185;--shadow:0 24px 90px rgba(0,0,0,.48)}
-html,body{width:100%;height:100%;overflow:hidden;overscroll-behavior:none}
-body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:linear-gradient(120deg,rgba(45,212,191,.13),transparent 28%),linear-gradient(240deg,rgba(37,99,235,.17),transparent 38%),linear-gradient(180deg,#050914,#08111e 48%,#050914);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
-body::before{content:"";position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.55),transparent 82%);pointer-events:none}
-button,input,textarea{font:inherit}button{border:0;color:inherit;cursor:pointer}button:disabled{cursor:default;opacity:.5}input,textarea{-webkit-user-select:text;user-select:text;font-size:16px}
-#app{position:relative;isolation:isolate;display:flex;flex-direction:column;width:min(100vw,920px);height:100vh;height:100dvh;margin:0 auto;overflow:hidden;background:linear-gradient(180deg,rgba(9,15,26,.86),rgba(7,12,21,.94));box-shadow:0 0 0 1px rgba(255,255,255,.045),var(--shadow);will-change:height,transform}
-@media(min-width:921px){#app{border-left:1px solid rgba(255,255,255,.07);border-right:1px solid rgba(255,255,255,.07)}}
-.scr{display:none;flex:1;min-height:0;overflow:hidden}.scr.on{display:flex}
-#ls{align-items:center;justify-content:center;padding:28px;background:transparent}.lcard{width:min(430px,100%);padding:42px 34px 32px;border-radius:22px;background:linear-gradient(180deg,rgba(16,27,43,.84),rgba(10,17,29,.78));border:1px solid var(--stroke);box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.16);display:flex;flex-direction:column;align-items:center;animation:rise .42s cubic-bezier(.34,1.4,.64,1) both}.lcard img{width:92px!important;height:92px!important;border-radius:20px!important;object-fit:cover;margin-bottom:24px;box-shadow:0 16px 48px rgba(34,211,238,.24),0 0 0 1px rgba(255,255,255,.16);animation:breathe 3.5s ease infinite}.ltit{font-size:28px;font-weight:800;letter-spacing:0;margin-bottom:10px}.lsub{width:100%;max-width:330px;margin-bottom:28px;color:#aab8c8;font-size:15px;line-height:1.55;text-align:center}.lsub.offhours{padding:12px 14px;border:1px solid rgba(251,191,36,.28);border-radius:14px;background:rgba(251,191,36,.09);color:#fde68a;text-align:left}.linp{width:100%;height:52px;margin-bottom:12px;padding:0 16px;border:1px solid var(--stroke);border-radius:14px;background:rgba(255,255,255,.045);color:var(--text);outline:none}.linp:focus,.tbox:focus-within{border-color:rgba(34,211,238,.62);box-shadow:0 0 0 4px rgba(34,211,238,.12),0 0 30px rgba(34,211,238,.10)}.linp::placeholder,#ti::placeholder{color:#607086}.lbtn{width:100%;min-height:52px;border-radius:14px;background:linear-gradient(135deg,#22d3ee,#2563eb);font-weight:800;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 14px 34px rgba(37,99,235,.33),inset 0 1px 0 rgba(255,255,255,.28)}
-#cs{flex-direction:column;background:transparent}.hdr{height:68px;flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:0 16px 0 18px;background:rgba(8,14,24,.82);border-bottom:1px solid var(--stroke);backdrop-filter:blur(22px) saturate(170%);-webkit-backdrop-filter:blur(22px) saturate(170%);box-shadow:0 8px 30px rgba(0,0,0,.22);z-index:10}.hdr img{width:42px!important;height:42px!important;border-radius:12px!important;object-fit:cover;flex:0 0 auto}.hin{flex:1;min-width:0}.hname{font-size:17px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hst{display:flex;align-items:center;gap:6px;margin-top:2px}.hdot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(52,211,153,.6);animation:blink 2.5s ease infinite}.hstxt{font-size:12.5px;color:var(--muted)}.hstxt.anim{animation:fadeSlide .22s ease}.hbtn{min-height:40px;padding:9px 13px;border-radius:12px;background:rgba(255,255,255,.045);border:1px solid var(--stroke);color:var(--soft);display:flex;align-items:center;gap:7px;white-space:nowrap;transition:.16s ease}.hbtn:hover{background:rgba(255,255,255,.075);color:var(--text)}.hbtn-ico{padding:9px 11px}
-.mwrap{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;background:linear-gradient(180deg,rgba(255,255,255,.015),transparent 140px);scrollbar-color:rgba(148,163,184,.28) transparent}.mwrap::-webkit-scrollbar{width:3px}.mwrap::-webkit-scrollbar-thumb{background:rgba(148,163,184,.28);border-radius:3px}.mlist{min-height:100%;display:flex;flex-direction:column;justify-content:flex-end;gap:5px;padding:18px 18px 14px}.dsp,.sysmsg{display:flex;justify-content:center;margin:8px 0}.dsp span,.sysmsg span{padding:5px 12px;border-radius:999px;background:rgba(15,23,42,.72);border:1px solid var(--stroke);color:#a8b3c3;font-size:12px}.emp{margin:auto;display:flex;flex-direction:column;align-items:center;gap:14px;padding:50px 20px;color:var(--muted);text-align:center}.emp svg{opacity:.2}.emp p{max-width:220px;line-height:1.55}
-.msg{max-width:min(78%,620px);display:flex;flex-direction:column}.msg.o{align-self:flex-end;animation:mpopOut .18s ease both}.msg.i{align-self:flex-start;animation:mpopIn .18s ease both}.bub{position:relative;overflow:hidden;padding:11px 14px 8px;border-radius:20px;line-height:1.5;word-break:break-word;box-shadow:0 10px 28px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.06)}.bub::before{content:"";position:absolute;inset:0 0 auto;height:48%;background:linear-gradient(180deg,rgba(255,255,255,.08),transparent);pointer-events:none}.msg.o .bub{background:linear-gradient(135deg,rgba(37,99,235,.92),rgba(8,145,178,.9));border:1px solid rgba(125,211,252,.36);border-bottom-right-radius:7px}.msg.i .bub{background:linear-gradient(180deg,rgba(20,32,49,.92),rgba(14,23,38,.9));border:1px solid var(--stroke);border-bottom-left-radius:7px}.msg.o+.msg.o .bub{border-bottom-right-radius:20px}.msg.i+.msg.i .bub{border-bottom-left-radius:20px}.bsnm{position:relative;margin-bottom:4px;color:#67e8f9;font-size:12.5px;font-weight:700}.btxt{position:relative;font-size:16px}.btxt a{color:#7dd3fc;text-decoration:underline;text-underline-offset:2px}.rxns{position:relative;display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}.rxns span{min-width:24px;height:22px;padding:0 6px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.14);font-size:14px;line-height:1}.bmeta{position:relative;float:right;clear:right;margin:4px 0 -2px 8px;display:flex;align-items:center;justify-content:flex-end;gap:4px}.btime{font-size:11px;color:rgba(226,232,240,.62)}.msg.o .btime{color:rgba(186,230,253,.7)}.mimg,.mvid{max-width:min(320px,68vw);max-height:340px;border-radius:14px;display:block;object-fit:cover}.mimg{cursor:zoom-in}.maud{width:220px;max-width:64vw}.mfile{display:flex;align-items:center;gap:10px;min-width:160px;text-decoration:none;color:inherit}.fic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:rgba(34,211,238,.12);color:var(--blue)}.fnm{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}.qblock{position:relative;margin-bottom:7px;padding:6px 9px;border-left:3px solid var(--blue);border-radius:0 8px 8px 0;background:rgba(255,255,255,.06);cursor:pointer}.qname{font-size:11px;color:#67e8f9;font-weight:800}.qtxt{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}.msg.hl .bub{animation:msghl 1.5s ease}
-.sdwn{position:absolute;right:18px;bottom:18px;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:rgba(8,14,24,.82);border:1px solid var(--stroke);color:var(--text);box-shadow:0 12px 34px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.14);opacity:0;transform:scale(.82);pointer-events:none;transition:.18s ease;z-index:5}.sdwn.on{opacity:1;transform:scale(1);pointer-events:auto}.sdwn.bounce{animation:sdwnBounce .4s ease}.ubadge{position:absolute;top:-5px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--blue2);display:grid;place-items:center;font-size:10px;font-weight:800;animation:bounceIn .3s cubic-bezier(.34,1.4,.64,1)}
-.typing-bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 18px 7px;background:rgba(8,14,24,.72);animation:slideUp .2s ease}.typing-dots{display:flex;gap:3px}.typing-dots span{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:tdot 1.2s ease infinite}.typing-dots span:nth-child(2){animation-delay:.15s}.typing-dots span:nth-child(3){animation-delay:.3s}.typing-lbl{font-size:12px;color:var(--muted)}
-.iarea{flex:0 0 auto;padding:12px 14px;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));background:rgba(8,14,24,.88);border-top:1px solid var(--stroke);backdrop-filter:blur(22px) saturate(170%);-webkit-backdrop-filter:blur(22px) saturate(170%)}.irow{display:flex;align-items:flex-end;gap:9px}.icn,.sndbtn{width:48px;height:48px;flex:0 0 auto;border-radius:16px;display:grid;place-items:center;transition:.14s ease}.icn{background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);color:var(--muted)}.icn:hover{background:rgba(255,255,255,.065);color:var(--text)}.sndbtn{background:linear-gradient(135deg,#22d3ee,#2563eb);border:1px solid rgba(125,211,252,.42);box-shadow:0 12px 28px rgba(37,99,235,.28)}.sndbtn:disabled{background:rgba(255,255,255,.045);border-color:var(--stroke);box-shadow:none;color:#536173}.tbox{flex:1;min-height:48px;display:flex;align-items:center;padding:10px 14px;border-radius:18px;background:rgba(17,28,45,.9);border:1px solid rgba(255,255,255,.08);transition:.18s ease}#ti{width:100%;max-height:108px;resize:none;border:0;outline:0;background:transparent;color:var(--text);line-height:1.45}
-.fprev{margin-bottom:8px;animation:springIn .2s cubic-bezier(.34,1.4,.64,1)}.fpi{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:14px;background:rgba(18,29,47,.82);border:1px solid var(--stroke);border-left:3px solid var(--blue)}.fpth{flex:1;min-width:0}.fpth img{max-width:88px;max-height:58px;border-radius:10px;display:block;object-fit:cover}.fpnm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}.fprm{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.08)}
-.epick{flex:0 0 auto;padding:10px 8px 8px;background:rgba(9,16,27,.96);border-top:1px solid var(--stroke);animation:slideUp .18s cubic-bezier(.34,1.4,.64,1)}.ecats{display:flex;gap:2px;overflow-x:auto;padding-bottom:7px;margin-bottom:7px;border-bottom:1px solid var(--stroke);scrollbar-width:none}.ecats::-webkit-scrollbar{display:none}.ecat,.eitm{border-radius:10px;background:transparent}.ecat{min-width:36px;padding:6px 8px;font-size:19px}.ecat.on,.ecat:hover,.eitm:hover{background:rgba(255,255,255,.07)}.egrid{display:grid;grid-template-columns:repeat(auto-fill,38px);gap:3px;max-height:188px;overflow-y:auto}.eitm{width:38px;height:38px;font-size:21px}
-.cbar{flex:0 0 auto;display:none;flex-direction:column;align-items:center;gap:12px;padding:14px 20px 16px;background:linear-gradient(180deg,rgba(251,113,133,.08),rgba(251,113,133,.035));border-top:1px solid rgba(251,113,133,.18)}.cbar.on{display:flex;animation:slideUp .22s ease}.cbar-t{color:#fda4af;font-size:13px;font-weight:700}.newbtn{width:100%;max-width:300px;min-height:46px;border-radius:14px;background:linear-gradient(135deg,#22d3ee,#2563eb);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:800}
-.dropzone{position:absolute;inset:12px;z-index:20;display:grid;place-items:center;opacity:0;pointer-events:none;transform:scale(.985);transition:.18s ease}.dropzone.on{opacity:1;transform:scale(1);pointer-events:auto}.dropzone::before{content:"";position:absolute;inset:0;border-radius:26px;background:rgba(3,7,18,.58);backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);border:1px solid rgba(125,211,252,.24);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05),0 24px 80px rgba(0,0,0,.42)}.dropcard{position:relative;width:min(340px,calc(100vw - 48px));padding:28px 24px;border-radius:22px;display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;color:#e0f7ff;background:linear-gradient(180deg,rgba(20,32,51,.88),rgba(8,14,24,.82));border:1px solid rgba(125,211,252,.30);box-shadow:0 22px 60px rgba(34,211,238,.16),inset 0 1px 0 rgba(255,255,255,.18)}.dropcard svg{color:#67e8f9;filter:drop-shadow(0 0 18px rgba(34,211,238,.45))}.dropcard b{font-size:18px}.dropcard span{font-size:13px;color:#9fb2c7;line-height:1.45}
-.mov{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(2,6,15,.68);backdrop-filter:blur(8px);animation:fin .18s ease}.mbox{width:calc(100% - 40px);max-width:320px;padding:24px;border-radius:20px;background:linear-gradient(180deg,rgba(20,31,48,.96),rgba(12,20,34,.96));border:1px solid var(--stroke);box-shadow:var(--shadow);animation:springIn .28s cubic-bezier(.34,1.4,.64,1)}.mbox h3{margin-bottom:8px;font-size:16px}.mbox p{margin-bottom:18px;color:var(--muted);line-height:1.5}.mbtns{display:flex;justify-content:flex-end;gap:8px}.mbc,.mbo{min-height:38px;padding:0 16px;border-radius:11px;font-weight:800}.mbc{background:rgba(255,255,255,.07)}.mbo{background:linear-gradient(135deg,#fb7185,#dc2626)}
-.tst{position:fixed;left:50%;bottom:96px;z-index:9999;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 28px);padding:10px 18px;border-radius:24px;background:rgba(15,23,42,.88);border:1px solid var(--stroke);box-shadow:0 12px 40px rgba(0,0,0,.45);color:var(--text);font-size:13px;white-space:nowrap;opacity:0;pointer-events:none;transform:translateX(-50%) translateY(10px);transition:.18s ease}.tst.on{opacity:1;transform:translateX(-50%) translateY(0);animation:springIn .3s cubic-bezier(.34,1.4,.64,1)}.tst[data-type=ok]{border-color:rgba(52,211,153,.35);color:#86efac}.tst[data-type=err]{border-color:rgba(251,113,133,.35);color:#fca5a5}.lb{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.95);cursor:zoom-out}.lb img,.lb video{max-width:96vw;max-height:92vh;border-radius:10px;object-fit:contain}.uspin{display:flex;align-items:center;gap:8px;padding:4px 2px;color:var(--muted);font-size:13px}.sp{width:14px;height:14px;border:2px solid rgba(255,255,255,.12);border-top-color:var(--blue);border-radius:50%;animation:rot .7s linear infinite}.lo-btn{align-self:center;margin:10px auto 4px;padding:8px 18px;border-radius:999px;background:rgba(255,255,255,.045);border:1px solid var(--stroke);color:var(--muted)}
-.hbtn,.lbtn,.newbtn,.sndbtn,.icn{position:relative;overflow:hidden}.rpl{position:absolute;border-radius:50%;background:rgba(255,255,255,.18);pointer-events:none;transform:scale(0);animation:ripple .55s ease-out forwards}
-@keyframes rise{from{opacity:0;transform:translateY(28px) scale(.96)}to{opacity:1;transform:none}}@keyframes breathe{0%,100%{box-shadow:0 16px 48px rgba(34,211,238,.20),0 0 0 1px rgba(255,255,255,.16)}50%{box-shadow:0 16px 54px rgba(34,211,238,.34),0 0 0 10px rgba(34,211,238,.045)}}@keyframes blink{0%,100%{opacity:1}60%{opacity:.42}}@keyframes fadeSlide{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:none}}@keyframes mpopIn{from{opacity:0;transform:scale(.95) translate(-10px,4px)}to{opacity:1;transform:none}}@keyframes mpopOut{from{opacity:0;transform:scale(.95) translate(10px,4px)}to{opacity:1;transform:none}}@keyframes slideUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}@keyframes springIn{0%{opacity:0;transform:scale(.85) translateY(12px)}60%{opacity:1;transform:scale(1.03) translateY(-2px)}100%{opacity:1;transform:scale(1) translateY(0)}}@keyframes bounceIn{0%{transform:scale(0)}60%{transform:scale(1.28)}100%{transform:scale(1)}}@keyframes sdwnBounce{0%,100%{transform:scale(1)}40%{transform:scale(1.22)}70%{transform:scale(.92)}}@keyframes msghl{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 2px rgba(34,211,238,.5),0 0 16px rgba(34,211,238,.18)}}@keyframes tdot{0%,80%,100%{transform:scale(1);opacity:.35}40%{transform:scale(1.4);opacity:1}}@keyframes fin{from{opacity:0;backdrop-filter:blur(0)}to{opacity:1;backdrop-filter:blur(8px)}}@keyframes rot{to{transform:rotate(360deg)}}@keyframes ripple{to{transform:scale(5);opacity:0}}
-.mimg,.mvid{width:auto;object-fit:contain;background:rgba(0,0,0,.18)}.mfile{min-width:0;max-width:100%}.fic{flex:0 0 auto}.fnm{max-width:min(180px,52vw)}.media-fallback{display:flex;flex-wrap:wrap;align-items:center;gap:8px;max-width:260px;padding:10px;border:1px solid rgba(251,113,133,.25);border-radius:12px;background:rgba(251,113,133,.08);font-size:12px}.media-fallback a,.media-fallback button{padding:5px 8px;border-radius:7px;background:rgba(255,255,255,.09);color:var(--text);text-decoration:none}
-@media(max-width:560px){#app{width:100vw;max-width:none;box-shadow:none}.hdr{height:62px;padding:0 10px 0 12px}.hdr img{width:38px!important;height:38px!important}.hname{font-size:15.5px}.hbtn{padding:8px 10px}.hbtxt{display:none}.mlist{padding:14px 10px 10px}.msg{max-width:88%}.btxt{font-size:15.5px}.iarea{padding:10px 8px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}.icn,.sndbtn{width:44px;height:44px}#ti{max-height:84px;overflow-y:auto}.dropzone{inset:8px}.dropcard{padding:22px 18px;border-radius:18px}.tst{bottom:88px}}
-@media(max-height:520px) and (orientation:landscape){#ls{padding:10px}.lcard{padding:14px 24px}.lcard img{width:54px!important;height:54px!important;margin-bottom:8px}.ltit{font-size:21px;margin-bottom:4px}.lsub{margin-bottom:10px}.hdr{height:52px}.iarea{padding-top:7px;padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))}.icn,.sndbtn{width:40px;height:40px}.tbox{min-height:40px}.epick{max-height:150px}.egrid{max-height:86px}}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0b141a">
+  <meta name="color-scheme" content="dark">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <link rel="stylesheet" href="/css/chat.css?v=20260729-1">
+  <title>Поддержка</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+  (() => {
+    const tg = window.Telegram?.WebApp;
+    const params = new URLSearchParams(location.search);
+    const start = tg?.initDataUnsafe?.start_param || params.get('startapp') || params.get('start_param');
+    if (start === 'admin' || params.get('admin') === '1') {
+      location.replace(`/miniapp?v=${Date.now().toString(36)}`);
+    }
+  })();
+  </script>
 </head>
 <body>
-<div id="app">
-  <div id="ls" class="scr on">
-    <div class="lcard">
-      <img src="/logo.png" alt="Поддержка">
-      <div class="ltit">Поддержка</div>
-      <div class="lsub">Представьтесь — ответим как можно скорее</div>
-      <input id="ni" class="linp" type="text" placeholder="Ваше имя" maxlength="50" autocomplete="given-name" enterkeyhint="go">
-      <button id="sb" class="lbtn" disabled><span id="sl">Начать чат</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 8h11M8.5 3.5l5 4.5-5 4.5"/></svg></button>
-    </div>
-  </div>
-
-  <div id="cs" class="scr">
-    <div class="hdr">
-      <img src="/logo.png" alt="Поддержка">
-      <div class="hin"><div class="hname">Служба поддержки</div><div class="hst"><span class="hdot"></span><span class="hstxt">подключение...</span></div></div>
-      <button class="hbtn hbtn-ico" id="nbtn" title="Включить уведомления"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a4.5 4.5 0 0 0-4.5 4.5v3l-1 1.5h11l-1-1.5V6A4.5 4.5 0 0 0 8 1.5z"/><path d="M6.5 13a1.5 1.5 0 0 0 3 0"/></svg></button>
-      <button class="hbtn" id="hcl"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="1" y="1" width="11" height="11" rx="2"/><path d="M4 4l5 5M9 4l-5 5"/></svg><span class="hbtxt">Закрыть</span></button>
-    </div>
-
-    <div style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
-      <div class="dropzone" id="dropzone"><div class="dropcard"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3"/></svg><b>Отпустите файл здесь</b><span>Фото, видео, аудио, документы до 50 МБ</span></div></div>
-      <div class="mwrap" id="mwrap"><div class="mlist" id="ml"></div></div>
-      <button class="sdwn" id="sdwn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M2.5 5.5l4.5 4.5 4.5-4.5"/></svg></button>
-    </div>
-
-    <div class="typing-bar" id="typing-bar" style="display:none"><div class="typing-dots"><span></span><span></span><span></span></div><span class="typing-lbl">Поддержка печатает...</span></div>
-    <div class="cbar" id="cbar"><div class="cbar-t">Обращение закрыто</div><button class="newbtn" id="newbtn"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7.5 1v13M1 7.5h13"/></svg>Начать новый чат</button></div>
-    <div class="epick" id="ep" style="display:none"></div>
-
-    <div class="iarea" id="ia">
-      <div class="fprev" id="fp" style="display:none"><div class="fpi"><div class="fpth" id="fpth"></div><button class="fprm" id="fprm"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 1l8 8M9 1 1 9"/></svg></button></div></div>
-      <div class="irow">
-        <button class="icn" id="abt"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M19.5 11.5 10.5 20.5a6 6 0 0 1-8.5-8.5L11 2.5a4 4 0 0 1 5.7 5.7L7.5 17.5a2 2 0 0 1-2.8-2.8l8-8"/></svg></button>
-        <input type="file" id="fi" accept="image/*,video/*,audio/*,.heic,.heif,.avif,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" style="display:none">
-        <div class="tbox"><textarea id="ti" placeholder="Сообщение..." rows="1" enterkeyhint="send"></textarea></div>
-        <button class="icn" id="ebt"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="9"/><path d="M7 14s1.2 2.5 4 2.5 4-2.5 4-2.5"/><circle cx="8" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="14" cy="9" r="1.1" fill="currentColor" stroke="none"/></svg></button>
-        <button class="sndbtn" id="sndbtn" disabled><svg width="19" height="19" viewBox="0 0 19 19" fill="currentColor"><path d="M2.5 9.5 17 3l-7 14-.8-6.5-6.7-1z"/></svg></button>
+  <main id="app">
+    <section id="ls" class="scr on" aria-label="Начало чата">
+      <div class="lcard">
+        <img src="/logo.png" alt="">
+        <div class="ltit">Поддержка</div>
+        <div class="lstatus">Операторы на связи</div>
+        <div class="lsub">Представьтесь — и напишите вопрос в защищённом чате</div>
+        <input id="ni" class="linp" type="text" placeholder="Ваше имя" maxlength="50" autocomplete="given-name" enterkeyhint="go" aria-label="Ваше имя">
+        <button id="sb" class="lbtn" type="button" disabled>
+          <span id="sl">Начать чат</span>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 8h11M8.5 3.5l5 4.5-5 4.5"/></svg>
+        </button>
       </div>
-    </div>
-  </div>
-</div>
-<div class="tst" id="tst"></div>
-<script src="/socket.io/socket.io.js"></script>
-<script src="/js/app.js?v=20260725-4"></script>
-<script>
-(() => {
-  const dropzone = document.getElementById('dropzone');
-  const fileInput = document.getElementById('fi');
-  const toast = document.getElementById('tst');
-  if (!dropzone || !fileInput) return;
-  let depth = 0;
-  const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files');
-  const show = on => dropzone.classList.toggle('on', on);
-  const note = text => {
-    if (!toast) return;
-    toast.innerHTML = `<span class="tst-ico">ℹ</span><span>${text}</span>`;
-    toast.dataset.type = 'info';
-    toast.classList.remove('on');
-    void toast.offsetWidth;
-    toast.classList.add('on');
-    setTimeout(() => toast.classList.remove('on'), 1800);
-  };
-  document.addEventListener('dragenter', event => { if (!hasFiles(event)) return; event.preventDefault(); depth += 1; show(true); }, false);
-  document.addEventListener('dragover', event => { if (!hasFiles(event)) return; event.preventDefault(); show(true); }, false);
-  document.addEventListener('dragleave', event => { if (!hasFiles(event)) return; depth = Math.max(0, depth - 1); if (!depth) show(false); }, false);
-  document.addEventListener('drop', event => {
-    if (!hasFiles(event)) return;
-    event.preventDefault();
-    depth = 0;
-    show(false);
-    const file = event.dataTransfer.files?.[0];
-    if (!file) return;
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
-    fileInput.files = transfer.files;
-    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-    note('Файл прикреплен');
-  }, false);
-})();
-</script>
+    </section>
+
+    <section id="cs" class="scr" aria-label="Чат с поддержкой">
+      <header class="hdr">
+        <img src="/logo.png" alt="">
+        <div class="hin">
+          <div class="hname">Служба поддержки</div>
+          <div class="hst"><span class="hdot"></span><span class="hstxt">подключение...</span></div>
+        </div>
+        <button class="hbtn hbtn-ico" id="nbtn" type="button" title="Включить уведомления" aria-label="Включить уведомления">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5a4.5 4.5 0 0 0-4.5 4.5v3l-1 1.5h11l-1-1.5V6A4.5 4.5 0 0 0 8 1.5z"/><path d="M6.5 13a1.5 1.5 0 0 0 3 0"/></svg>
+        </button>
+        <button class="hbtn" id="hcl" type="button" aria-label="Закрыть обращение">
+          <svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="1" y="1" width="11" height="11" rx="2"/><path d="M4 4l5 5M9 4l-5 5"/></svg>
+          <span class="hbtxt">Закрыть</span>
+        </button>
+      </header>
+
+      <div class="chat-stage">
+        <div class="dropzone" id="dropzone">
+          <div class="dropcard">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3"/></svg>
+            <b>Отпустите файл здесь</b>
+            <span>Фото, видео, аудио и документы до 50 МБ</span>
+          </div>
+        </div>
+        <div class="mwrap" id="mwrap"><div class="mlist" id="ml" aria-live="polite"></div></div>
+        <button class="sdwn" id="sdwn" type="button" aria-label="Перейти к новым сообщениям">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 5.5l4.5 4.5 4.5-4.5"/></svg>
+        </button>
+      </div>
+
+      <div class="typing-bar" id="typing-bar" style="display:none">
+        <div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        <span class="typing-lbl">Поддержка печатает...</span>
+      </div>
+
+      <div class="cbar" id="cbar">
+        <div class="cbar-t">Обращение закрыто</div>
+        <button class="newbtn" id="newbtn" type="button">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M7.5 1v13M1 7.5h13"/></svg>
+          Начать новый чат
+        </button>
+      </div>
+
+      <div class="epick" id="ep" style="display:none"></div>
+
+      <div class="iarea" id="ia">
+        <div class="fprev" id="fp" style="display:none">
+          <div class="fpi">
+            <div class="fpth" id="fpth"></div>
+            <button class="fprm" id="fprm" type="button" aria-label="Убрать вложение">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 1l8 8M9 1 1 9"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="irow">
+          <button class="icn" id="abt" type="button" aria-label="Прикрепить файл">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M19.5 11.5 10.5 20.5a6 6 0 0 1-8.5-8.5L11 2.5a4 4 0 0 1 5.7 5.7L7.5 17.5a2 2 0 0 1-2.8-2.8l8-8"/></svg>
+          </button>
+          <input type="file" id="fi" accept="image/*,video/*,audio/*,.heic,.heif,.avif,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" hidden>
+          <div class="tbox"><textarea id="ti" placeholder="Сообщение" rows="1" enterkeyhint="send" aria-label="Сообщение"></textarea></div>
+          <button class="icn" id="ebt" type="button" aria-label="Выбрать эмодзи">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="9"/><path d="M7 14s1.2 2.5 4 2.5 4-2.5 4-2.5"/><circle cx="8" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="14" cy="9" r="1.1" fill="currentColor" stroke="none"/></svg>
+          </button>
+          <button class="sndbtn" id="sndbtn" type="button" disabled aria-label="Отправить">
+            <svg width="19" height="19" viewBox="0 0 19 19" fill="currentColor" aria-hidden="true"><path d="M2.5 9.5 17 3l-7 14-.8-6.5-6.7-1z"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="tst" id="tst" role="status" aria-live="polite"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/app.js?v=20260729-1"></script>
+  <script>
+  (() => {
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fi');
+    const toast = document.getElementById('tst');
+    if (!dropzone || !fileInput) return;
+    let depth = 0;
+    const hasFiles = event => Array.from(event.dataTransfer?.types || []).includes('Files');
+    const show = on => dropzone.classList.toggle('on', on);
+    const note = text => {
+      if (!toast) return;
+      toast.innerHTML = `<span class="tst-ico">ℹ</span><span>${text}</span>`;
+      toast.dataset.type = 'info';
+      toast.classList.remove('on');
+      void toast.offsetWidth;
+      toast.classList.add('on');
+      setTimeout(() => toast.classList.remove('on'), 1800);
+    };
+    document.addEventListener('dragenter', event => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      depth += 1;
+      show(true);
+    }, false);
+    document.addEventListener('dragover', event => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      show(true);
+    }, false);
+    document.addEventListener('dragleave', event => {
+      if (!hasFiles(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) show(false);
+    }, false);
+    document.addEventListener('drop', event => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      depth = 0;
+      show(false);
+      const file = event.dataTransfer.files?.[0];
+      if (!file) return;
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      fileInput.files = transfer.files;
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      note('Файл прикреплён');
+    }, false);
+  })();
+  </script>
 </body>
 </html>
