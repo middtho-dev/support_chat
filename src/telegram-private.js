@@ -78,9 +78,11 @@ let io = null;
 let reconnectTimer = null;
 let cleanupTimer = null;
 let deliveryTimer = null;
+let reminderTimer = null;
 let deliveryWakeTimer = null;
 let deliveryWakeAt = 0;
 let deliveryRunning = false;
+let reminderRunning = false;
 let connected = false;
 let threadedModeEnabled = false;
 let richMessagesAvailable = true;
@@ -102,6 +104,12 @@ const deliveryStats = {
   unassigned: 0,
   lastError: null,
   lastSuccessAt: null
+};
+const reminderStats = {
+  sent: 0,
+  failed: 0,
+  lastSentAt: null,
+  lastError: null
 };
 const latencySamples = {
   topicCreateMs: [],
@@ -590,6 +598,8 @@ function init(socketIo) {
   scheduleDeliveryQueue(1000);
   setInterval(reconcileUnassignedTickets, 60 * 1000);
   setTimeout(reconcileUnassignedTickets, 10000);
+  reminderTimer = setInterval(processUnansweredReminders, 30 * 1000);
+  setTimeout(processUnansweredReminders, 20000);
   setInterval(cleanupOldTopics, 60 * 60 * 1000);
   setTimeout(cleanupOldTopics, 15000);
   return bot;
@@ -738,6 +748,100 @@ async function registeredAuthorizedOperators({ discover = false } = {}) {
   operators = db.getActiveTelegramOperators.all()
     .filter(operator => isAuthorized(operator.telegram_user_id));
   return operators;
+}
+
+function parseDatabaseTime(value) {
+  const raw = String(value || '');
+  if (!raw) return new Date(NaN);
+  return new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : raw);
+}
+
+async function processUnansweredReminders() {
+  const settings = cfg();
+  if (!tgEnabled() || !settings.telegramUnansweredReminderEnabled || reminderRunning) return 0;
+  reminderRunning = true;
+  try {
+    const tickets = db.getTicketsAwaitingTelegramReminder.all(
+      `-${settings.telegramUnansweredReminderMinutes} minutes`,
+      `-${settings.telegramUnansweredRepeatMinutes} minutes`,
+      50
+    );
+    if (!tickets.length) return 0;
+
+    const operators = await registeredAuthorizedOperators({ discover: true });
+    let sentCount = 0;
+    for (const ticket of tickets) {
+      const assigned = operators.find(operator =>
+        String(operator.telegram_user_id) === String(ticket.assigned_operator_id || '')
+      );
+      const targets = assigned ? [assigned] : operators;
+      if (!targets.length) {
+        reminderStats.failed++;
+        reminderStats.lastError = `No registered operator for ${shortId(ticket)}`;
+        continue;
+      }
+
+      const waitingSince = parseDatabaseTime(ticket.waiting_since);
+      const waitingMinutes = Math.max(
+        1,
+        Math.floor((Date.now() - waitingSince.getTime()) / 60000)
+      );
+      const assignment = assigned
+        ? `Назначен: ${assigned.display_name}`
+        : ticket.assigned_operator_id
+          ? 'Назначенный оператор недоступен — требуется вмешательство'
+          : 'Никто не взял тикет';
+      const text = [
+        `⏰ <b>Тикет ждёт ответа ${waitingMinutes} мин</b>`,
+        `👤 ${htmlEscape(ticket.user_name || 'Клиент')} · <code>${htmlEscape(shortId(ticket))}</code>`,
+        htmlEscape(assignment),
+        '',
+        'Откройте тикет и ответьте клиенту.'
+      ].join('\n');
+      const results = await Promise.allSettled(targets.map(operator => bot.sendMessage(
+        operator.telegram_user_id,
+        text,
+        {
+          parse_mode: 'HTML',
+          disable_notification: false,
+          reply_markup: ticketKeyboard(ticket, ticket.assigned_operator_id ? 'open' : 'unassigned')
+        }
+      )));
+      const delivered = results.some(result => result.status === 'fulfilled');
+      if (!delivered) {
+        reminderStats.failed++;
+        reminderStats.lastError = results
+          .filter(result => result.status === 'rejected')
+          .map(result => tgError(result.reason))
+          .join('; ') || `Reminder failed for ${shortId(ticket)}`;
+        await operationalAlert(
+          `telegram-reminder-${ticket.id}`,
+          `Не доставлено напоминание по тикету ${shortId(ticket)}`,
+          reminderStats.lastError
+        );
+        continue;
+      }
+      db.markTelegramTicketReminded.run(ticket.id);
+      reminderStats.sent++;
+      reminderStats.lastSentAt = new Date().toISOString();
+      sentCount++;
+      io?.to('admin').emit('ticket_reminder', {
+        ticketId: ticket.id,
+        waitingMinutes,
+        assigned: !!assigned
+      });
+    }
+    return sentCount;
+  } catch (error) {
+    reminderStats.failed++;
+    reminderStats.lastError = tgError(error);
+    console.error('[TG private] unanswered reminder:', reminderStats.lastError);
+    return 0;
+  } finally {
+    reminderRunning = false;
+  }
 }
 
 async function reportAssignmentFailure(ticket, operator, error) {
@@ -1913,6 +2017,13 @@ function status() {
       pendingMessages,
       oldestPendingSeconds,
       scheduledInMs: deliveryWakeAt ? Math.max(0, deliveryWakeAt - Date.now()) : null
+    },
+    reminders: {
+      ...reminderStats,
+      enabled: !!cfg().telegramUnansweredReminderEnabled,
+      firstAfterMinutes: cfg().telegramUnansweredReminderMinutes,
+      repeatEveryMinutes: cfg().telegramUnansweredRepeatMinutes,
+      inFlight: reminderRunning
     }
   };
 }
@@ -1960,5 +2071,6 @@ module.exports = {
   warnInactivity,
   checkTopicAlive,
   status,
+  processUnansweredReminders,
   notifyOperationalIssue: operationalAlert
 };

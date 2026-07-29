@@ -257,6 +257,7 @@ app.get('/admin', (req, res) => {
     if (err) return res.sendFile(htmlPath);
     const v = Date.now().toString(36);
     res.type('html').send(html
+      .replace('/css/admin.css', `/css/admin.css?v=${v}`)
       .replace('/js/admin-enhance.js', `/js/admin-enhance.js?v=${v}`)
       .replace('/js/admin.js', `/js/admin.js?v=${v}`));
   });

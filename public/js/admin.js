@@ -116,7 +116,9 @@ function initTelegramMiniApp() {
   TG.expand();
   TG.disableVerticalSwipes?.();
   applyTelegramTheme();
+  applyTelegramViewport();
   TG.onEvent?.('themeChanged', applyTelegramTheme);
+  TG.onEvent?.('viewportChanged', applyTelegramViewport);
   TG.BackButton?.onClick(handleTelegramBack);
 }
 
@@ -157,14 +159,25 @@ function applyTelegramTheme() {
   if (p.button_text_color) root.setProperty('--button-text', p.button_text_color);
 }
 
+function applyTelegramViewport() {
+  if (!IS_TG_MINI) return;
+  const stableHeight = Math.round(
+    Number(TG?.viewportStableHeight) ||
+    Number(TG?.viewportHeight) ||
+    window.innerHeight
+  );
+  if (stableHeight > 0) {
+    document.documentElement.style.setProperty('--tg-stable-height', `${stableHeight}px`);
+  }
+}
+
 function tgImpact(style = 'light') {
   TG?.HapticFeedback?.impactOccurred?.(style);
 }
 
 function handleTelegramBack() {
   if ($('main')?.classList.contains('open')) {
-    $('main').classList.remove('open');
-    updateTelegramBackButton();
+    leaveCurrentTicket();
     return;
   }
   if (S.view !== 'chat') {
@@ -185,13 +198,16 @@ function bindStaticUi() {
   $('srch').addEventListener('input', () => { S.search = $('srch').value.trim().toLowerCase(); renderSidebar(); });
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => setFilter(btn.dataset.tab)));
   document.querySelectorAll('.navbtn').forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.view)));
-  $('back').addEventListener('click', () => { $('main').classList.remove('open'); updateTelegramBackButton(); });
+  $('back').addEventListener('click', leaveCurrentTicket);
   $('cv-toggle').addEventListener('click', toggleTicketStatus);
+  $('mobile-ticket-back').addEventListener('click', leaveCurrentTicket);
+  $('mobile-ticket-card').addEventListener('click', () => window.adminOpenTicketCard?.());
+  $('mobile-ticket-toggle').addEventListener('click', toggleTicketStatus);
   document.addEventListener('click', event => { if (!event.target.closest('.pop') && event.target !== $('quick')) document.querySelectorAll('.pop').forEach(p => p.remove()); });
 }
 
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
-function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
+function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
 
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
@@ -283,6 +299,7 @@ socket.on('admin_message_reactions', ({ ticketId, messageId, reactions }) => {
 
 socket.on('admin_error', ({ message }) => toast(message, 'err'));
 socket.on('operational_alert', ({ message, details }) => toast(`${message}${details ? `: ${details}` : ''}`, 'err', 8000));
+socket.on('ticket_reminder', ({ waitingMinutes }) => toast(`Оператору отправлено напоминание: клиент ждёт ${waitingMinutes} мин`));
 
 socket.on('admin_user_typing', ({ ticketId }) => {
   if (ticketId !== S.current?.id) return;
@@ -318,6 +335,7 @@ function setView(view) {
     $('chat').style.display = S.current ? 'flex' : 'none';
     if (isMobileLayout() && !S.current) $('main').classList.remove('open');
   } else {
+    document.body.classList.remove('ticket-open');
     $('welcome').style.display = 'none';
     $('chat').style.display = 'none';
     $('main').classList.add('open');
@@ -339,7 +357,14 @@ function ticketHtml(t) { const ts = t.last_activity || t.created_at; const badge
 function preview(t) { if (!t.last_msg && !t.last_msg_type) return '<span>нет сообщений</span>'; const prefix = t.last_sender === 'support' ? 'Вы: ' : ''; if (t.last_msg_type && t.last_msg_type !== 'text') return esc(prefix + (t.last_msg_type === 'image' ? 'Фото' : t.last_msg_type === 'video' ? 'Видео' : t.last_msg_type === 'audio' ? 'Аудио' : 'Файл')); return esc(prefix + (t.last_msg || '').slice(0, 80)); }
 function renderRelativeTimes() { document.querySelectorAll('[data-ts]').forEach(el => { el.textContent = timeAgo(el.dataset.ts); }); }
 
-function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; tgImpact('medium'); updateTelegramBackButton(); renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
+function leaveCurrentTicket() {
+  $('main').classList.remove('open');
+  document.body.classList.remove('ticket-open');
+  $('mobile-ticket-top').setAttribute('aria-hidden', 'true');
+  updateTelegramBackButton();
+}
+
+function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); document.body.classList.add('ticket-open'); $('mobile-ticket-top').setAttribute('aria-hidden', 'false'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; tgImpact('medium'); updateTelegramBackButton(); renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
 function renderChatHeader() {
   if (!S.current) return;
   const t = S.current;
@@ -351,10 +376,22 @@ function renderChatHeader() {
   $('cv-av').className = `avatar ${t.status === 'closed' ? 'closed' : ''}`;
   $('cv-name').textContent = t.user_name;
   $('cv-sub').textContent = `#${t.id.slice(0, 8)} · ${fmtDate(parseServerDate(t.created_at))} · ${t.status === 'open' ? 'открыто' : 'закрыто'} · оператор: ${assignee}`;
+  const firstResponse = S.messages.find(message => message.sender === 'support' && !Number(message.is_auto));
+  const pending = t.status === 'open' && (t.unread_count > 0 || t.last_sender === 'user' || !firstResponse);
+  const activity = timeAgo(t.last_activity || t.created_at);
+  $('mobile-ticket-avatar').style.background = avatarColor(t.user_name);
+  $('mobile-ticket-avatar').textContent = initials(t.user_name);
+  $('mobile-ticket-avatar').className = `avatar ${t.status === 'closed' ? 'closed' : pending ? 'wait' : ''}`;
+  $('mobile-ticket-name').textContent = t.user_name;
+  $('mobile-ticket-summary').textContent = `${pending ? 'Ждёт ответа' : 'На контроле'} · ${activity}${firstResponse ? ` · ответ ${fmtTime(parseServerDate(firstResponse.created_at))}` : ''}`;
   const btn = $('cv-toggle');
   btn.disabled = legacyDeleted;
   btn.className = t.status === 'open' ? 'danger' : 'okbtn';
   btn.textContent = t.status === 'open' ? 'Закрыть' : (legacyDeleted ? 'Тема удалена' : 'Переоткрыть');
+  const mobileBtn = $('mobile-ticket-toggle');
+  mobileBtn.disabled = legacyDeleted;
+  mobileBtn.className = `mobile-ticket-toggle ${t.status === 'open' ? 'danger' : 'okbtn'}`;
+  mobileBtn.textContent = t.status === 'open' ? 'Закрыть' : (legacyDeleted ? 'Недоступно' : 'Открыть');
   $('composer').innerHTML = t.status === 'open'
     ? composerHtml()
     : '<div class="closed-note">Обращение закрыто. При необходимости переоткройте его.</div>';
@@ -465,7 +502,7 @@ function renderSettings() {
     <div class="card"><h3>Чат и график</h3>${input('set-support-name','Имя поддержки в чате',s.supportName || 'Поддержка KV9RU')}${input('set-tz','Часовой пояс',s.timezone || 'Europe/Moscow')}${input('set-work-start','Начало рабочего часа',s.workStartHour ?? 8,'number','min="0" max="23"')}${input('set-work-end','Конец рабочего часа',s.workEndHour ?? 23,'number','min="1" max="24"')}${check('set-offhours-enabled','Показывать предупреждение вне графика',s.offhoursEnabled)}${area('set-banner-text','Баннер перед вводом имени вне графика',s.offhoursBannerText || '')}${area('set-reject-text','Резервный текст предупреждения вне графика',s.offhoursRejectText || '')}</div>
     <div class="card"><h3>Приветствия и ожидание</h3>${check('set-welcome-enabled','Включить цепочку приветствий',s.welcomeEnabled)}${check('set-welcome-1-enabled','Отправлять первое приветствие',s.welcomeText1Enabled ?? true)}${input('set-welcome-delay-1','Задержка первого приветствия, мс',s.welcomeDelayFirstMs ?? 1200,'number','min="0" max="30000"')}${area('set-welcome-1','Первое приветствие',s.welcomeText1 || '',3)}${check('set-welcome-2-enabled','Отправлять второе приветствие',s.welcomeText2Enabled ?? true)}${input('set-welcome-delay-2','Задержка второго приветствия, мс',s.welcomeDelaySecondMs ?? 2800,'number','min="0" max="60000"')}${area('set-welcome-2','Второе приветствие',s.welcomeText2 || '',4)}${check('set-welcome-3-enabled','Отправлять третье дополнительное сообщение',s.welcomeText3Enabled)}${input('set-welcome-delay-3','Задержка третьего сообщения, мс',s.welcomeDelayThirdMs ?? 6500,'number','min="0" max="120000"')}${area('set-welcome-3','Третье дополнительное сообщение',s.welcomeText3 || '',4)}${check('set-operator-wait-enabled','Сообщать клиенту, если оператор задерживается',s.operatorWaitEnabled)}${input('set-operator-wait-delay','Задержка сообщения об ожидании, мс',s.operatorWaitDelayMs ?? 180000,'number','min="10000" max="3600000"')}${area('set-operator-wait-text','Сообщение при долгом ожидании оператора',s.operatorWaitText || '',4)}${input('set-rate','Лимит сообщений в минуту',s.messageRateLimitPerMinute ?? 20,'number','min="1" max="300"')}${input('set-upload','Максимальный файл, МБ',s.uploadMaxMb ?? 50,'number','min="1" max="50"')}</div>
     <div class="card"><h3>Автозакрытие</h3>${check('set-inactivity-enabled','Включить предупреждение и автозакрытие',s.inactivityEnabled)}${input('set-inactivity-warn','Предупредить через, минут',s.inactivityWarnMinutes ?? 45,'number','min="1" max="1440"')}${input('set-inactivity-close','Закрыть через, минут',s.inactivityCloseMinutes ?? 60,'number','min="2" max="2880"')}${area('set-inactivity-warning','Сообщение-предупреждение в чат',s.inactivityWarningText || '',3)}${area('set-inactivity-close-text','Сообщение автозакрытия в чат',s.inactivityCloseText || '',3)}</div>
-    <div class="card"><h3>Telegram: личный бот</h3><p class="muted">Режим: ${esc(s.telegramMode === 'private' ? 'личные чаты операторов' : 'совместимость с группой')}. Если зарегистрирован один активный оператор, новые тикеты назначаются ему автоматически.</p>${check('set-tg-enabled','Включить Telegram-интеграцию',s.telegramEnabled)}${topicModeControl}${check('set-tg-forward-user','Пересылать сообщения клиента оператору',s.telegramForwardUserMessages)}${check('set-tg-forward-admin','Показывать ответы из админки в теме',s.telegramForwardAdminMessages)}${check('set-tg-forward-operator','Принимать ответы оператора из Telegram',s.telegramForwardOperatorMessages)}${check('set-tg-delete-renames','Удалять сервисные сообщения о переименовании (legacy)',s.telegramDeleteRenameNotices)}${check('set-tg-pin','Закреплять rich-карточку тикета',s.telegramPinNewTicketMessage)}${check('set-tg-close-topic','Закрывать приватную тему вместе с тикетом',s.telegramCloseTopicOnClose)}${check('set-tg-reopen-topic','Открывать приватную тему при переоткрытии',s.telegramReopenTopicOnReopen)}${check('set-tg-cleanup','Удалять старые закрытые темы',s.telegramCleanupClosedTopics)}${input('set-tg-cleanup-hours','Удалять закрытые темы через, часов (0 — сразу)',s.telegramCleanupClosedHours ?? 24,'number','min="0" max="720"')}</div>
+    <div class="card"><h3>Telegram: личный бот</h3><p class="muted">Режим: ${esc(s.telegramMode === 'private' ? 'личные чаты операторов' : 'совместимость с группой')}. Если зарегистрирован один активный оператор, новые тикеты назначаются ему автоматически.</p>${check('set-tg-enabled','Включить Telegram-интеграцию',s.telegramEnabled)}${topicModeControl}${check('set-tg-forward-user','Пересылать сообщения клиента оператору',s.telegramForwardUserMessages)}${check('set-tg-forward-admin','Показывать ответы из админки в теме',s.telegramForwardAdminMessages)}${check('set-tg-forward-operator','Принимать ответы оператора из Telegram',s.telegramForwardOperatorMessages)}${check('set-tg-reminders','Напоминать со звуком, пока оператор не ответил',s.telegramUnansweredReminderEnabled ?? true)}${input('set-tg-reminder-first','Первое напоминание через, минут',s.telegramUnansweredReminderMinutes ?? 3,'number','min="1" max="1440"')}${input('set-tg-reminder-repeat','Повторять напоминание каждые, минут',s.telegramUnansweredRepeatMinutes ?? 5,'number','min="1" max="1440"')}${check('set-tg-delete-renames','Удалять сервисные сообщения о переименовании (legacy)',s.telegramDeleteRenameNotices)}${check('set-tg-pin','Закреплять rich-карточку тикета',s.telegramPinNewTicketMessage)}${check('set-tg-close-topic','Закрывать приватную тему вместе с тикетом',s.telegramCloseTopicOnClose)}${check('set-tg-reopen-topic','Открывать приватную тему при переоткрытии',s.telegramReopenTopicOnReopen)}${check('set-tg-cleanup','Удалять старые закрытые темы',s.telegramCleanupClosedTopics)}${input('set-tg-cleanup-hours','Удалять закрытые темы через, часов (0 — сразу)',s.telegramCleanupClosedHours ?? 24,'number','min="0" max="720"')}</div>
     <div class="card"><h3>Telegram: приватные темы и кнопки</h3>${input('set-topic-template','Шаблон названия темы',s.telegramTopicNameTemplate || '{emoji} {name} • {date}')}${input('set-emoji-new','Эмодзи нового тикета',s.telegramNewEmoji || '❗')}${input('set-emoji-open','Эмодзи в работе',s.telegramOpenEmoji || '🔵')}${input('set-emoji-wait','Эмодзи ждет ответа',s.telegramWaitEmoji || '🔔')}${input('set-emoji-closed','Эмодзи закрыто',s.telegramClosedEmoji || '🗑️')}${input('set-close-btn','Текст кнопки закрытия',s.telegramCloseButtonText || '🗑️ Закрыть тикет')}${select('set-close-btn-style','Цвет кнопки закрытия',s.telegramCloseButtonStyle || 'danger',[{value:'danger',label:'Красная'},{value:'success',label:'Зеленая'},{value:'primary',label:'Синяя'},{value:'',label:'Стандартная'}])}${input('set-close-btn-emoji-id','ID анимированного emoji закрытия',s.telegramCloseButtonEmojiId || '')}${input('set-reopen-btn','Текст кнопки переоткрытия',s.telegramReopenButtonText || '🟢 Переоткрыть')}${select('set-reopen-btn-style','Цвет кнопки переоткрытия',s.telegramReopenButtonStyle || 'success',[{value:'success',label:'Зеленая'},{value:'primary',label:'Синяя'},{value:'danger',label:'Красная'},{value:'',label:'Стандартная'}])}${input('set-reopen-btn-emoji-id','ID анимированного emoji переоткрытия',s.telegramReopenButtonEmojiId || '')}</div>
     <div class="card"><h3>Telegram: тексты</h3>${area('set-tg-new-ticket','Карточка нового тикета (legacy)',s.telegramNewTicketText || '',5)}${area('set-tg-closed-user','Закрыто пользователем',s.telegramClosedByUserText || '',2)}${area('set-tg-closed-support','Закрыто оператором',s.telegramClosedBySupportText || '',2)}${area('set-tg-reopened','Переоткрыто из Telegram',s.telegramReopenedText || '',2)}${area('set-tg-reopened-user','Переоткрыто пользователем',s.telegramReopenedByUserText || '',2)}${area('set-tg-autoclose','Автозакрытие в Telegram',s.telegramAutoCloseText || '',3)}${area('set-tg-warn','Предупреждение о неактивности в Telegram',s.telegramWarnInactivityText || '',3)}${area('set-tg-topic-deleted','Ошибка удаленной темы в админке (legacy)',s.telegramTopicDeletedAdminText || '',2)}</div>
   </div><p style="margin-top:14px">Переменные для шаблонов: {name}, {shortId}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p><button id="set-save" class="save">Сохранить все настройки</button></div>`;
@@ -477,7 +514,7 @@ function saveSettings() {
     supportName: val('set-support-name'), timezone: val('set-tz'), workStartHour: num('set-work-start'), workEndHour: num('set-work-end'), offhoursEnabled: checked('set-offhours-enabled'), offhoursBannerText: val('set-banner-text'), offhoursRejectText: val('set-reject-text'),
     welcomeEnabled: checked('set-welcome-enabled'), welcomeText1Enabled: checked('set-welcome-1-enabled'), welcomeText2Enabled: checked('set-welcome-2-enabled'), welcomeText3Enabled: checked('set-welcome-3-enabled'), welcomeDelayFirstMs: num('set-welcome-delay-1'), welcomeDelaySecondMs: num('set-welcome-delay-2'), welcomeDelayThirdMs: num('set-welcome-delay-3'), welcomeText1: val('set-welcome-1'), welcomeText2: val('set-welcome-2'), welcomeText3: val('set-welcome-3'), operatorWaitEnabled: checked('set-operator-wait-enabled'), operatorWaitDelayMs: num('set-operator-wait-delay'), operatorWaitText: val('set-operator-wait-text'), messageRateLimitPerMinute: num('set-rate'), uploadMaxMb: num('set-upload'),
     inactivityEnabled: checked('set-inactivity-enabled'), inactivityWarnMinutes: num('set-inactivity-warn'), inactivityCloseMinutes: num('set-inactivity-close'), inactivityWarningText: val('set-inactivity-warning'), inactivityCloseText: val('set-inactivity-close-text'),
-    telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: true, telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramReopenTopicOnReopen: checked('set-tg-reopen-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
+    telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: true, telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramUnansweredReminderEnabled: checked('set-tg-reminders'), telegramUnansweredReminderMinutes: num('set-tg-reminder-first'), telegramUnansweredRepeatMinutes: num('set-tg-reminder-repeat'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramReopenTopicOnReopen: checked('set-tg-reopen-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
     telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'), telegramReopenButtonText: val('set-reopen-btn'), telegramReopenButtonStyle: val('set-reopen-btn-style'), telegramReopenButtonEmojiId: val('set-reopen-btn-emoji-id'),
     telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramReopenedText: val('set-tg-reopened'), telegramReopenedByUserText: val('set-tg-reopened-user'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
   };

@@ -45,6 +45,9 @@ const DEFAULTS = {
   telegramReopenTopicOnReopen: true,
   telegramCleanupClosedTopics: true,
   telegramCleanupClosedHours: 24,
+  telegramUnansweredReminderEnabled: true,
+  telegramUnansweredReminderMinutes: 3,
+  telegramUnansweredRepeatMinutes: 5,
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
   telegramNewEmoji: '❗',
   telegramOpenEmoji: '🔵',
@@ -106,6 +109,9 @@ const KEY_MAP = {
   telegramReopenTopicOnReopen: 'telegram_reopen_topic_on_reopen',
   telegramCleanupClosedTopics: 'telegram_cleanup_closed_topics',
   telegramCleanupClosedHours: 'telegram_cleanup_closed_hours',
+  telegramUnansweredReminderEnabled: 'telegram_unanswered_reminder_enabled',
+  telegramUnansweredReminderMinutes: 'telegram_unanswered_reminder_minutes',
+  telegramUnansweredRepeatMinutes: 'telegram_unanswered_repeat_minutes',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -174,6 +180,8 @@ function normalize(input = {}) {
   cfg.inactivityWarnMinutes = clamp(cfg.inactivityWarnMinutes, 1, 1440, DEFAULTS.inactivityWarnMinutes);
   cfg.inactivityCloseMinutes = clamp(cfg.inactivityCloseMinutes, cfg.inactivityWarnMinutes + 1, 2880, DEFAULTS.inactivityCloseMinutes);
   cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
+  cfg.telegramUnansweredReminderMinutes = clamp(cfg.telegramUnansweredReminderMinutes, 1, 1440, DEFAULTS.telegramUnansweredReminderMinutes);
+  cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
