@@ -28,9 +28,12 @@ source .env
 set +a
 
 [ -n "${TELEGRAM_BOT_TOKEN:-}" ] || err "В .env не задан TELEGRAM_BOT_TOKEN"
-[ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В .env не задан TELEGRAM_GROUP_ID"
 [ -n "${ADMIN_TOKEN:-}" ] || err "В .env не задан ADMIN_TOKEN (админ-панель не будет доступна)"
-[ -n "${TELEGRAM_ADMIN_IDS:-}" ] || warn "TELEGRAM_ADMIN_IDS не задан — Telegram Mini App не пустит админа без ручного ADMIN_TOKEN"
+if [ "${TELEGRAM_MODE:-private}" = "private" ]; then
+  [ -n "${TELEGRAM_ADMIN_IDS:-}" ] || err "В private-режиме обязателен TELEGRAM_ADMIN_IDS"
+else
+  [ -n "${TELEGRAM_GROUP_ID:-}" ] || err "В legacy-режиме обязателен TELEGRAM_GROUP_ID"
+fi
 
 # Не патчим старый Caddyfile регулярками: формат мог измениться.
 # Полностью пересоздаём конфиг из PUBLIC_URL, но сохраняем backup до успешной проверки.
@@ -63,6 +66,9 @@ if [ -z "${VAPID_PUBLIC_KEY:-}" ] || [ -z "${VAPID_PRIVATE_KEY:-}" ]; then
 fi
 if [ -z "${PUBLIC_URL:-}" ] && [ -z "${TELEGRAM_WEBAPP_URL:-}" ]; then
   warn "PUBLIC_URL/TELEGRAM_WEBAPP_URL не заданы — Telegram Mini App для админки не будет настроен"
+fi
+if [ "${TELEGRAM_MODE:-private}" = "private" ]; then
+  warn "Проверьте Threaded Mode в @BotFather и выполните /start от каждого ID из TELEGRAM_ADMIN_IDS"
 fi
 
 info "Останавливаю контейнер..."
