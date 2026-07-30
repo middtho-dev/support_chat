@@ -20,7 +20,11 @@ const io = new Server(server, {
   maxHttpBufferSize: 50 * 1024 * 1024
 });
 
-telegram.init(io);
+telegram.init(io, {
+  scheduleWelcomeMessages,
+  scheduleOperatorWaitMessage,
+  cancelOperatorWait
+});
 push.init();
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
@@ -511,6 +515,9 @@ function emitSupportAutoMessage(ticketId, content) {
   io.to(`ticket:${ticketId}`).emit('message', message);
   io.to('admin').emit('admin_new_message', { ticketId, message });
   broadcastAdminTickets();
+  telegram.deliverCustomerReply?.(ticket, message).catch(error => {
+    console.error('[Auto] Telegram customer delivery:', error?.message);
+  });
   return message;
 }
 
@@ -792,6 +799,27 @@ io.on('connection', (socket) => {
     io.to(`ticket:${ticketId}`).emit('typing_support');
     const ticket = db.getTicketById.get(ticketId);
     telegram.sendCustomerTyping?.(ticket).catch(() => {});
+  });
+
+  socket.on('admin_send_customer_control', async ({ ticketId } = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    const ticket = db.getTicketById.get(ticketId);
+    if (!ticket || ticket.source !== 'telegram') {
+      return ack?.({ error: 'Это не Telegram-тикет' });
+    }
+    if (ticket.status !== 'open') {
+      return ack?.({ error: 'Тикет уже закрыт' });
+    }
+    if (typeof telegram.sendCustomerControl !== 'function') {
+      return ack?.({ error: 'Действие недоступно в текущем режиме Telegram' });
+    }
+    try {
+      await telegram.sendCustomerControl(ticket, { repin: true });
+      ack?.({ ok: true });
+    } catch (error) {
+      console.error('[Admin] customer control:', error?.message);
+      ack?.({ error: 'Не удалось закрепить карточку у клиента' });
+    }
   });
 
   socket.on('admin_close_ticket', ({ ticketId }) => {

@@ -71,6 +71,7 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_username TEXT`);
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_first_name TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_last_name TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_language_code TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_control_message_id INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_chat_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_message_id INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_message_id INTEGER`); } catch {}
@@ -216,6 +217,13 @@ module.exports = {
       telegram_customer_language_code = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE telegram_customer_id = ? AND status = 'open'
+  `),
+  setTelegramCustomerControlMessage: db.prepare(`
+    UPDATE tickets SET telegram_customer_control_message_id = ? WHERE id = ?
+  `),
+  clearTelegramCustomerControlMessage: db.prepare(`
+    UPDATE tickets SET telegram_customer_control_message_id = NULL
+    WHERE id = ? AND telegram_customer_control_message_id = ?
   `),
 
   getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
