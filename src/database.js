@@ -234,6 +234,18 @@ module.exports = {
     UPDATE tickets SET telegram_customer_control_message_id = NULL
     WHERE id = ? AND telegram_customer_control_message_id = ?
   `),
+  trackTelegramCustomerChatMessage: db.prepare(`
+    INSERT OR IGNORE INTO telegram_customer_chat_messages
+      (ticket_id, chat_id, message_id)
+    VALUES (?, ?, ?)
+  `),
+  getTelegramCustomerChatMessages: db.prepare(`
+    SELECT message_id FROM telegram_customer_chat_messages
+    WHERE ticket_id = ?
+  `),
+  clearTelegramCustomerChatMessages: db.prepare(`
+    DELETE FROM telegram_customer_chat_messages WHERE ticket_id = ?
+  `),
 
   getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
   getTicketBySession:    db.prepare(`SELECT * FROM tickets WHERE session_token = ? AND status = 'open'`),
