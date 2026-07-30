@@ -34,8 +34,8 @@ socket.on('message',msg=>{
   else{S.unread++;updSDB()}
   if(msg.sender==='support'){hideSupportTyping();playNotifSound();showBrowserNotif(msg);}
 });
-socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Обращение закрыто оператором':by==='inactivity'?'Обращение закрыто по неактивности':'Обращение закрыто','info')});
-socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';saveMsgCache();showToast('Обращение переоткрыто','ok')});
+socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Тикет закрыт оператором':by==='inactivity'?'Тикет закрыт по неактивности':'Тикет закрыт','info')});
+socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';saveMsgCache();showToast('Тикет переоткрыт','ok')});
 socket.on('ticket_orphaned',()=>{markClosedNoReopen();showToast('Тема удалена — начните новый чат','err',5000);});
 socket.on('messages_read',()=>{/* support has opened the ticket */});
 socket.on('typing_support',()=>{showSupportTyping();});
@@ -211,7 +211,7 @@ function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');t
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
   if(S.closed)return;
-  dlg('Закрыть обращение?','После закрытия можно начать новый чат.',async()=>{
+  dlg('Закрыть тикет?','После закрытия можно начать новый чат.',async()=>{
     try{
       const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
       if(!r.ok)throw 0;
@@ -349,7 +349,7 @@ async function send(){
     if(timeoutError){showToast('Нет подтверждения доставки. Нажмите отправить ещё раз — дубля не будет.','err',6000);sndbtn.disabled=false;updSend();return;}
     if(ack?.error){
       if(ack.error==='Rate limit')showToast(`Слишком много сообщений — подождите ${ack.retryAfter||60}с`,'err');
-      else if(ack.error==='Ticket is closed')showToast('Обращение закрыто','info');
+      else if(ack.error==='Ticket is closed')showToast('Тикет закрыт','info');
       else if(ack.error==='Message too long')showToast(`Слишком длинное сообщение — максимум ${ack.maxLength||4000} символов`,'err');
       else showToast('Ошибка отправки','err');
     }else{S.pendingSend=null;ti.value='';resize();clearFile();closeEp();clearDraft();}

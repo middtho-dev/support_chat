@@ -431,7 +431,9 @@ app.post('/api/tickets/:ticketId/close', (req, res) => {
 
   db.closeTicket.run(ticket.id);
   cancelOperatorWait(ticket.id);
-  telegram.notifyTicketClosed(ticket).catch(e => console.error('[TG] notifyTicketClosed:', e?.message));
+  telegram.notifyTicketClosed(ticket, {
+    customerReason: loadSettings().telegramCustomerClosedByUserText
+  }).catch(e => console.error('[TG] notifyTicketClosed:', e?.message));
   io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'user' });
   io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
   broadcastAdminTickets();
@@ -831,7 +833,9 @@ io.on('connection', (socket) => {
     io.to(`ticket:${ticketId}`).emit('ticket_closed', { by: 'support' });
     io.to('admin').emit('admin_ticket_status', { ticketId, status: 'closed' });
     broadcastAdminTickets();
-    telegram.notifyTicketClosed(ticket).catch(() => {});
+    telegram.notifyTicketClosed(ticket, {
+      customerReason: loadSettings().telegramCustomerClosedBySupportText
+    }).catch(() => {});
   });
 
   socket.on('admin_reopen_ticket', async ({ ticketId }) => {

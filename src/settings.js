@@ -30,8 +30,8 @@ const DEFAULTS = {
   inactivityEnabled: true,
   inactivityWarnMinutes: 45,
   inactivityCloseMinutes: 60,
-  inactivityWarningText: 'Нет активности 45 минут — обращение будет закрыто через 15 минут.',
-  inactivityCloseText: 'Обращение закрыто автоматически — нет активности в течение 1 часа.',
+  inactivityWarningText: 'Нет активности 45 минут — тикет будет закрыт через 15 минут.',
+  inactivityCloseText: 'Тикет закрыт автоматически — нет активности в течение 1 часа.',
 
   backupEnabled: true,
   backupIntervalHours: 24,
@@ -80,7 +80,7 @@ const DEFAULTS = {
   telegramReopenButtonStyle: 'success',
   telegramCloseButtonEmojiId: '',
   telegramReopenButtonEmojiId: '',
-  telegramNewTicketText: '🎫 *Новое обращение*\n👤 *{name}*\n🆔 `{shortId}`\n📅 {dateTime}',
+  telegramNewTicketText: '🎫 *Новый тикет*\n👤 *{name}*\n🆔 `{shortId}`\n📅 {dateTime}',
   telegramClosedByUserText: '🗑️ Закрыто пользователем',
   telegramClosedBySupportText: '🔴 Тикет закрыт',
   telegramReopenedText: '🔔 Тикет переоткрыт',
@@ -153,6 +153,12 @@ const KEY_MAP = {
   telegramCustomerNewTicketText: 'telegram_customer_new_ticket_text',
   telegramCustomerReopenedText: 'telegram_customer_reopened_text',
   telegramCustomerClosedText: 'telegram_customer_closed_text',
+  telegramCustomerClosedByUserText: 'telegram_customer_closed_by_user_text',
+  telegramCustomerClosedBySupportText: 'telegram_customer_closed_by_support_text',
+  telegramCustomerClosedBySystemText: 'telegram_customer_closed_by_system_text',
+  telegramCustomerCloseButtonText: 'telegram_customer_close_button_text',
+  telegramCustomerNewButtonText: 'telegram_customer_new_button_text',
+  telegramCustomerSendCloseButtonText: 'telegram_customer_send_close_button_text',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -231,6 +237,7 @@ function normalize(input = {}) {
   cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
   cfg.telegramUnansweredReminderMinutes = clamp(cfg.telegramUnansweredReminderMinutes, 1, 1440, DEFAULTS.telegramUnansweredReminderMinutes);
   cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);
+  cfg.telegramCustomerReopenClosed = false;
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
@@ -250,6 +257,18 @@ function normalize(input = {}) {
   }
   cfg.telegramCustomerReopenedText = sanitizeText(cfg.telegramCustomerReopenedText, DEFAULTS.telegramCustomerReopenedText, 1000);
   cfg.telegramCustomerClosedText = sanitizeText(cfg.telegramCustomerClosedText, DEFAULTS.telegramCustomerClosedText, 1000);
+  if (cfg.telegramCustomerReopenedText === LEGACY_TELEGRAM_CUSTOMER_REOPENED) {
+    cfg.telegramCustomerReopenedText = DEFAULTS.telegramCustomerReopenedText;
+  }
+  if (cfg.telegramCustomerClosedText === LEGACY_TELEGRAM_CUSTOMER_CLOSED) {
+    cfg.telegramCustomerClosedText = DEFAULTS.telegramCustomerClosedText;
+  }
+  cfg.telegramCustomerClosedByUserText = sanitizeText(cfg.telegramCustomerClosedByUserText, DEFAULTS.telegramCustomerClosedByUserText, 500);
+  cfg.telegramCustomerClosedBySupportText = sanitizeText(cfg.telegramCustomerClosedBySupportText, DEFAULTS.telegramCustomerClosedBySupportText, 500);
+  cfg.telegramCustomerClosedBySystemText = sanitizeText(cfg.telegramCustomerClosedBySystemText, DEFAULTS.telegramCustomerClosedBySystemText, 500);
+  cfg.telegramCustomerCloseButtonText = sanitizeText(cfg.telegramCustomerCloseButtonText, DEFAULTS.telegramCustomerCloseButtonText, 64) || DEFAULTS.telegramCustomerCloseButtonText;
+  cfg.telegramCustomerNewButtonText = sanitizeText(cfg.telegramCustomerNewButtonText, DEFAULTS.telegramCustomerNewButtonText, 64) || DEFAULTS.telegramCustomerNewButtonText;
+  cfg.telegramCustomerSendCloseButtonText = sanitizeText(cfg.telegramCustomerSendCloseButtonText, DEFAULTS.telegramCustomerSendCloseButtonText, 64) || DEFAULTS.telegramCustomerSendCloseButtonText;
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
   cfg.telegramReopenButtonStyle = allowedButtonStyles.has(cfg.telegramReopenButtonStyle) ? cfg.telegramReopenButtonStyle : DEFAULTS.telegramReopenButtonStyle;

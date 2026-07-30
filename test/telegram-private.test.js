@@ -54,8 +54,14 @@ class FakeBot {
     return Promise.resolve({ message_id: sentMessageId });
   }
   sendRichMessage(chatId, payload, options) {
-    rich.push({ chatId: String(chatId), markdown: payload.markdown, options });
-    return Promise.resolve({ message_id: ++messageId });
+    const sentMessageId = ++messageId;
+    rich.push({
+      chatId: String(chatId),
+      markdown: payload.markdown,
+      options,
+      messageId: sentMessageId
+    });
+    return Promise.resolve({ message_id: sentMessageId });
   }
   editMessageText(text, options) {
     edits.push({ text, options });
@@ -80,6 +86,9 @@ class FakeBot {
     return topicAttempts === 1
       ? Promise.reject(new Error('temporary Telegram error'))
       : Promise.resolve({ message_thread_id: ++nextTopicId });
+  }
+  closeForumTopic() {
+    return Promise.resolve();
   }
 }
 

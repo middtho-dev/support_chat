@@ -37,7 +37,10 @@ test('maintenance and alert settings persist and are normalized', () => {
     telegramCustomerWelcomeText: '  Напишите нам в Telegram  ',
     telegramCustomerNewTicketText: 'Тикет создан',
     telegramCustomerReopenedText: 'Тикет снова открыт',
-    telegramCustomerClosedText: 'Тикет закрыт'
+    telegramCustomerClosedText: 'Тикет закрыт',
+    telegramCustomerCloseButtonText: 'Закрыть',
+    telegramCustomerNewButtonText: 'Новый тикет',
+    telegramCustomerSendCloseButtonText: 'Отправить закрытие'
   });
 
   assert.equal(saved.backupEnabled, false);
@@ -69,6 +72,17 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.telegramCustomerFilesEnabled, false);
   assert.equal(loaded.telegramCustomerReopenClosed, false);
   assert.equal(loaded.telegramCustomerClosedText, 'Тикет закрыт');
+  assert.equal(loaded.telegramCustomerCloseButtonText, 'Закрыть');
+  assert.equal(loaded.telegramCustomerNewButtonText, 'Новый тикет');
+  assert.equal(loaded.telegramCustomerSendCloseButtonText, 'Отправить закрытие');
+});
+
+test('legacy Telegram ticket confirmation is upgraded to the pinned card template', () => {
+  const saved = saveSettings({
+    telegramCustomerNewTicketText: '✅ Обращение создано. Оператор уже получил уведомление.'
+  });
+  assert.doesNotMatch(saved.telegramCustomerNewTicketText, /обращени/i);
+  assert.match(saved.telegramCustomerNewTicketText, /оператор/i);
 });
 
 test('legacy Telegram ticket confirmation is upgraded to the pinned card template', () => {

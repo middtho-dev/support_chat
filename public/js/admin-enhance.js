@@ -25,6 +25,9 @@
     return `${Math.floor(sec / 86400)} д`;
   };
   const fmtTime = iso => iso ? parseServerDate(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'нет ответа';
+  const customerControlLabel = () =>
+    window.supportAdminSettings?.telegramCustomerSendCloseButtonText ||
+    '📨 Отправить кнопку закрытия';
   const telegramProfile = ticket => {
     const id = String(ticket?.telegram_customer_id || '');
     const username = String(ticket?.telegram_customer_username || '').replace(/^@/, '');
@@ -98,7 +101,7 @@
             ${currentTicket.status === 'open' ? '<button id="send-customer-control" class="customer-action" type="button">Отправить кнопку закрытия</button>' : ''}
           </div>
         </div>`
-      : `<div class="ticket-customer compact"><span class="ticket-source-badge web">Сайт</span><span>Обращение создано в веб-чате</span></div>`;
+      : `<div class="ticket-customer compact"><span class="ticket-source-badge web">Сайт</span><span>Тикет создан в веб-чате</span></div>`;
     dialog.innerHTML = `
       <button class="ticket-card-backdrop" type="button" aria-label="Закрыть карточку"></button>
       <section class="ticket-card-sheet" role="dialog" aria-modal="true" aria-labelledby="ticket-card-title">
