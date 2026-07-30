@@ -98,7 +98,7 @@
             <a class="customer-action primary" href="${esc(telegram.directUrl)}">Написать лично</a>
             ${telegram.profileUrl ? `<a class="customer-action" href="${esc(telegram.profileUrl)}" target="_blank" rel="noopener noreferrer">Открыть профиль</a>` : ''}
             <button id="copy-telegram-id" class="customer-action" type="button">Копировать ID</button>
-            ${currentTicket.status === 'open' ? `<button id="send-customer-control" class="customer-action" type="button">${esc(customerControlLabel())}</button>` : ''}
+            ${currentTicket.status === 'open' ? '<button id="send-customer-control" class="customer-action" type="button">Отправить кнопку закрытия</button>' : ''}
           </div>
         </div>`
       : `<div class="ticket-customer compact"><span class="ticket-source-badge web">Сайт</span><span>Тикет создан в веб-чате</span></div>`;
@@ -169,13 +169,13 @@
         if (timeoutError || !result?.ok) {
           button.textContent = result?.error || 'Не удалось отправить';
           setTimeout(() => {
-            if (button.isConnected) button.textContent = customerControlLabel();
+            if (button.isConnected) button.textContent = 'Отправить кнопку закрытия';
           }, 2200);
           return;
         }
         button.textContent = 'Карточка закреплена';
         setTimeout(() => {
-          if (button.isConnected) button.textContent = customerControlLabel();
+          if (button.isConnected) button.textContent = 'Отправить кнопку закрытия';
         }, 1800);
       }
     );

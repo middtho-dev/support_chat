@@ -103,7 +103,6 @@ const assigningTickets = new Map();
 const forwardingMessages = new Set();
 const customerDeliveryMessages = new Set();
 const customerControlMessages = new Map();
-const closingCustomerTickets = new Set();
 const incomingMessages = new Set();
 const customerMessageRates = new Map();
 const alertTimes = new Map();
@@ -330,7 +329,7 @@ function ticketKeyboard(ticket, state = 'open') {
     rows.push(profileButtons);
     if (state === 'open') {
       rows.push([{
-        text: settings.telegramCustomerSendCloseButtonText,
+        text: '📨 Отправить кнопку закрытия',
         callback_data: `customercontrol:${ticket.id}`
       }]);
     }
@@ -821,42 +820,21 @@ function customerKeyboard(ticket) {
   return { inline_keyboard: rows };
 }
 
-function customerControlModel(ticket, reason = '') {
+function customerControlText(ticket) {
   const settings = cfg();
   const values = {
     name: ticket.user_name || 'Клиент',
     shortId: shortId(ticket),
-    id: ticket.id,
-    reason
+    id: ticket.id
   };
   if (ticket.status === 'closed') {
-    const body = formatTemplate(settings.telegramCustomerClosedText, values);
-    const reasonLine = reason && !settings.telegramCustomerClosedText.includes('{reason}')
-      ? `\n\n**Причина:** ${reason}`
-      : '';
-    const fallbackReason = reason && !settings.telegramCustomerClosedText.includes('{reason}')
-      ? `\n\nПричина: ${reason}`
-      : '';
-    return {
-      markdown: [
-        `## ✅ Тикет #${markdownEscape(shortId(ticket))} закрыт`,
-        '',
-        `${body}${reasonLine}`
-      ].join('\n'),
-      fallback: [`✅ Тикет #${shortId(ticket)} закрыт`, '', `${body}${fallbackReason}`].join('\n')
-    };
+    return [
+      `✅ Обращение #${shortId(ticket)} закрыто`,
+      '',
+      formatTemplate(settings.telegramCustomerClosedText, values)
+    ].join('\n');
   }
-  const body = formatTemplate(settings.telegramCustomerNewTicketText, values);
-  return {
-    markdown: [
-      `## 🎫 Тикет #${markdownEscape(shortId(ticket))} создан`,
-      '',
-      body,
-      '',
-      `**Статус:** открыт`
-    ].join('\n'),
-    fallback: [`🎫 Тикет #${shortId(ticket)} создан`, '', body, '', 'Статус: открыт'].join('\n')
-  };
+  return formatTemplate(settings.telegramCustomerNewTicketText, values);
 }
 
 async function pinCustomerControl(chatId, messageId, { repin = false } = {}) {
@@ -870,66 +848,7 @@ async function pinCustomerControl(chatId, messageId, { repin = false } = {}) {
   });
 }
 
-async function deleteCustomerMessage(chatId, messageId) {
-  if (!messageId || typeof bot.deleteMessage !== 'function') return false;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      await bot.deleteMessage(chatId, Number(messageId));
-      return true;
-    } catch (error) {
-      const message = tgError(error).toLowerCase();
-      if (message.includes('message to delete not found') ||
-          message.includes('message_id_invalid')) {
-        return true;
-      }
-      if (attempt < 3) {
-        await wait(150 * attempt);
-        continue;
-      }
-      console.warn('[TG private] customer message cleanup:', tgError(error));
-    }
-  }
-  return false;
-}
-
-function trackCustomerChatMessage(ticket, message) {
-  if (!ticket?.id || !ticket.telegram_customer_chat_id || !message?.message_id) return;
-  db.trackTelegramCustomerChatMessage.run(
-    ticket.id,
-    String(ticket.telegram_customer_chat_id),
-    Number(message.message_id)
-  );
-}
-
-async function sendCustomerRichNotice(ticket, markdown, fallback, options = {}) {
-  const sent = await sendRichOrText(
-    String(ticket.telegram_customer_chat_id),
-    markdown,
-    options,
-    fallback
-  );
-  trackCustomerChatMessage(ticket, sent);
-  return sent;
-}
-
-async function removeCustomerControl(ticket) {
-  const fresh = db.getTicketById.get(ticket?.id) || ticket;
-  const chatId = String(fresh?.telegram_customer_chat_id || '');
-  const messageId = Number(fresh?.telegram_customer_control_message_id || 0);
-  if (!chatId || !messageId) return;
-  if (typeof bot.unpinChatMessage === 'function') {
-    await bot.unpinChatMessage(chatId, { message_id: messageId }).catch(() => {});
-  }
-  await deleteCustomerMessage(chatId, messageId);
-  db.clearTelegramCustomerControlMessage.run(fresh.id, messageId);
-}
-
-async function ensureCustomerControlMessage(ticket, {
-  repin = false,
-  forceNew = false,
-  preserveExisting = false,
-  reason = ''
-} = {}) {
+async function ensureCustomerControlMessage(ticket, { repin = false } = {}) {
   const fresh = db.getTicketById.get(ticket?.id);
   if (!tgEnabled() || fresh?.source !== 'telegram' || !fresh.telegram_customer_chat_id) {
     return null;
@@ -939,37 +858,34 @@ async function ensureCustomerControlMessage(ticket, {
   }
   const task = (async () => {
     const chatId = String(fresh.telegram_customer_chat_id);
-    const model = customerControlModel(fresh, reason);
+    const text = customerControlText(fresh);
     const replyMarkup = customerKeyboard(fresh);
     let controlMessageId = Number(fresh.telegram_customer_control_message_id || 0) || null;
-    if (preserveExisting && controlMessageId) {
-      await pinCustomerControl(chatId, controlMessageId, { repin });
-      return controlMessageId;
-    }
-    if (forceNew && controlMessageId) {
-      await removeCustomerControl(fresh);
-      controlMessageId = null;
-    }
     if (controlMessageId) {
-      const edited = await editRichOrDisable(
-        chatId,
-        controlMessageId,
-        model.markdown,
-        replyMarkup,
-        model.fallback
-      );
-      if (!edited) {
-        db.clearTelegramCustomerControlMessage.run(fresh.id, controlMessageId);
-        controlMessageId = null;
+      try {
+        await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: controlMessageId,
+          reply_markup: replyMarkup
+        });
+      } catch (error) {
+        const message = tgError(error).toLowerCase();
+        const missing = message.includes('message to edit not found') ||
+          message.includes('message_id_invalid') ||
+          message.includes("message can't be edited");
+        if (!message.includes('message is not modified') && missing) {
+          db.clearTelegramCustomerControlMessage.run(fresh.id, controlMessageId);
+          controlMessageId = null;
+        } else if (!message.includes('message is not modified')) {
+          throw error;
+        }
       }
     }
     if (!controlMessageId) {
-      const sent = await sendRichOrText(
-        chatId,
-        model.markdown,
-        { reply_markup: replyMarkup, disable_notification: false },
-        model.fallback
-      );
+      const sent = await bot.sendMessage(chatId, text, {
+        reply_markup: replyMarkup,
+        disable_notification: false
+      });
       if (!sent?.message_id) throw new Error('Telegram did not confirm ticket control message');
       controlMessageId = sent.message_id;
       db.setTelegramCustomerControlMessage.run(controlMessageId, fresh.id);
@@ -981,84 +897,8 @@ async function ensureCustomerControlMessage(ticket, {
   return task;
 }
 
-async function clearCustomerTicketChat(ticket, { extraMessageIds = [] } = {}) {
-  const fresh = db.getTicketById.get(ticket?.id) || ticket;
-  if (fresh?.source !== 'telegram' || !fresh.telegram_customer_chat_id) return;
-  const chatId = String(fresh.telegram_customer_chat_id);
-  const ids = new Set(extraMessageIds.map(Number).filter(Boolean));
-  const controlMessageId = Number(fresh.telegram_customer_control_message_id || 0);
-  if (controlMessageId) ids.add(controlMessageId);
-  for (const message of db.getMessages.all(fresh.id)) {
-    if (message.telegram_source_message_id) ids.add(Number(message.telegram_source_message_id));
-    if (message.telegram_customer_message_id) ids.add(Number(message.telegram_customer_message_id));
-  }
-  for (const message of db.getTelegramCustomerChatMessages.all(fresh.id)) {
-    if (message.message_id) ids.add(Number(message.message_id));
-  }
-  if (controlMessageId && typeof bot.unpinChatMessage === 'function') {
-    await bot.unpinChatMessage(chatId, { message_id: controlMessageId }).catch(() => {});
-  }
-  const orderedIds = [...ids].sort((a, b) => b - a);
-  const failed = [];
-  for (let index = 0; index < orderedIds.length; index += 10) {
-    const batch = orderedIds.slice(index, index + 10);
-    const results = await Promise.all(batch.map(messageId =>
-      deleteCustomerMessage(chatId, messageId)
-    ));
-    results.forEach((ok, resultIndex) => {
-      if (!ok) failed.push(batch[resultIndex]);
-    });
-  }
-  if (controlMessageId) {
-    db.clearTelegramCustomerControlMessage.run(fresh.id, controlMessageId);
-  }
-  db.clearTelegramCustomerChatMessages.run(fresh.id);
-  if (failed.length) {
-    await operationalAlert(
-      `tg-customer-cleanup-${fresh.id}`,
-      `Не удалось полностью очистить чат тикета ${shortId(fresh)}`,
-      `Не удалены сообщения: ${failed.join(', ')}`
-    );
-  }
-}
-
-async function showClosedCustomerLauncher(ticket, reason, options = {}) {
-  const fresh = db.getTicketById.get(ticket?.id) || ticket;
-  if (fresh?.source !== 'telegram' || !fresh.telegram_customer_chat_id) return null;
-  closingCustomerTickets.add(fresh.id);
-  try {
-    await customerControlMessages.get(fresh.id)?.catch(() => {});
-    await clearCustomerTicketChat(fresh, options);
-    return await ensureCustomerControlMessage(fresh, {
-      forceNew: true,
-      repin: true,
-      reason
-    });
-  } finally {
-    closingCustomerTickets.delete(fresh.id);
-  }
-}
-
-async function sendCustomerControl(ticket, options = {}) {
-  return ensureCustomerControlMessage(ticket, {
-    ...options,
-    forceNew: true,
-    repin: true
-  });
-}
-
-async function removePreviousCustomerLauncher(customerId) {
-  const latest = db.getLatestTicketByTelegramCustomer.get(String(customerId));
-  if (latest?.status === 'closed') {
-    await clearCustomerTicketChat(latest);
-  }
-}
-
-async function startCustomerTicketExperience(ticket, { replaceMessageId = null } = {}) {
-  if (replaceMessageId) {
-    await deleteCustomerMessage(String(ticket.telegram_customer_chat_id), replaceMessageId);
-  }
-  await ensureCustomerControlMessage(ticket, { forceNew: true });
+async function startCustomerTicketExperience(ticket) {
+  await ensureCustomerControlMessage(ticket);
   lifecycle.scheduleWelcomeMessages?.(ticket.id);
   createTopic(ticket.id).catch(error => {
     console.error('[TG private] customer topic:', tgError(error));
@@ -1141,10 +981,7 @@ async function closeCustomerTicket(msg) {
   }
   db.closeTicket.run(ticket.id);
   lifecycle.cancelOperatorWait?.(ticket.id);
-  await notifyTicketClosed(ticket, {
-    customerReason: cfg().telegramCustomerClosedByUserText,
-    extraMessageIds: [msg.message_id]
-  });
+  await notifyTicketClosed(ticket);
   io?.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'user' });
   io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
   io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
@@ -1160,16 +997,15 @@ async function handleCustomerStart(msg) {
     ).catch(() => {});
     return;
   }
-  let ticket = db.getOpenTicketByTelegramCustomer.get(String(msg.from.id));
-  if (ticket) {
-    updateCustomerProfile(msg.from, msg.chat.id);
-    await deleteCustomerMessage(msg.chat.id, msg.message_id);
-    await ensureCustomerControlMessage(ticket, { forceNew: true, repin: true }).catch(() => {});
-    return;
-  }
-  const result = await ensureCustomerTicket(msg, { forceNew: true });
-  ticket = result.ticket;
-  await startCustomerTicketExperience(ticket, { replaceMessageId: msg.message_id });
+  const ticket = db.getOpenTicketByTelegramCustomer.get(String(msg.from.id));
+  if (ticket) updateCustomerProfile(msg.from, msg.chat.id);
+  if (ticket) await ensureCustomerControlMessage(ticket, { repin: true }).catch(() => {});
+  const text = ticket
+    ? `Открытое обращение #${shortId(ticket)} закреплено сверху. Продолжайте писать в этот чат.`
+    : cfg().telegramCustomerWelcomeText;
+  await bot.sendMessage(msg.chat.id, text, ticket ? {} : {
+    reply_markup: customerKeyboard(null)
+  }).catch(() => {});
 }
 
 async function handleCustomerMessage(msg) {
@@ -1191,16 +1027,12 @@ async function handleCustomerMessage(msg) {
   if (command === '/start') return handleCustomerStart(msg);
   if (command === '/status') {
     const ticket = db.getOpenTicketByTelegramCustomer.get(String(msg.from.id));
-    await deleteCustomerMessage(msg.chat.id, msg.message_id);
-    if (ticket) return ensureCustomerControlMessage(ticket, { forceNew: true, repin: true });
-    const latest = db.getLatestTicketByTelegramCustomer.get(String(msg.from.id));
-    if (latest) {
-      return ensureCustomerControlMessage(latest, {
-        preserveExisting: true,
-        repin: true
-      });
-    }
-    return handleCustomerStart(msg);
+    if (ticket) await ensureCustomerControlMessage(ticket, { repin: true }).catch(() => {});
+    return bot.sendMessage(
+      msg.chat.id,
+      ticket ? `🔵 Обращение #${shortId(ticket)} открыто и закреплено сверху.` : 'Открытых обращений нет.',
+      ticket ? {} : { reply_markup: customerKeyboard(null) }
+    );
   }
   if (command === '/close') return closeCustomerTicket(msg);
   if (command === '/new') {
@@ -1210,7 +1042,7 @@ async function handleCustomerMessage(msg) {
       return ensureCustomerControlMessage(existing, { forceNew: true, repin: true });
     }
     const result = await ensureCustomerTicket(msg, { forceNew: true });
-    await startCustomerTicketExperience(result.ticket, { replaceMessageId: msg.message_id });
+    await startCustomerTicketExperience(result.ticket);
     return;
   }
   if (command) {
@@ -1781,9 +1613,7 @@ async function handleCallbackQuery(query) {
         from: query.from,
         chat: query.message.chat
       }, { forceNew: true });
-      return startCustomerTicketExperience(result.ticket, {
-        replaceMessageId: query.message.message_id
-      });
+      return startCustomerTicketExperience(result.ticket);
     }
     return;
   }
@@ -1880,7 +1710,7 @@ async function handleCallbackQuery(query) {
         return;
       }
       await answer({ text: 'Закрепляю кнопку у клиента…' });
-      await ensureCustomerControlMessage(ticket, { forceNew: true, repin: true });
+      await ensureCustomerControlMessage(ticket, { repin: true });
       return;
     }
     if (action === 'close') {
@@ -2417,10 +2247,15 @@ async function closeTicketFromTelegram(ticket) {
     }
   }
   if (fresh?.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    await showClosedCustomerLauncher(
-      fresh,
-      settings.telegramCustomerClosedBySupportText
+    await bot.sendMessage(
+      fresh.telegram_customer_chat_id,
+      formatTemplate(settings.telegramCustomerClosedText, {
+        name: fresh.user_name,
+        shortId: shortId(fresh),
+        id: fresh.id
+      })
     ).catch(() => {});
+    await ensureCustomerControlMessage(fresh).catch(() => {});
   }
   db.closeTelegramThreadsForTicket.run(ticket.id);
   const operator = fresh.assigned_operator_id
@@ -2457,10 +2292,15 @@ async function reopenTicketFromTelegram(ticket, operatorOverride = null) {
     fresh = db.getTicketById.get(fresh.id);
     await reconcileUnassignedTickets();
     if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-      await ensureCustomerControlMessage(fresh, {
-        forceNew: true,
-        repin: true
-      }).catch(() => {});
+      await bot.sendMessage(
+        fresh.telegram_customer_chat_id,
+        formatTemplate(settings.telegramCustomerReopenedText, {
+          name: fresh.user_name,
+          shortId: shortId(fresh),
+          id: fresh.id
+        })
+      ).catch(() => {});
+      await ensureCustomerControlMessage(fresh).catch(() => {});
     }
     observeLatency('reopenMs', startedAt);
     return;
@@ -2492,10 +2332,15 @@ async function reopenTicketFromTelegram(ticket, operatorOverride = null) {
   io?.to('admin').emit('admin_ticket_status', { ticketId: fresh.id, status: 'open' });
   io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
   if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    await ensureCustomerControlMessage(fresh, {
-      forceNew: true,
-      repin: true
-    }).catch(() => {});
+    await bot.sendMessage(
+      fresh.telegram_customer_chat_id,
+      formatTemplate(settings.telegramCustomerReopenedText, {
+        name: fresh.user_name,
+        shortId: shortId(fresh),
+        id: fresh.id
+      })
+    ).catch(() => {});
+    await ensureCustomerControlMessage(fresh).catch(() => {});
   }
   observeLatency('reopenMs', startedAt);
 }
@@ -2507,9 +2352,15 @@ async function notifyTicketClosed(ticket, {
   const thread = db.getTelegramThreadForTicket.get(ticket.id);
   const fresh = db.getTicketById.get(ticket.id) || ticket;
   if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    await showClosedCustomerLauncher(fresh, customerReason, {
-      extraMessageIds
-    }).catch(() => {});
+    await bot.sendMessage(
+      fresh.telegram_customer_chat_id,
+      formatTemplate(cfg().telegramCustomerClosedText, {
+        name: fresh.user_name,
+        shortId: shortId(fresh),
+        id: fresh.id
+      })
+    ).catch(() => {});
+    await ensureCustomerControlMessage(fresh).catch(() => {});
   }
   if (thread) {
     await setTopicStatus(thread, fresh, cfg().telegramClosedEmoji).catch(() => {});
@@ -2541,11 +2392,11 @@ async function autoCloseTicket(ticket, extra = {}) {
   const fresh = db.getTicketById.get(ticket.id) || ticket;
   lifecycle.cancelOperatorWait?.(ticket.id);
   if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    const reason = formatTemplate(
-      cfg().telegramCustomerClosedBySystemText,
-      extra
-    );
-    await showClosedCustomerLauncher(fresh, reason).catch(() => {});
+    await bot.sendMessage(
+      fresh.telegram_customer_chat_id,
+      formatTemplate(cfg().inactivityCloseText, extra)
+    ).catch(() => {});
+    await ensureCustomerControlMessage(fresh).catch(() => {});
   }
   if (thread) {
     await setTopicStatus(thread, fresh, cfg().telegramClosedEmoji).catch(() => {});
@@ -2578,11 +2429,9 @@ async function warnInactivity(ticket, extra = {}) {
     ).catch(() => {});
   }
   if (ticket.source === 'telegram' && ticket.telegram_customer_chat_id) {
-    const text = formatTemplate(cfg().inactivityWarningText, extra);
-    await sendCustomerRichNotice(
-      ticket,
-      `## ⚠️ Тикет скоро закроется\n\n${text}`,
-      `⚠️ Тикет скоро закроется\n\n${text}`
+    await bot.sendMessage(
+      ticket.telegram_customer_chat_id,
+      formatTemplate(cfg().inactivityWarningText, extra)
     ).catch(() => {});
   }
 }
@@ -2941,7 +2790,7 @@ module.exports = {
   createTopic,
   forwardMessage,
   deliverCustomerReply,
-  sendCustomerControl,
+  sendCustomerControl: ensureCustomerControlMessage,
   notifyTicketClosed,
   notifyTicketReopened,
   autoCloseTicket,
