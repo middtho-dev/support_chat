@@ -25,6 +25,10 @@ PUBLIC_URL=https://support.example.com
 After the container starts, every ID listed in `TELEGRAM_ADMIN_IDS` must open a
 private chat with the bot and send `/start`. This registers the operator and
 allows the bot to create per-ticket private topics. No Telegram group is needed.
+Users not listed in `TELEGRAM_ADMIN_IDS` can contact support through the same
+private bot chat. Their first message creates a Telegram-source ticket, while
+operator replies are delivered back to that chat. This channel and its texts
+are controlled in the admin settings without restarting the container.
 
 `PUBLIC_URL` enables the Mini App button. Set `TELEGRAM_WEBAPP_URL` only when
 the Mini App uses a different HTTPS URL.
@@ -101,10 +105,11 @@ Expected values in the `/health` response:
 ```
 
 Also verify that `registeredOperators` matches the operators who sent `/start`,
-and that `unassignedTickets` does not keep growing. Delivery failures and retry
-counters are available under `telegram.delivery`. Backup, cleanup and disk
-thresholds are configured in the admin UI; only `BACKUP_DIR` remains a
-server-controlled path.
+that `unassignedTickets` does not keep growing, and that
+`customerChannelEnabled` is `true`. Delivery failures and separate customer
+reply retry counters are available under `telegram.delivery`. Backup, cleanup,
+Telegram customer behavior, and disk thresholds are configured in the admin
+UI; only `BACKUP_DIR` remains a server-controlled path.
 
 ## Notes
 

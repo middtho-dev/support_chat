@@ -61,6 +61,14 @@ const DEFAULTS = {
   telegramUnansweredReminderEnabled: true,
   telegramUnansweredReminderMinutes: 3,
   telegramUnansweredRepeatMinutes: 5,
+  telegramCustomerEnabled: true,
+  telegramCustomerFilesEnabled: true,
+  telegramCustomerDeliverReplies: true,
+  telegramCustomerReopenClosed: true,
+  telegramCustomerWelcomeText: 'Здравствуйте! Напишите вопрос, отправьте фото или файл — поддержка ответит здесь.',
+  telegramCustomerNewTicketText: '✅ Обращение создано. Оператор уже получил уведомление.',
+  telegramCustomerReopenedText: '🔔 Ваше обращение снова открыто.',
+  telegramCustomerClosedText: 'Обращение закрыто. Напишите новое сообщение, чтобы снова обратиться в поддержку.',
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
   telegramNewEmoji: '❗',
   telegramOpenEmoji: '🔵',
@@ -137,6 +145,14 @@ const KEY_MAP = {
   telegramUnansweredReminderEnabled: 'telegram_unanswered_reminder_enabled',
   telegramUnansweredReminderMinutes: 'telegram_unanswered_reminder_minutes',
   telegramUnansweredRepeatMinutes: 'telegram_unanswered_repeat_minutes',
+  telegramCustomerEnabled: 'telegram_customer_enabled',
+  telegramCustomerFilesEnabled: 'telegram_customer_files_enabled',
+  telegramCustomerDeliverReplies: 'telegram_customer_deliver_replies',
+  telegramCustomerReopenClosed: 'telegram_customer_reopen_closed',
+  telegramCustomerWelcomeText: 'telegram_customer_welcome_text',
+  telegramCustomerNewTicketText: 'telegram_customer_new_ticket_text',
+  telegramCustomerReopenedText: 'telegram_customer_reopened_text',
+  telegramCustomerClosedText: 'telegram_customer_closed_text',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -226,6 +242,10 @@ function normalize(input = {}) {
   if (cfg.offhoursRejectText === LEGACY_OFFHOURS_REJECT) cfg.offhoursRejectText = DEFAULTS.offhoursRejectText;
   cfg.inactivityWarningText = sanitizeText(cfg.inactivityWarningText, DEFAULTS.inactivityWarningText, 1000);
   cfg.inactivityCloseText = sanitizeText(cfg.inactivityCloseText, DEFAULTS.inactivityCloseText, 1000);
+  cfg.telegramCustomerWelcomeText = sanitizeText(cfg.telegramCustomerWelcomeText, DEFAULTS.telegramCustomerWelcomeText, 1500);
+  cfg.telegramCustomerNewTicketText = sanitizeText(cfg.telegramCustomerNewTicketText, DEFAULTS.telegramCustomerNewTicketText, 1000);
+  cfg.telegramCustomerReopenedText = sanitizeText(cfg.telegramCustomerReopenedText, DEFAULTS.telegramCustomerReopenedText, 1000);
+  cfg.telegramCustomerClosedText = sanitizeText(cfg.telegramCustomerClosedText, DEFAULTS.telegramCustomerClosedText, 1000);
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
   cfg.telegramReopenButtonStyle = allowedButtonStyles.has(cfg.telegramReopenButtonStyle) ? cfg.telegramReopenButtonStyle : DEFAULTS.telegramReopenButtonStyle;

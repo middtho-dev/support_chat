@@ -129,6 +129,29 @@ function createMaintenance({
     };
   }
 
+  function healthStatus() {
+    const status = publicStatus();
+    return {
+      healthy: status.healthy,
+      backupOverdue: status.backupOverdue,
+      diskLevel: status.diskLevel,
+      disk: status.disk ? {
+        usedPercent: status.disk.usedPercent,
+        freeBytes: status.disk.freeBytes
+      } : null,
+      uploads: status.uploads ? {
+        files: status.uploads.files,
+        bytes: status.uploads.bytes
+      } : null,
+      lastBackupAt: status.lastBackupAt,
+      lastBackupError: status.lastBackupError,
+      lastCleanupAt: status.lastCleanupAt,
+      lastCleanupError: status.lastCleanupError,
+      backupInProgress: status.backupInProgress,
+      cleanupInProgress: status.cleanupInProgress
+    };
+  }
+
   async function writeManifest() {
     await fs.promises.mkdir(backupDir, { recursive: true });
     const temp = `${manifestPath}.tmp`;
@@ -361,6 +384,7 @@ function createMaintenance({
     init,
     shutdown,
     status: publicStatus,
+    healthStatus,
     refreshStatus,
     runBackup,
     runCleanup,
