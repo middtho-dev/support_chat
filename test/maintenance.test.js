@@ -66,6 +66,11 @@ test('backup is verified and orphan cleanup preserves referenced uploads', async
   assert.equal(fs.existsSync(path.join(uploadsDir, 'orphan.jpg')), false);
   assert.equal(maintenance.status().lastBackupError, null);
   assert.equal(maintenance.status().lastCleanupError, null);
+  const publicHealth = maintenance.healthStatus();
+  assert.equal(publicHealth.healthy, true);
+  assert.equal('backupDir' in publicHealth, false);
+  assert.equal('lastBackupFile' in publicHealth, false);
+  assert.equal('config' in publicHealth, false);
 });
 
 test('runtime maintenance settings are applied without recreation', () => {

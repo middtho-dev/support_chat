@@ -165,7 +165,9 @@ input:focus,textarea:focus,select:focus{
 }
 .avatar.closed::after{background:var(--muted)}
 .avatar.wait::after{background:var(--amber)}
-.tname{font-size:14px;font-weight:680;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tname{display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;font-weight:680}
+.tname>span:first-child{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-channel{height:18px;padding:0 6px;display:inline-flex;align-items:center;flex:0 0 auto;border-radius:99px;background:rgba(42,171,238,.14);color:#8ed8fa;font-size:8px;font-weight:850;letter-spacing:.05em}
 .tlast{margin-top:4px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .time{color:var(--muted);font-size:10.5px;white-space:nowrap;text-align:right}
 .badge{
@@ -241,6 +243,20 @@ input:focus,textarea:focus,select:focus{
 .ticket-card-stats>div{min-width:0;padding:10px;border-radius:12px;background:var(--panel2)}
 .ticket-card-stats b{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-card-stats span{display:block;margin-top:3px;color:var(--muted);font-size:9px;text-transform:uppercase}
+.ticket-customer{margin:0 0 14px;padding:13px;border:1px solid rgba(42,171,238,.18);border-radius:14px;background:rgba(42,171,238,.055)}
+.ticket-customer.compact{display:flex;align-items:center;gap:9px;padding:10px 12px;color:var(--muted);font-size:11px}
+.ticket-customer-title{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.ticket-customer-title b{font-size:12px}
+.ticket-source-badge{display:inline-flex;align-items:center;height:23px;padding:0 8px;border-radius:99px;background:rgba(42,171,238,.15);color:#8ed8fa;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.ticket-source-badge.web{background:rgba(255,255,255,.07);color:var(--soft)}
+.ticket-customer-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px;margin:0}
+.ticket-customer-grid>div{min-width:0;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.055)}
+.ticket-customer-grid dt{color:var(--muted);font-size:9px;text-transform:uppercase}
+.ticket-customer-grid dd{margin:3px 0 0;color:var(--soft);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-customer-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.customer-action{min-height:34px;padding:0 11px;border:1px solid var(--line);border-radius:10px;display:inline-flex;align-items:center;justify-content:center;background:var(--panel3);color:var(--soft);font-size:10.5px;font-weight:750;text-decoration:none}
+.customer-action.primary{border-color:rgba(42,171,238,.25);background:rgba(42,171,238,.14);color:#8ed8fa}
+.customer-action:hover{background:#29404c}
 .ticket-card-fields{display:grid;gap:10px}
 .meta-field{display:grid;gap:4px;min-width:0}
 .meta-field label{color:var(--muted);font-size:10px;text-transform:uppercase}
@@ -342,6 +358,49 @@ input:focus,textarea:focus,select:focus{
 .save,.add{
   min-height:39px;padding:0 14px;border-radius:11px;background:var(--blue);color:white;font-size:12px;font-weight:700;
 }
+.settings-section{padding-bottom:82px}
+.settings-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:16px}
+.settings-hero h2{margin:3px 0 5px}
+.settings-hero p{max-width:680px;margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.settings-eyebrow{color:#72cef8;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.12em}
+.settings-hero-actions{display:flex;gap:7px;flex:0 0 auto}
+.settings-toolbar{position:sticky;top:-23px;z-index:8;margin:0 -2px 14px;padding:10px 2px 9px;background:linear-gradient(var(--bg) 78%,transparent)}
+.settings-toolbar>input{width:100%;height:42px;padding:0 14px;border-radius:13px;background:var(--panel)}
+.settings-filters{display:flex;gap:6px;margin-top:8px;overflow:auto;scrollbar-width:none}
+.settings-filters::-webkit-scrollbar{display:none}
+.settings-filters button{height:32px;padding:0 11px;flex:0 0 auto;border:1px solid transparent;border-radius:99px;background:var(--panel);color:var(--muted);font-size:10px;font-weight:750}
+.settings-filters button.on{border-color:rgba(42,171,238,.23);background:rgba(42,171,238,.14);color:#8ed8fa}
+.settings-grid{align-items:start}
+.settings-card{padding:0;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.11)}
+.settings-card-head{display:flex;align-items:flex-start;gap:10px;padding:15px 16px 13px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.012)}
+.settings-card-head h3{margin:0 0 4px;font-size:14px}
+.settings-card-head p{margin:0;color:var(--muted);font-size:10.5px;line-height:1.45}
+.settings-card-mark{width:9px;height:9px;flex:0 0 9px;margin-top:3px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 5px rgba(42,171,238,.09)}
+.settings-card-mark.violet{background:#9f75ff;box-shadow:0 0 0 5px rgba(159,117,255,.09)}
+.settings-card-mark.amber{background:var(--amber);box-shadow:0 0 0 5px rgba(240,180,41,.09)}
+.settings-card-mark.green{background:var(--green);box-shadow:0 0 0 5px rgba(37,211,102,.09)}
+.settings-card-body{padding:14px 16px 16px}
+.settings-card .field{margin-bottom:12px}
+.settings-card .field>label{font-size:10.5px}
+.settings-card .field input,.settings-card .field textarea,.settings-card .field select{border:1px solid rgba(255,255,255,.045);background:var(--panel3)}
+.setting-toggle{min-height:42px;margin:0 0 7px;padding:7px 9px;border:1px solid rgba(255,255,255,.045);border-radius:11px;background:rgba(255,255,255,.018)}
+.setting-toggle span{flex:1;line-height:1.35}
+.setting-disabled{opacity:.4}
+.settings-note{margin:0 0 9px;padding:9px 10px;border-radius:10px;background:rgba(42,171,238,.07);color:var(--muted);font-size:10px;line-height:1.45}
+.settings-empty{display:none;padding:38px 18px;text-align:center;color:var(--muted)}
+.settings-empty.on{display:block}
+.settings-variables{margin:14px 0!important;font-size:10px!important}
+.settings-savebar{
+  position:sticky;z-index:12;bottom:-23px;min-height:62px;margin:12px -2px -23px;padding:10px 12px;
+  display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-bottom:0;border-radius:15px 15px 0 0;
+  background:rgba(17,27,33,.96);box-shadow:0 -14px 36px rgba(0,0,0,.24);backdrop-filter:blur(16px);
+}
+.settings-savebar>div{min-width:0;flex:1}
+.settings-savebar b,.settings-savebar span{display:block}
+.settings-savebar b{font-size:11.5px}
+.settings-savebar span{margin-top:3px;color:var(--muted);font-size:9.5px}
+.settings-savebar button{flex:0 0 auto}
+.settings-savebar button:disabled{opacity:.42;cursor:default}
 .template-list{display:flex;flex-direction:column;gap:8px}
 .tpl{display:grid;grid-template-columns:160px minmax(0,1fr) 38px;gap:7px}
 .tpl input{height:38px;padding:0 10px;border-radius:10px}
@@ -441,6 +500,8 @@ input:focus,textarea:focus,select:focus{
     width:100%;max-height:82dvh;padding:16px 13px calc(16px + env(safe-area-inset-bottom,0px));
     border-radius:20px 20px 0 0;border-bottom:0;
   }
+  .ticket-customer-grid{grid-template-columns:1fr}
+  .ticket-customer-actions{display:grid;grid-template-columns:1fr}
   .msgs{padding:10px 8px}.msg{max-width:88%}.bubble{font-size:12.5px}
   .composer{padding:7px 7px calc(7px + env(safe-area-inset-bottom,0px))}
   .compose-row{gap:3px}
@@ -457,6 +518,15 @@ input:focus,textarea:focus,select:focus{
   .maintenance-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
   .health-stat{padding:11px}.health-stat b{font-size:17px}
   .health-details>div{gap:8px}
+  .settings-section{padding-bottom:74px}
+  .settings-hero{align-items:center}.settings-hero p{display:none}
+  .settings-hero-actions{display:grid;grid-template-columns:1fr 1fr;width:100%}
+  .settings-hero{flex-wrap:wrap}
+  .settings-toolbar{top:-14px;margin:0 -1px 10px;padding-top:5px}
+  .settings-card-head{padding:13px}.settings-card-body{padding:12px 13px 14px}
+  .settings-savebar{bottom:-14px;margin:10px -1px -14px;padding:9px}
+  .settings-savebar span{display:none}
+  .settings-savebar .ghost{padding:0 8px}
   .toast{bottom:calc(68px + env(safe-area-inset-bottom,0px))}
 }
 

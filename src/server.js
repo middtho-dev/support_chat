@@ -698,18 +698,48 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('admin_update_settings', (payload = {}) => {
-    if (!socket.isAdmin) return;
-    const cfg = saveSettings(payload);
-    const visibleCfg = {
-      ...cfg,
-      telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
-    };
-    socket.emit('admin_settings', visibleCfg);
-    io.to('admin').emit('admin_settings_updated', visibleCfg);
-    maintenance.refreshStatus({ alertDisk: false }).then(status => {
-      io.to('admin').emit('maintenance_updated', status);
-    }).catch(() => {});
+  socket.on('admin_update_settings', (payload = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    try {
+      const cfg = saveSettings(payload);
+      const visibleCfg = {
+        ...cfg,
+        telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
+      };
+      socket.broadcast.to('admin').emit('admin_settings_updated', visibleCfg);
+      maintenance.refreshStatus({ alertDisk: false }).then(status => {
+        io.to('admin').emit('maintenance_updated', status);
+      }).catch(() => {});
+      ack?.({ ok: true, settings: visibleCfg, savedAt: new Date().toISOString() });
+    } catch (error) {
+      console.error('[Settings] save:', error);
+      ack?.({ error: 'Не удалось сохранить настройки' });
+    }
+  });
+
+  socket.on('admin_test_operational_alert', async (_payload = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    const cfg = loadSettings();
+    const telegramStatus = typeof telegram.status === 'function' ? telegram.status() : null;
+    if (!cfg.operationalAlertsEnabled) {
+      return ack?.({ error: 'Сначала включите и сохраните системные уведомления' });
+    }
+    if (!telegramStatus?.configured || !telegramStatus?.connected) {
+      return ack?.({ error: 'Telegram-бот сейчас не подключён' });
+    }
+    if (telegramStatus.mode === 'private' && !telegramStatus.operatorAccessConfigured) {
+      return ack?.({ error: 'В TELEGRAM_ADMIN_IDS не настроен ни один оператор' });
+    }
+    try {
+      await telegram.notifyOperationalIssue(
+        `manual-test-${Date.now()}`,
+        'Тест системных уведомлений',
+        'Если вы видите это сообщение, канал контроля работает.'
+      );
+      ack?.({ ok: true });
+    } catch (error) {
+      ack?.({ error: error?.message || 'Не удалось отправить тестовое уведомление' });
+    }
   });
 
   socket.on('admin_reply', async (data = {}, ack) => {
@@ -749,13 +779,19 @@ io.on('connection', (socket) => {
     cancelOperatorWait(ticketId);
     broadcastAdminTickets();
     push.send(ticketId, text || safeFileName || 'Новое сообщение').catch(() => {});
-    telegram.forwardMessage(db.getTicketById.get(ticketId), message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
+    const freshTicket = db.getTicketById.get(ticketId);
+    telegram.forwardMessage(freshTicket, message).catch(e => console.error('[Admin] forwardMessage:', e?.message));
+    telegram.deliverCustomerReply?.(freshTicket, message).catch(e => {
+      console.error('[Admin] customer delivery:', e?.message);
+    });
     ack?.({ ok: true, id: msgId });
   });
 
   socket.on('admin_typing', ({ ticketId }) => {
     if (!socket.isAdmin) return;
     io.to(`ticket:${ticketId}`).emit('typing_support');
+    const ticket = db.getTicketById.get(ticketId);
+    telegram.sendCustomerTyping?.(ticket).catch(() => {});
   });
 
   socket.on('admin_close_ticket', ({ ticketId }) => {
@@ -774,6 +810,14 @@ io.on('connection', (socket) => {
     if (!socket.isAdmin) return;
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket || ticket.status !== 'closed') return;
+    if (ticket.source === 'telegram' && ticket.telegram_customer_id) {
+      const existing = db.getOpenTicketByTelegramCustomer.get(String(ticket.telegram_customer_id));
+      if (existing && existing.id !== ticket.id) {
+        return socket.emit('admin_error', {
+          message: `У этого Telegram-клиента уже открыт тикет #${existing.id.slice(0, 8)}`
+        });
+      }
+    }
     if (usesLegacyTelegramTopics() && ticket.telegram_topic_deleted) {
       return socket.emit('admin_error', { message: loadSettings().telegramTopicDeletedAdminText });
     }
@@ -885,7 +929,7 @@ app.get('/health', (req, res) => res.json({
   ok: true,
   uptime: Math.floor(process.uptime()),
   telegram: typeof telegram.status === 'function' ? telegram.status() : null,
-  maintenance: maintenance.status()
+  maintenance: maintenance.healthStatus()
 }));
 
 const PORT = process.env.PORT || 3000;

@@ -25,6 +25,17 @@
     return `${Math.floor(sec / 86400)} д`;
   };
   const fmtTime = iso => iso ? parseServerDate(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'нет ответа';
+  const telegramProfile = ticket => {
+    const id = String(ticket?.telegram_customer_id || '');
+    const username = String(ticket?.telegram_customer_username || '').replace(/^@/, '');
+    const validUsername = /^[a-zA-Z0-9_]{5,32}$/.test(username) ? username : '';
+    return {
+      id,
+      username: validUsername,
+      directUrl: id ? `tg://user?id=${encodeURIComponent(id)}` : '',
+      profileUrl: validUsername ? `https://t.me/${validUsername}` : ''
+    };
+  };
 
   function ensureMetaPanel() {
     let el = $('ticket-meta');
@@ -68,6 +79,25 @@
     }
     dialog.classList.toggle('open', cardOpen);
     dialog.setAttribute('aria-hidden', cardOpen ? 'false' : 'true');
+    const telegram = telegramProfile(currentTicket);
+    const customerDetails = currentTicket.source === 'telegram' && telegram.id
+      ? `<div class="ticket-customer">
+          <div class="ticket-customer-title"><span class="ticket-source-badge">Telegram</span><b>Профиль клиента</b></div>
+          <dl class="ticket-customer-grid">
+            <div><dt>Telegram ID</dt><dd>${esc(telegram.id)}</dd></div>
+            <div><dt>Username</dt><dd>${telegram.username ? `@${esc(telegram.username)}` : 'не указан'}</dd></div>
+            <div><dt>Имя</dt><dd>${esc(currentTicket.telegram_customer_first_name || '—')}</dd></div>
+            <div><dt>Фамилия</dt><dd>${esc(currentTicket.telegram_customer_last_name || '—')}</dd></div>
+            <div><dt>Язык</dt><dd>${esc(currentTicket.telegram_customer_language_code || '—')}</dd></div>
+            <div><dt>Chat ID</dt><dd>${esc(currentTicket.telegram_customer_chat_id || '—')}</dd></div>
+          </dl>
+          <div class="ticket-customer-actions">
+            <a class="customer-action primary" href="${esc(telegram.directUrl)}">Написать лично</a>
+            ${telegram.profileUrl ? `<a class="customer-action" href="${esc(telegram.profileUrl)}" target="_blank" rel="noopener noreferrer">Открыть профиль</a>` : ''}
+            <button id="copy-telegram-id" class="customer-action" type="button">Копировать ID</button>
+          </div>
+        </div>`
+      : `<div class="ticket-customer compact"><span class="ticket-source-badge web">Сайт</span><span>Обращение создано в веб-чате</span></div>`;
     dialog.innerHTML = `
       <button class="ticket-card-backdrop" type="button" aria-label="Закрыть карточку"></button>
       <section class="ticket-card-sheet" role="dialog" aria-modal="true" aria-labelledby="ticket-card-title">
@@ -80,6 +110,7 @@
           <div><b>${esc(timeAgo(currentTicket.last_activity || currentTicket.created_at))}</b><span>Активность</span></div>
           <div><b>${esc(firstResponse ? fmtTime(firstResponse.created_at) : 'нет')}</b><span>Первый ответ</span></div>
         </div>
+        ${customerDetails}
         <div class="ticket-card-fields">
           <div class="meta-field"><label for="meta-tags">Метки через запятую</label><input id="meta-tags" maxlength="180" value="${esc(tagsArray(currentTicket).join(', '))}" placeholder="vpn, оплата, срочно"></div>
           <div class="meta-field"><label for="meta-note">Внутренняя заметка</label><textarea id="meta-note" maxlength="1200" rows="4" placeholder="Видно только оператору">${esc(currentTicket.admin_note || '')}</textarea></div>
@@ -96,7 +127,28 @@
     $('ticket-card-close')?.addEventListener('click', closeTicketCard);
     $('meta-cancel')?.addEventListener('click', closeTicketCard);
     $('meta-save')?.addEventListener('click', saveTicketMeta);
+    $('copy-telegram-id')?.addEventListener('click', () => copyTelegramId(telegram.id));
     dialog.querySelectorAll('[data-tag-preset]').forEach(btn => btn.addEventListener('click', () => addPresetTag(btn.dataset.tagPreset)));
+  }
+
+  async function copyTelegramId(id) {
+    if (!id) return;
+    try {
+      await navigator.clipboard.writeText(id);
+    } catch {
+      const input = document.createElement('textarea');
+      input.value = id;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    const button = $('copy-telegram-id');
+    if (button) {
+      const original = button.textContent;
+      button.textContent = 'ID скопирован';
+      setTimeout(() => { if (button.isConnected) button.textContent = original; }, 1500);
+    }
   }
 
   function openTicketCard() {

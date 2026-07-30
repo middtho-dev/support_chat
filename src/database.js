@@ -64,6 +64,32 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_tags TEXT DEFAULT ''`); } ca
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_note TEXT DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN assigned_operator_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_last_reminded_at DATETIME`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN source TEXT DEFAULT 'web'`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_id TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_chat_id TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_username TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_first_name TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_last_name TEXT`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_language_code TEXT`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_chat_id TEXT`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_message_id INTEGER`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_message_id INTEGER`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_attempts INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_last_error TEXT`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_next_retry_at DATETIME`); } catch {}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_tickets_telegram_customer
+    ON tickets(telegram_customer_id, status, updated_at);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_open_telegram_customer
+    ON tickets(telegram_customer_id)
+    WHERE status = 'open' AND telegram_customer_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_telegram_source
+    ON messages(telegram_source_chat_id, telegram_source_message_id)
+    WHERE telegram_source_chat_id IS NOT NULL AND telegram_source_message_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_messages_customer_delivery
+    ON messages(telegram_customer_message_id, telegram_customer_next_retry_at, created_at);
+`);
 
 // Private Telegram operator inbox. A private topic id is scoped to its chat, so
 // never store or look it up without the operator chat id.
@@ -160,6 +186,36 @@ module.exports = {
   createTicket: db.prepare(`
     INSERT INTO tickets (id, user_name, session_token, status)
     VALUES (?, ?, ?, 'open')
+  `),
+  createTelegramTicket: db.prepare(`
+    INSERT INTO tickets (
+      id, user_name, session_token, status, source,
+      telegram_customer_id, telegram_customer_chat_id,
+      telegram_customer_username, telegram_customer_first_name,
+      telegram_customer_last_name, telegram_customer_language_code
+    )
+    VALUES (?, ?, ?, 'open', 'telegram', ?, ?, ?, ?, ?, ?)
+  `),
+  getOpenTicketByTelegramCustomer: db.prepare(`
+    SELECT * FROM tickets
+    WHERE telegram_customer_id = ? AND status = 'open'
+    ORDER BY updated_at DESC LIMIT 1
+  `),
+  getLatestTicketByTelegramCustomer: db.prepare(`
+    SELECT * FROM tickets
+    WHERE telegram_customer_id = ?
+    ORDER BY updated_at DESC LIMIT 1
+  `),
+  updateTelegramCustomerProfile: db.prepare(`
+    UPDATE tickets SET
+      user_name = ?,
+      telegram_customer_chat_id = ?,
+      telegram_customer_username = ?,
+      telegram_customer_first_name = ?,
+      telegram_customer_last_name = ?,
+      telegram_customer_language_code = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE telegram_customer_id = ? AND status = 'open'
   `),
 
   getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
@@ -396,6 +452,19 @@ module.exports = {
     SELECT * FROM messages
     WHERE telegram_chat_id = ? AND telegram_message_id = ?
   `),
+  getMessageByTelegramSource: db.prepare(`
+    SELECT * FROM messages
+    WHERE telegram_source_chat_id = ? AND telegram_source_message_id = ?
+  `),
+  getMessageByTelegramCustomerDelivery: db.prepare(`
+    SELECT * FROM messages
+    WHERE ticket_id = ? AND telegram_customer_message_id = ?
+  `),
+  setTelegramMessageSource: db.prepare(`
+    UPDATE messages
+    SET telegram_source_chat_id = ?, telegram_source_message_id = ?
+    WHERE id = ?
+  `),
 
   getMessageById: db.prepare(`SELECT * FROM messages WHERE id = ?`),
 
@@ -440,6 +509,34 @@ module.exports = {
     UPDATE messages SET telegram_attempts = COALESCE(telegram_attempts, 0) + 1,
       telegram_last_error = ?, telegram_next_retry_at = datetime('now', ?)
     WHERE id = ? AND telegram_message_id IS NULL
+  `),
+  getPendingTelegramCustomerReplies: db.prepare(`
+    SELECT m.*, t.telegram_customer_chat_id, t.telegram_customer_id,
+      t.status AS ticket_status, t.source AS ticket_source
+    FROM messages m
+    JOIN tickets t ON t.id = m.ticket_id
+    WHERE m.sender = 'support'
+      AND t.source = 'telegram'
+      AND t.telegram_customer_chat_id IS NOT NULL
+      AND m.telegram_customer_message_id IS NULL
+      AND (m.telegram_customer_next_retry_at IS NULL
+        OR m.telegram_customer_next_retry_at <= CURRENT_TIMESTAMP)
+    ORDER BY m.created_at ASC
+    LIMIT ?
+  `),
+  updateTelegramCustomerDelivery: db.prepare(`
+    UPDATE messages SET
+      telegram_customer_message_id = ?,
+      telegram_customer_last_error = NULL,
+      telegram_customer_next_retry_at = NULL
+    WHERE id = ?
+  `),
+  markTelegramCustomerAttempt: db.prepare(`
+    UPDATE messages SET
+      telegram_customer_attempts = COALESCE(telegram_customer_attempts, 0) + 1,
+      telegram_customer_last_error = ?,
+      telegram_customer_next_retry_at = datetime('now', ?)
+    WHERE id = ? AND telegram_customer_message_id IS NULL
   `),
   updateMessageReactions: db.prepare(`UPDATE messages SET reactions = ? WHERE id = ?`),
 
