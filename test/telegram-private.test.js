@@ -142,6 +142,41 @@ test('empty ticket creates a topic after a transient Telegram failure', async ()
   assert.match(intro.markdown, /Создан/);
 });
 
+test('Telegram service messages are removed before bot and topic routing', async () => {
+  const serviceUpdates = [
+    { pinned_message: { message_id: 1 } },
+    { forum_topic_edited: { name: '🔵 Тикет' } },
+    { forum_topic_closed: {} },
+    { forum_topic_reopened: {} },
+    { general_forum_topic_hidden: {} },
+    { general_forum_topic_unhidden: {} }
+  ];
+
+  for (const [index, service] of serviceUpdates.entries()) {
+    const serviceMessageId = 900 + index;
+    await fakeBot.handlers.message({
+      message_id: serviceMessageId,
+      message_thread_id: 501,
+      chat: { id: 7001, type: 'private' },
+      from: { id: 9999, is_bot: true },
+      ...service
+    });
+    assert.ok(deleted.some(item =>
+      item.chatId === '7001' && item.messageId === serviceMessageId
+    ));
+  }
+
+  saveSettings({ telegramDeleteRenameNotices: false });
+  await fakeBot.handlers.message({
+    message_id: 950,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 9999, is_bot: true },
+    pinned_message: { message_id: 2 }
+  });
+  assert.equal(deleted.some(item => item.messageId === 950), false);
+  saveSettings({ telegramDeleteRenameNotices: true });
+});
+
 test('unanswered reminder is loud and stops after a support response', async () => {
   const id = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
   db.createTicket.run(id, 'Ожидающий клиент', 'session-reminder-test');
