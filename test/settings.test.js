@@ -70,3 +70,10 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.telegramCustomerReopenClosed, false);
   assert.equal(loaded.telegramCustomerClosedText, 'Тикет закрыт');
 });
+
+test('legacy Telegram ticket confirmation is upgraded to the pinned card template', () => {
+  const saved = saveSettings({
+    telegramCustomerNewTicketText: '✅ Обращение создано. Оператор уже получил уведомление.'
+  });
+  assert.match(saved.telegramCustomerNewTicketText, /\{shortId\}/);
+});

@@ -66,7 +66,7 @@ const DEFAULTS = {
   telegramCustomerDeliverReplies: true,
   telegramCustomerReopenClosed: true,
   telegramCustomerWelcomeText: 'Здравствуйте! Напишите вопрос, отправьте фото или файл — поддержка ответит здесь.',
-  telegramCustomerNewTicketText: '✅ Обращение создано. Оператор уже получил уведомление.',
+  telegramCustomerNewTicketText: '🎫 Обращение #{shortId} создано\n\nОператор уже получил уведомление. Когда вопрос будет решён, закройте обращение кнопкой ниже.',
   telegramCustomerReopenedText: '🔔 Ваше обращение снова открыто.',
   telegramCustomerClosedText: 'Обращение закрыто. Напишите новое сообщение, чтобы снова обратиться в поддержку.',
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
@@ -177,6 +177,7 @@ const KEY_MAP = {
 const TYPES = Object.fromEntries(Object.entries(DEFAULTS).map(([key, value]) => [key, typeof value]));
 const LEGACY_OFFHOURS_BANNER = 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.';
 const LEGACY_OFFHOURS_REJECT = 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.';
+const LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET = '✅ Обращение создано. Оператор уже получил уведомление.';
 
 function clamp(n, min, max, fallback) {
   const value = Number(n);
@@ -244,6 +245,9 @@ function normalize(input = {}) {
   cfg.inactivityCloseText = sanitizeText(cfg.inactivityCloseText, DEFAULTS.inactivityCloseText, 1000);
   cfg.telegramCustomerWelcomeText = sanitizeText(cfg.telegramCustomerWelcomeText, DEFAULTS.telegramCustomerWelcomeText, 1500);
   cfg.telegramCustomerNewTicketText = sanitizeText(cfg.telegramCustomerNewTicketText, DEFAULTS.telegramCustomerNewTicketText, 1000);
+  if (cfg.telegramCustomerNewTicketText === LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET) {
+    cfg.telegramCustomerNewTicketText = DEFAULTS.telegramCustomerNewTicketText;
+  }
   cfg.telegramCustomerReopenedText = sanitizeText(cfg.telegramCustomerReopenedText, DEFAULTS.telegramCustomerReopenedText, 1000);
   cfg.telegramCustomerClosedText = sanitizeText(cfg.telegramCustomerClosedText, DEFAULTS.telegramCustomerClosedText, 1000);
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
