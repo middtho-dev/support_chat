@@ -93,13 +93,18 @@ Expected values in the `/health` response:
     "connected": true,
     "threadedModeEnabled": true,
     "richMessagesAvailable": true
+  },
+  "maintenance": {
+    "healthy": true
   }
 }
 ```
 
 Also verify that `registeredOperators` matches the operators who sent `/start`,
 and that `unassignedTickets` does not keep growing. Delivery failures and retry
-counters are available under `telegram.delivery`.
+counters are available under `telegram.delivery`. Backup, cleanup and disk
+thresholds are configured in the admin UI; only `BACKUP_DIR` remains a
+server-controlled path.
 
 ## Notes
 

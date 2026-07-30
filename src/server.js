@@ -6,11 +6,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { v4: uuidv4 } = require('uuid');
 const db = require('./database');
 const telegram = require('./telegram');
 const push = require('./push');
 const { loadSettings, saveSettings } = require('./settings');
+const { createMaintenance } = require('./maintenance');
+const uuidv4 = () => crypto.randomUUID();
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +28,16 @@ const TELEGRAM_ADMIN_IDS = new Set(String(process.env.TELEGRAM_ADMIN_IDS || '').
 const miniAdminSessions = new Map();
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+const maintenance = createMaintenance({
+  database: db,
+  uploadsDir: UPLOADS_DIR,
+  notify: (...args) => telegram.notifyOperationalIssue?.(...args) || Promise.resolve(),
+  io,
+  getSettings: loadSettings
+});
+maintenance.init().catch(error => {
+  console.error('[Maintenance] init:', error?.message || error);
+});
 
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg','.jpeg','.jpe','.jfif','.png','.gif','.webp']);
 const IMG_EXTS = new Set([
@@ -274,6 +285,36 @@ app.post('/api/admin/telegram-auth', (req, res) => {
   const token = uuidv4();
   miniAdminSessions.set(token, { userId: String(user.id), expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
   res.json({ adminSessionToken: token, user: { id: user.id, first_name: user.first_name || '', username: user.username || '' } });
+});
+
+app.get('/api/admin/maintenance', async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    await maintenance.refreshStatus({ alertDisk: false });
+    res.json(maintenance.status());
+  } catch (error) {
+    res.status(500).json({ error: error?.message || 'Maintenance status failed' });
+  }
+});
+
+app.post('/api/admin/maintenance/backup', async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await maintenance.runBackup('manual');
+    res.json({ ...result, status: maintenance.status() });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || 'Backup failed', status: maintenance.status() });
+  }
+});
+
+app.post('/api/admin/maintenance/cleanup', async (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await maintenance.runCleanup('manual');
+    res.json({ ...result, status: maintenance.status() });
+  } catch (error) {
+    res.status(500).json({ error: error?.message || 'Cleanup failed', status: maintenance.status() });
+  }
 });
 
 function isWithinWorkHours(cfg = loadSettings()) {
@@ -666,6 +707,9 @@ io.on('connection', (socket) => {
     };
     socket.emit('admin_settings', visibleCfg);
     io.to('admin').emit('admin_settings_updated', visibleCfg);
+    maintenance.refreshStatus({ alertDisk: false }).then(status => {
+      io.to('admin').emit('maintenance_updated', status);
+    }).catch(() => {});
   });
 
   socket.on('admin_reply', async (data = {}, ack) => {
@@ -840,7 +884,8 @@ app.use((err, req, res, next) => {
 app.get('/health', (req, res) => res.json({
   ok: true,
   uptime: Math.floor(process.uptime()),
-  telegram: typeof telegram.status === 'function' ? telegram.status() : null
+  telegram: typeof telegram.status === 'function' ? telegram.status() : null,
+  maintenance: maintenance.status()
 }));
 
 const PORT = process.env.PORT || 3000;

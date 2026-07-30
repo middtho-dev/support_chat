@@ -33,6 +33,19 @@ const DEFAULTS = {
   inactivityWarningText: 'Нет активности 45 минут — обращение будет закрыто через 15 минут.',
   inactivityCloseText: 'Обращение закрыто автоматически — нет активности в течение 1 часа.',
 
+  backupEnabled: true,
+  backupIntervalHours: 24,
+  backupRetention: 7,
+  backupUploadsEnabled: true,
+  uploadCleanupEnabled: true,
+  uploadCleanupIntervalHours: 6,
+  uploadOrphanGraceHours: 24,
+  diskMonitoringEnabled: true,
+  diskWarnPercent: 75,
+  diskCriticalPercent: 90,
+  operationalAlertsEnabled: true,
+  operationalAlertCooldownMinutes: 15,
+
   telegramEnabled: true,
   telegramCreateTopics: true,
   telegramAutoAssignSingleOperator: true,
@@ -97,6 +110,18 @@ const KEY_MAP = {
   inactivityCloseMinutes: 'inactivity_close_minutes',
   inactivityWarningText: 'inactivity_warning_text',
   inactivityCloseText: 'inactivity_close_text',
+  backupEnabled: 'backup_enabled',
+  backupIntervalHours: 'backup_interval_hours',
+  backupRetention: 'backup_retention',
+  backupUploadsEnabled: 'backup_uploads_enabled',
+  uploadCleanupEnabled: 'upload_cleanup_enabled',
+  uploadCleanupIntervalHours: 'upload_cleanup_interval_hours',
+  uploadOrphanGraceHours: 'upload_orphan_grace_hours',
+  diskMonitoringEnabled: 'disk_monitoring_enabled',
+  diskWarnPercent: 'disk_warn_percent',
+  diskCriticalPercent: 'disk_critical_percent',
+  operationalAlertsEnabled: 'operational_alerts_enabled',
+  operationalAlertCooldownMinutes: 'operational_alert_cooldown_minutes',
   telegramEnabled: 'telegram_enabled',
   telegramCreateTopics: 'telegram_create_topics',
   telegramAutoAssignSingleOperator: 'telegram_auto_assign_single_operator',
@@ -179,6 +204,13 @@ function normalize(input = {}) {
   cfg.uploadMaxMb = clamp(cfg.uploadMaxMb, 1, 50, DEFAULTS.uploadMaxMb);
   cfg.inactivityWarnMinutes = clamp(cfg.inactivityWarnMinutes, 1, 1440, DEFAULTS.inactivityWarnMinutes);
   cfg.inactivityCloseMinutes = clamp(cfg.inactivityCloseMinutes, cfg.inactivityWarnMinutes + 1, 2880, DEFAULTS.inactivityCloseMinutes);
+  cfg.backupIntervalHours = clamp(cfg.backupIntervalHours, 1, 720, DEFAULTS.backupIntervalHours);
+  cfg.backupRetention = Math.round(clamp(cfg.backupRetention, 1, 365, DEFAULTS.backupRetention));
+  cfg.uploadCleanupIntervalHours = clamp(cfg.uploadCleanupIntervalHours, 1, 720, DEFAULTS.uploadCleanupIntervalHours);
+  cfg.uploadOrphanGraceHours = clamp(cfg.uploadOrphanGraceHours, 1, 8760, DEFAULTS.uploadOrphanGraceHours);
+  cfg.diskWarnPercent = clamp(cfg.diskWarnPercent, 1, 98, DEFAULTS.diskWarnPercent);
+  cfg.diskCriticalPercent = clamp(cfg.diskCriticalPercent, cfg.diskWarnPercent + 1, 100, DEFAULTS.diskCriticalPercent);
+  cfg.operationalAlertCooldownMinutes = clamp(cfg.operationalAlertCooldownMinutes, 1, 1440, DEFAULTS.operationalAlertCooldownMinutes);
   cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
   cfg.telegramUnansweredReminderMinutes = clamp(cfg.telegramUnansweredReminderMinutes, 1, 1440, DEFAULTS.telegramUnansweredReminderMinutes);
   cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);

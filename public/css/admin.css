@@ -363,6 +363,31 @@ input:focus,textarea:focus,select:focus{
 .pop b{display:block;color:#73c9f2;font-size:11px}
 .pop span{display:block;margin-top:2px;color:var(--soft);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tpl-search{height:36px;margin-bottom:6px}
+.maintenance-title{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:17px}
+.maintenance-title h2{margin-bottom:5px}
+.maintenance-title p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.maintenance-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:12px}
+.health-stat{
+  min-width:0;padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--panel);
+  box-shadow:0 8px 24px rgba(0,0,0,.12);
+}
+.health-stat span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.health-stat b{display:block;margin-top:7px;font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.health-stat small{display:block;margin-top:4px;color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.health-stat.ok{border-color:rgba(37,211,102,.2)}
+.health-stat.ok b{color:#62df91}
+.health-stat.warning{border-color:rgba(240,180,41,.24)}
+.health-stat.warning b{color:#f4c960}
+.health-stat.critical{border-color:rgba(255,102,120,.3)}
+.health-stat.critical b{color:#ff8997}
+.maintenance-grid .card{display:flex;flex-direction:column}
+.maintenance-grid .card>.save,.maintenance-grid .card>.ghost{align-self:flex-start;margin-top:auto}
+.health-details{display:grid;gap:0;margin:4px 0 16px}
+.health-details>div{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--line)}
+.health-details dt{color:var(--muted);font-size:11px}
+.health-details dd{min-width:0;margin:0;text-align:right;color:var(--soft);font-size:11px;overflow:hidden;text-overflow:ellipsis}
+.health-error{margin:0 0 12px;padding:9px 10px;border-radius:10px;background:rgba(255,102,120,.08);color:#ff8997;font-size:11px}
+.maintenance-loading{color:var(--muted)}
 
 @keyframes adminEnter{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
 @keyframes messageIn{from{opacity:0;transform:translateY(5px) scale(.99)}to{opacity:1;transform:none}}
@@ -428,6 +453,10 @@ input:focus,textarea:focus,select:focus{
   .section h2{font-size:21px}
   .card{padding:13px;border-radius:14px}
   .tpl{grid-template-columns:1fr}.tpl button{height:36px}
+  .maintenance-title{align-items:center}.maintenance-title p{display:none}
+  .maintenance-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .health-stat{padding:11px}.health-stat b{font-size:17px}
+  .health-details>div{gap:8px}
   .toast{bottom:calc(68px + env(safe-area-inset-bottom,0px))}
 }
 

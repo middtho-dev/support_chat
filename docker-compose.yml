@@ -12,6 +12,7 @@ services:
       - HOST=127.0.0.1
       - DB_PATH=/app/data/support.db
       - UPLOADS_DIR=/app/public/uploads
+      - BACKUP_DIR=/app/backups
       - VAPID_STORE=/app/data/vapid.json
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_MODE=${TELEGRAM_MODE:-private}
@@ -29,7 +30,9 @@ services:
     volumes:
       - support-data:/app/data
       - support-uploads:/app/public/uploads
+      - support-backups:/app/backups
 
 volumes:
   support-data:
   support-uploads:
+  support-backups:

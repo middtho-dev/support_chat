@@ -10,8 +10,8 @@ RUN npm ci --omit=dev
 COPY src/ ./src/
 COPY public/ ./public/
 
-# Create data and uploads directories
-RUN mkdir -p /app/data /app/public/uploads
+# Create data, uploads and backup directories
+RUN mkdir -p /app/data /app/public/uploads /app/backups
 
 # Run as non-root
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
@@ -23,6 +23,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV DB_PATH=/app/data/support.db
 ENV UPLOADS_DIR=/app/public/uploads
+ENV BACKUP_DIR=/app/backups
 
 EXPOSE 3000
 
