@@ -14,6 +14,11 @@ process.env.PUBLIC_URL = 'https://support.example';
 
 const sent = [];
 const rich = [];
+const pins = [];
+const unpins = [];
+const edits = [];
+const welcomeTickets = [];
+const operatorWaits = [];
 let topicAttempts = 0;
 let nextTopicId = 500;
 let messageId = 10;
@@ -44,20 +49,30 @@ class FakeBot {
     return Promise.resolve({ id, type: 'private', first_name: 'Оператор' });
   }
   sendMessage(chatId, text, options) {
-    sent.push({ chatId: String(chatId), text, options });
-    return Promise.resolve({ message_id: ++messageId });
+    const sentMessageId = ++messageId;
+    sent.push({ chatId: String(chatId), text, options, messageId: sentMessageId });
+    return Promise.resolve({ message_id: sentMessageId });
   }
   sendRichMessage(chatId, payload, options) {
     rich.push({ chatId: String(chatId), markdown: payload.markdown, options });
     return Promise.resolve({ message_id: ++messageId });
   }
-  editMessageText() {
+  editMessageText(text, options) {
+    edits.push({ text, options });
     return Promise.resolve({});
   }
   editMessageReplyMarkup() {
     return Promise.resolve({});
   }
-  pinChatMessage() {
+  pinChatMessage(chatId, pinnedMessageId, options) {
+    pins.push({ chatId: String(chatId), messageId: pinnedMessageId, options });
+    return Promise.resolve();
+  }
+  unpinChatMessage(chatId, options) {
+    unpins.push({ chatId: String(chatId), options });
+    return Promise.resolve();
+  }
+  answerCallbackQuery() {
     return Promise.resolve();
   }
   createForumTopic() {
@@ -78,7 +93,15 @@ require.cache[telegramModule] = {
 const db = require('../src/database');
 const { saveSettings } = require('../src/settings');
 const telegram = require('../src/telegram-private');
-const fakeBot = telegram.init({ to: () => ({ emit: () => {} }) });
+const fakeBot = telegram.init(
+  { to: () => ({ emit: () => {} }) },
+  {
+    scheduleWelcomeMessages: ticketId => welcomeTickets.push(ticketId),
+    scheduleOperatorWaitMessage: (ticketId, afterMessageId) => {
+      operatorWaits.push({ ticketId, afterMessageId });
+    }
+  }
+);
 
 test.after(() => {
   if (db.db.open) db.db.close();
@@ -156,10 +179,26 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.equal(ticket.telegram_customer_username, 'anna_client');
   assert.equal(ticket.telegram_customer_language_code, 'ru');
   assert.equal(ticket.assigned_operator_id, '7001');
+  const customerMessages = sent.filter(item => item.chatId === customerId);
+  const control = customerMessages[0];
+  assert.match(control.text, new RegExp(`#${ticket.id.slice(0, 8)}`));
+  assert.equal(
+    control.options.reply_markup.inline_keyboard[0][0].callback_data,
+    'customer:close'
+  );
+  assert.equal(ticket.telegram_customer_control_message_id, control.messageId);
+  assert.ok(pins.some(item =>
+    item.chatId === customerId &&
+    item.messageId === ticket.telegram_customer_control_message_id
+  ));
+  assert.deepEqual(welcomeTickets, [ticket.id]);
   const userMessage = db.getMessages.all(ticket.id).find(message => message.sender === 'user');
   assert.equal(userMessage.content, 'Нужна помощь с подключением');
   assert.equal(userMessage.telegram_source_message_id, 801);
   assert.ok(userMessage.telegram_message_id);
+  assert.ok(operatorWaits.some(item =>
+    item.ticketId === ticket.id && item.afterMessageId === userMessage.id
+  ));
 
   const supportId = 'support-to-telegram-customer';
   db.saveMessage.run(
@@ -178,11 +217,18 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   await telegram.deliverCustomerReply(ticket, db.getMessageById.get(supportId));
   const delivery = db.getMessageById.get(supportId);
   assert.ok(delivery.telegram_customer_message_id);
-  assert.ok(sent.some(item =>
+  const supportDelivery = sent.find(item =>
     item.chatId === customerId && item.text === 'Проверяем подключение'
-  ));
+  );
+  assert.ok(supportDelivery);
+  assert.equal(supportDelivery.options?.reply_markup, undefined);
   assert.ok(rich.some(item =>
     item.markdown.includes('Telegram ID') && item.markdown.includes(customerId)
+  ));
+  assert.ok(rich.some(item =>
+    item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
+      button.callback_data === `customercontrol:${ticket.id}`
+    )
   ));
 
   const countBeforeDuplicate = db.getMessages.all(ticket.id).length;
@@ -193,6 +239,20 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     text: 'Нужна помощь с подключением'
   });
   assert.equal(db.getMessages.all(ticket.id).length, countBeforeDuplicate);
+
+  const pinsBeforeOperatorAction = pins.length;
+  await fakeBot.handlers.callback_query({
+    id: 'customer-control-query',
+    from: { id: 7001, first_name: 'Оператор' },
+    message: { chat: { id: 7001, type: 'private' } },
+    data: `customercontrol:${ticket.id}`
+  });
+  assert.ok(edits.some(item =>
+    item.options?.chat_id === customerId &&
+    item.options?.message_id === ticket.telegram_customer_control_message_id
+  ));
+  assert.ok(unpins.some(item => item.chatId === customerId));
+  assert.ok(pins.length > pinsBeforeOperatorAction);
 });
 
 test('single-operator auto assignment can be disabled in settings', async () => {

@@ -257,6 +257,7 @@ input:focus,textarea:focus,select:focus{
 .customer-action{min-height:34px;padding:0 11px;border:1px solid var(--line);border-radius:10px;display:inline-flex;align-items:center;justify-content:center;background:var(--panel3);color:var(--soft);font-size:10.5px;font-weight:750;text-decoration:none}
 .customer-action.primary{border-color:rgba(42,171,238,.25);background:rgba(42,171,238,.14);color:#8ed8fa}
 .customer-action:hover{background:#29404c}
+.customer-action:disabled{opacity:.55;cursor:wait}
 .ticket-card-fields{display:grid;gap:10px}
 .meta-field{display:grid;gap:4px;min-width:0}
 .meta-field label{color:var(--muted);font-size:10px;text-transform:uppercase}

@@ -95,6 +95,7 @@
             <a class="customer-action primary" href="${esc(telegram.directUrl)}">Написать лично</a>
             ${telegram.profileUrl ? `<a class="customer-action" href="${esc(telegram.profileUrl)}" target="_blank" rel="noopener noreferrer">Открыть профиль</a>` : ''}
             <button id="copy-telegram-id" class="customer-action" type="button">Копировать ID</button>
+            ${currentTicket.status === 'open' ? '<button id="send-customer-control" class="customer-action" type="button">Отправить кнопку закрытия</button>' : ''}
           </div>
         </div>`
       : `<div class="ticket-customer compact"><span class="ticket-source-badge web">Сайт</span><span>Обращение создано в веб-чате</span></div>`;
@@ -128,6 +129,7 @@
     $('meta-cancel')?.addEventListener('click', closeTicketCard);
     $('meta-save')?.addEventListener('click', saveTicketMeta);
     $('copy-telegram-id')?.addEventListener('click', () => copyTelegramId(telegram.id));
+    $('send-customer-control')?.addEventListener('click', sendCustomerControl);
     dialog.querySelectorAll('[data-tag-preset]').forEach(btn => btn.addEventListener('click', () => addPresetTag(btn.dataset.tagPreset)));
   }
 
@@ -149,6 +151,31 @@
       button.textContent = 'ID скопирован';
       setTimeout(() => { if (button.isConnected) button.textContent = original; }, 1500);
     }
+  }
+
+  function sendCustomerControl() {
+    const button = $('send-customer-control');
+    if (!activeSocket || !currentTicket || !button) return;
+    button.disabled = true;
+    button.textContent = 'Закрепляю…';
+    activeSocket.timeout(12000).emit(
+      'admin_send_customer_control',
+      { ticketId: currentTicket.id },
+      (timeoutError, result) => {
+        button.disabled = false;
+        if (timeoutError || !result?.ok) {
+          button.textContent = result?.error || 'Не удалось отправить';
+          setTimeout(() => {
+            if (button.isConnected) button.textContent = 'Отправить кнопку закрытия';
+          }, 2200);
+          return;
+        }
+        button.textContent = 'Карточка закреплена';
+        setTimeout(() => {
+          if (button.isConnected) button.textContent = 'Отправить кнопку закрытия';
+        }, 1800);
+      }
+    );
   }
 
   function openTicketCard() {

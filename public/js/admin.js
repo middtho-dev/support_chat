@@ -625,8 +625,9 @@ function settingsCards(s, topicModeControl) {
       check('set-tg-customer-files','Принимать фото, видео и файлы',s.telegramCustomerFilesEnabled ?? true) +
       check('set-tg-customer-replies','Доставлять ответы поддержки в Telegram',s.telegramCustomerDeliverReplies ?? true) +
       check('set-tg-customer-reopen','Переоткрывать последний тикет новым сообщением',s.telegramCustomerReopenClosed ?? true) +
-      area('set-tg-customer-welcome','Приветствие клиента в боте',s.telegramCustomerWelcomeText || '',3) +
-      area('set-tg-customer-new','Подтверждение нового обращения',s.telegramCustomerNewTicketText || '',2) +
+      '<div class="settings-note">После создания тикета бот использует ту же цепочку, тексты и задержки, что заданы в карточке «Приветствия и ожидание».</div>' +
+      area('set-tg-customer-welcome','Подсказка до создания обращения (/start)',s.telegramCustomerWelcomeText || '',3) +
+      area('set-tg-customer-new','Закреплённая карточка открытого тикета',s.telegramCustomerNewTicketText || '',4) +
       area('set-tg-customer-reopened','Сообщение о переоткрытии',s.telegramCustomerReopenedText || '',2) +
       area('set-tg-customer-closed','Сообщение после закрытия',s.telegramCustomerClosedText || '',3),
       'blue',
