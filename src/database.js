@@ -119,6 +119,15 @@ db.exec(`
     FOREIGN KEY (operator_id) REFERENCES telegram_operators(telegram_user_id)
   );
 
+  CREATE TABLE IF NOT EXISTS telegram_customer_chat_messages (
+    ticket_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, message_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS telegram_ticket_notifications (
     ticket_id TEXT NOT NULL,
     operator_id TEXT NOT NULL,
@@ -224,6 +233,18 @@ module.exports = {
   clearTelegramCustomerControlMessage: db.prepare(`
     UPDATE tickets SET telegram_customer_control_message_id = NULL
     WHERE id = ? AND telegram_customer_control_message_id = ?
+  `),
+  trackTelegramCustomerChatMessage: db.prepare(`
+    INSERT OR IGNORE INTO telegram_customer_chat_messages
+      (ticket_id, chat_id, message_id)
+    VALUES (?, ?, ?)
+  `),
+  getTelegramCustomerChatMessages: db.prepare(`
+    SELECT message_id FROM telegram_customer_chat_messages
+    WHERE ticket_id = ?
+  `),
+  clearTelegramCustomerChatMessages: db.prepare(`
+    DELETE FROM telegram_customer_chat_messages WHERE ticket_id = ?
   `),
 
   getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
@@ -525,6 +546,7 @@ module.exports = {
     JOIN tickets t ON t.id = m.ticket_id
     WHERE m.sender = 'support'
       AND t.source = 'telegram'
+      AND t.status = 'open'
       AND t.telegram_customer_chat_id IS NOT NULL
       AND m.telegram_customer_message_id IS NULL
       AND (m.telegram_customer_next_retry_at IS NULL

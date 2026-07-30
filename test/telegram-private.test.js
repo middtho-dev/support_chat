@@ -17,6 +17,7 @@ const rich = [];
 const pins = [];
 const unpins = [];
 const edits = [];
+const deleted = [];
 const welcomeTickets = [];
 const operatorWaits = [];
 let topicAttempts = 0;
@@ -54,8 +55,14 @@ class FakeBot {
     return Promise.resolve({ message_id: sentMessageId });
   }
   sendRichMessage(chatId, payload, options) {
-    rich.push({ chatId: String(chatId), markdown: payload.markdown, options });
-    return Promise.resolve({ message_id: ++messageId });
+    const sentMessageId = ++messageId;
+    rich.push({
+      chatId: String(chatId),
+      markdown: payload.markdown,
+      options,
+      messageId: sentMessageId
+    });
+    return Promise.resolve({ message_id: sentMessageId });
   }
   editMessageText(text, options) {
     edits.push({ text, options });
@@ -72,6 +79,10 @@ class FakeBot {
     unpins.push({ chatId: String(chatId), options });
     return Promise.resolve();
   }
+  deleteMessage(chatId, deletedMessageId) {
+    deleted.push({ chatId: String(chatId), messageId: Number(deletedMessageId) });
+    return Promise.resolve();
+  }
   answerCallbackQuery() {
     return Promise.resolve();
   }
@@ -80,6 +91,9 @@ class FakeBot {
     return topicAttempts === 1
       ? Promise.reject(new Error('temporary Telegram error'))
       : Promise.resolve({ message_thread_id: ++nextTopicId });
+  }
+  closeForumTopic() {
+    return Promise.resolve();
   }
 }
 
@@ -179,9 +193,11 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.equal(ticket.telegram_customer_username, 'anna_client');
   assert.equal(ticket.telegram_customer_language_code, 'ru');
   assert.equal(ticket.assigned_operator_id, '7001');
-  const customerMessages = sent.filter(item => item.chatId === customerId);
-  const control = customerMessages[0];
-  assert.match(control.text, new RegExp(`#${ticket.id.slice(0, 8)}`));
+  const control = rich.find(item =>
+    item.chatId === customerId &&
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
+  );
+  assert.match(control.markdown, new RegExp(`#${ticket.id.slice(0, 8)}`));
   assert.equal(
     control.options.reply_markup.inline_keyboard[0][0].callback_data,
     'customer:close'
@@ -217,8 +233,8 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   await telegram.deliverCustomerReply(ticket, db.getMessageById.get(supportId));
   const delivery = db.getMessageById.get(supportId);
   assert.ok(delivery.telegram_customer_message_id);
-  const supportDelivery = sent.find(item =>
-    item.chatId === customerId && item.text === 'Проверяем подключение'
+  const supportDelivery = rich.find(item =>
+    item.chatId === customerId && item.markdown.includes('Проверяем подключение')
   );
   assert.ok(supportDelivery);
   assert.equal(supportDelivery.options?.reply_markup, undefined);
@@ -241,18 +257,85 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.equal(db.getMessages.all(ticket.id).length, countBeforeDuplicate);
 
   const pinsBeforeOperatorAction = pins.length;
+  const controlBeforeOperatorAction = ticket.telegram_customer_control_message_id;
   await fakeBot.handlers.callback_query({
     id: 'customer-control-query',
     from: { id: 7001, first_name: 'Оператор' },
     message: { chat: { id: 7001, type: 'private' } },
     data: `customercontrol:${ticket.id}`
   });
-  assert.ok(edits.some(item =>
-    item.options?.chat_id === customerId &&
-    item.options?.message_id === ticket.telegram_customer_control_message_id
+  const refreshedTicket = db.getTicketById.get(ticket.id);
+  assert.notEqual(
+    refreshedTicket.telegram_customer_control_message_id,
+    controlBeforeOperatorAction
+  );
+  assert.ok(deleted.some(item =>
+    item.chatId === customerId && item.messageId === controlBeforeOperatorAction
   ));
   assert.ok(unpins.some(item => item.chatId === customerId));
   assert.ok(pins.length > pinsBeforeOperatorAction);
+
+  const activeControlMessageId = refreshedTicket.telegram_customer_control_message_id;
+  await fakeBot.handlers.callback_query({
+    id: 'customer-close-query',
+    from: { id: Number(customerId), first_name: 'Анна' },
+    message: {
+      message_id: activeControlMessageId,
+      chat: { id: Number(customerId), type: 'private' }
+    },
+    data: 'customer:close'
+  });
+  const closedTicket = db.getTicketById.get(ticket.id);
+  assert.equal(closedTicket.status, 'closed');
+  assert.ok(deleted.some(item => item.messageId === 801));
+  assert.ok(deleted.some(item => item.messageId === delivery.telegram_customer_message_id));
+  assert.ok(deleted.some(item => item.messageId === activeControlMessageId));
+  const launcher = rich.findLast(item =>
+    item.chatId === customerId &&
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:new'
+  );
+  assert.ok(launcher);
+  assert.match(launcher.markdown, /Вы закрыли тикет/);
+  assert.equal(closedTicket.telegram_customer_control_message_id, launcher.messageId);
+});
+
+test('/start immediately creates a ticket and replaces the command with a Rich control', async () => {
+  const customerId = '8004';
+  await fakeBot.handlers.message({
+    message_id: 804,
+    chat: { id: customerId, type: 'private' },
+    from: { id: Number(customerId), first_name: 'Мария', language_code: 'ru' },
+    text: '/start'
+  });
+
+  const ticket = db.getOpenTicketByTelegramCustomer.get(customerId);
+  assert.ok(ticket);
+  assert.ok(deleted.some(item => item.chatId === customerId && item.messageId === 804));
+  const control = rich.find(item =>
+    item.chatId === customerId &&
+    item.messageId === ticket.telegram_customer_control_message_id
+  );
+  assert.ok(control);
+  assert.match(control.markdown, /Тикет .* создан/);
+  assert.equal(
+    control.options.reply_markup.inline_keyboard[0][0].callback_data,
+    'customer:close'
+  );
+
+  db.closeTicket.run(ticket.id);
+  await telegram.notifyTicketClosed(ticket, {
+    customerReason: 'Тикет закрыл оператор поддержки.'
+  });
+  const launcher = rich.findLast(item =>
+    item.chatId === customerId &&
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:new'
+  );
+  assert.ok(launcher);
+  assert.match(launcher.markdown, /закрыл оператор/);
+  assert.ok(deleted.some(item =>
+    item.chatId === customerId &&
+    item.messageId === control.messageId
+  ));
 });
 
 test('single-operator auto assignment can be disabled in settings', async () => {

@@ -6,7 +6,7 @@ const DEFAULT_TEMPLATES = [
   { label: 'Переустановка', text: 'Попробуйте переустановить VPN-клиент и перезагрузить устройство.' },
   { label: 'Смена сервера', text: 'Попробуйте сменить сервер в настройках приложения.' },
   { label: 'Скриншот', text: 'Пришлите, пожалуйста, скриншот ошибки — это ускорит решение.' },
-  { label: 'Завершение', text: 'Спасибо за обращение в поддержку KV9RU! Будем рады помочь снова.' }
+  { label: 'Завершение', text: 'Спасибо, что написали в поддержку KV9RU! Будем рады помочь снова.' }
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
 const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
@@ -229,6 +229,7 @@ socket.on('admin_auth_ok', () => {
 });
 socket.on('admin_settings', s => {
   S.settings = s || {};
+  window.supportAdminSettings = S.settings;
   renderSettings();
 });
 socket.on('admin_settings_updated', s => {
@@ -237,6 +238,7 @@ socket.on('admin_settings_updated', s => {
     return;
   }
   S.settings = s || {};
+  window.supportAdminSettings = S.settings;
   if (S.view === 'settings') renderSettings();
 });
 
@@ -412,7 +414,7 @@ function renderChatHeader() {
   mobileBtn.textContent = t.status === 'open' ? 'Закрыть' : (legacyDeleted ? 'Недоступно' : 'Открыть');
   $('composer').innerHTML = t.status === 'open'
     ? composerHtml()
-    : '<div class="closed-note">Обращение закрыто. При необходимости переоткройте его.</div>';
+    : '<div class="closed-note">Тикет закрыт. При необходимости переоткройте его.</div>';
   if (t.status === 'open') wireComposer();
 }
 function composerHtml() { return `<div id="admin-file-preview" class="admin-file-preview" style="display:none"></div><div class="compose-row"><button id="quick" class="quick" title="Шаблоны" aria-label="Шаблоны ответов"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></button><button id="reply-attach" class="quick" title="Прикрепить файл" aria-label="Прикрепить файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m20.5 11.5-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button><input id="reply-file" type="file" accept="image/*,video/*,audio/*,.jpg,.jpeg,.jpe,.jfif,.heic,.heif,.heics,.heifs,.dng,.avif,.tif,.tiff,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" style="display:none"><textarea id="reply-txt" rows="1" placeholder="Сообщение" aria-label="Ответ клиенту"></textarea><button id="reply-send" class="send" disabled aria-label="Отправить"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 11.2 20.2 4a.8.8 0 0 1 1 1l-7.1 16.1a.8.8 0 0 1-1.5-.1l-2.2-6.5-6.7-1.8a.8.8 0 0 1-.3-1.5Z"/><path d="m10.4 14.5 4-4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button></div><div class="hint"><span>Ctrl+Enter — отправить</span><span id="reply-cnt"></span></div>`; }
@@ -589,7 +591,7 @@ function settingsCards(s, topicModeControl) {
     settingCard(
       'automation',
       'Автозакрытие',
-      'Предупреждение и завершение неактивных обращений.',
+      'Предупреждение и завершение неактивных тикетов.',
       check('set-inactivity-enabled','Включить предупреждение и автозакрытие',s.inactivityEnabled) +
       input('set-inactivity-warn','Предупредить через, минут',s.inactivityWarnMinutes ?? 45,'number','min="1" max="1440"') +
       input('set-inactivity-close','Закрыть через, минут',s.inactivityCloseMinutes ?? 60,'number','min="2" max="2880"') +
@@ -620,18 +622,22 @@ function settingsCards(s, topicModeControl) {
     settingCard(
       'telegram',
       'Telegram для клиентов',
-      `Приём обращений, файлов и доставка ответов через этого же бота${s.telegramMode === 'private' ? '.' : ' (доступно после перехода в private-режим).'}`,
+      `Приём тикетов, файлов и доставка ответов через этого же бота${s.telegramMode === 'private' ? '.' : ' (доступно после перехода в private-режим).'}`,
       check('set-tg-customer-enabled','Разрешить клиентам писать боту',s.telegramCustomerEnabled ?? true) +
       check('set-tg-customer-files','Принимать фото, видео и файлы',s.telegramCustomerFilesEnabled ?? true) +
       check('set-tg-customer-replies','Доставлять ответы поддержки в Telegram',s.telegramCustomerDeliverReplies ?? true) +
-      check('set-tg-customer-reopen','Переоткрывать последний тикет новым сообщением',s.telegramCustomerReopenClosed ?? true) +
-      '<div class="settings-note">После создания тикета бот использует ту же цепочку, тексты и задержки, что заданы в карточке «Приветствия и ожидание».</div>' +
-      area('set-tg-customer-welcome','Подсказка до создания обращения (/start)',s.telegramCustomerWelcomeText || '',3) +
-      area('set-tg-customer-new','Закреплённая карточка открытого тикета',s.telegramCustomerNewTicketText || '',4) +
+      '<div class="settings-note">Команда /start сразу создаёт тикет. После закрытия бот очищает диалог и оставляет одну Rich-карточку создания нового тикета. Приветствия и ожидание берутся из общей карточки «Приветствия и ожидание».</div>' +
+      area('set-tg-customer-new','Rich-карточка открытого тикета',s.telegramCustomerNewTicketText || '',5) +
       area('set-tg-customer-reopened','Сообщение о переоткрытии',s.telegramCustomerReopenedText || '',2) +
-      area('set-tg-customer-closed','Сообщение после закрытия',s.telegramCustomerClosedText || '',3),
+      area('set-tg-customer-closed','Rich-карточка после закрытия',s.telegramCustomerClosedText || '',5) +
+      area('set-tg-customer-closed-user','Причина: закрыл клиент',s.telegramCustomerClosedByUserText || '',2) +
+      area('set-tg-customer-closed-support','Причина: закрыл оператор',s.telegramCustomerClosedBySupportText || '',2) +
+      area('set-tg-customer-closed-system','Причина: закрыло автозакрытие',s.telegramCustomerClosedBySystemText || '',2) +
+      input('set-tg-customer-close-btn','Кнопка закрытия тикета у клиента',s.telegramCustomerCloseButtonText || '✅ Закрыть тикет') +
+      input('set-tg-customer-new-btn','Кнопка создания нового тикета',s.telegramCustomerNewButtonText || '🆕 Создать новый тикет') +
+      input('set-tg-customer-send-close-btn','Кнопка оператора для отправки закрытия',s.telegramCustomerSendCloseButtonText || '📨 Отправить кнопку закрытия'),
       'blue',
-      'клиент бот личные сообщения профиль'
+      'клиент бот личные сообщения профиль rich кнопки закрытие'
     ),
     settingCard(
       'telegram',
@@ -708,7 +714,7 @@ function renderSettings() {
     </div>
     <div id="settings-grid" class="grid settings-grid">${settingsCards(s, topicModeControl).join('')}</div>
     <div id="settings-empty" class="settings-empty">По этому запросу настроек нет.</div>
-    <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
+    <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
     <div class="settings-savebar">
       <div><b id="settings-save-state">Изменений нет</b><span id="settings-save-time">${S.settingsLastSavedAt ? `Сохранено ${esc(fmtStatusDate(S.settingsLastSavedAt))}` : 'Настройки загружены с сервера'}</span></div>
       <button id="settings-discard" class="ghost" disabled>Отменить</button>
@@ -725,7 +731,7 @@ function settingsPayload() {
     inactivityEnabled: checked('set-inactivity-enabled'), inactivityWarnMinutes: num('set-inactivity-warn'), inactivityCloseMinutes: num('set-inactivity-close'), inactivityWarningText: val('set-inactivity-warning'), inactivityCloseText: val('set-inactivity-close-text'),
     backupEnabled: checked('set-backup-enabled'), backupIntervalHours: num('set-backup-interval'), backupRetention: num('set-backup-retention'), backupUploadsEnabled: checked('set-backup-uploads'), uploadCleanupEnabled: checked('set-upload-cleanup'), uploadCleanupIntervalHours: num('set-upload-cleanup-interval'), uploadOrphanGraceHours: num('set-upload-orphan-grace'), diskMonitoringEnabled: checked('set-disk-monitoring'), diskWarnPercent: num('set-disk-warning'), diskCriticalPercent: num('set-disk-critical'), operationalAlertsEnabled: checked('set-operational-alerts'), operationalAlertCooldownMinutes: num('set-operational-alert-cooldown'),
     telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: checked('set-tg-auto-assign'), telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramUnansweredReminderEnabled: checked('set-tg-reminders'), telegramUnansweredReminderMinutes: num('set-tg-reminder-first'), telegramUnansweredRepeatMinutes: num('set-tg-reminder-repeat'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramReopenTopicOnReopen: checked('set-tg-reopen-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
-    telegramCustomerEnabled: checked('set-tg-customer-enabled'), telegramCustomerFilesEnabled: checked('set-tg-customer-files'), telegramCustomerDeliverReplies: checked('set-tg-customer-replies'), telegramCustomerReopenClosed: checked('set-tg-customer-reopen'), telegramCustomerWelcomeText: val('set-tg-customer-welcome'), telegramCustomerNewTicketText: val('set-tg-customer-new'), telegramCustomerReopenedText: val('set-tg-customer-reopened'), telegramCustomerClosedText: val('set-tg-customer-closed'),
+    telegramCustomerEnabled: checked('set-tg-customer-enabled'), telegramCustomerFilesEnabled: checked('set-tg-customer-files'), telegramCustomerDeliverReplies: checked('set-tg-customer-replies'), telegramCustomerReopenClosed: false, telegramCustomerNewTicketText: val('set-tg-customer-new'), telegramCustomerReopenedText: val('set-tg-customer-reopened'), telegramCustomerClosedText: val('set-tg-customer-closed'), telegramCustomerClosedByUserText: val('set-tg-customer-closed-user'), telegramCustomerClosedBySupportText: val('set-tg-customer-closed-support'), telegramCustomerClosedBySystemText: val('set-tg-customer-closed-system'), telegramCustomerCloseButtonText: val('set-tg-customer-close-btn'), telegramCustomerNewButtonText: val('set-tg-customer-new-btn'), telegramCustomerSendCloseButtonText: val('set-tg-customer-send-close-btn'),
     telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'), telegramReopenButtonText: val('set-reopen-btn'), telegramReopenButtonStyle: val('set-reopen-btn-style'), telegramReopenButtonEmojiId: val('set-reopen-btn-emoji-id'),
     telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramReopenedText: val('set-tg-reopened'), telegramReopenedByUserText: val('set-tg-reopened-user'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
   };
@@ -761,7 +767,7 @@ function applySettingsDependencies() {
   setDependentControls('set-upload-cleanup', ['set-upload-cleanup-interval','set-upload-orphan-grace']);
   setDependentControls('set-disk-monitoring', ['set-disk-warning','set-disk-critical']);
   setDependentControls('set-operational-alerts', ['set-operational-alert-cooldown']);
-  setDependentControls('set-tg-customer-enabled', ['set-tg-customer-files','set-tg-customer-replies','set-tg-customer-reopen','set-tg-customer-welcome','set-tg-customer-new','set-tg-customer-reopened','set-tg-customer-closed']);
+  setDependentControls('set-tg-customer-enabled', ['set-tg-customer-files','set-tg-customer-replies','set-tg-customer-new','set-tg-customer-reopened','set-tg-customer-closed','set-tg-customer-closed-user','set-tg-customer-closed-support','set-tg-customer-closed-system','set-tg-customer-close-btn','set-tg-customer-new-btn','set-tg-customer-send-close-btn']);
   setDependentControls('set-tg-reminders', ['set-tg-reminder-first','set-tg-reminder-repeat']);
   setDependentControls('set-tg-cleanup', ['set-tg-cleanup-hours']);
 }
@@ -852,6 +858,7 @@ function saveSettings() {
       return toast(result?.error || 'Сервер не подтвердил сохранение', 'err');
     }
     S.settings = result.settings || payload;
+    window.supportAdminSettings = S.settings;
     S.settingsLastSavedAt = result.savedAt || new Date().toISOString();
     renderSettings();
     toast('Настройки сохранены и применены', 'ok');

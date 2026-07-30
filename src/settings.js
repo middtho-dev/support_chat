@@ -30,8 +30,8 @@ const DEFAULTS = {
   inactivityEnabled: true,
   inactivityWarnMinutes: 45,
   inactivityCloseMinutes: 60,
-  inactivityWarningText: 'Нет активности 45 минут — обращение будет закрыто через 15 минут.',
-  inactivityCloseText: 'Обращение закрыто автоматически — нет активности в течение 1 часа.',
+  inactivityWarningText: 'Нет активности 45 минут — тикет будет закрыт через 15 минут.',
+  inactivityCloseText: 'Тикет закрыт автоматически — нет активности в течение 1 часа.',
 
   backupEnabled: true,
   backupIntervalHours: 24,
@@ -64,11 +64,17 @@ const DEFAULTS = {
   telegramCustomerEnabled: true,
   telegramCustomerFilesEnabled: true,
   telegramCustomerDeliverReplies: true,
-  telegramCustomerReopenClosed: true,
-  telegramCustomerWelcomeText: 'Здравствуйте! Напишите вопрос, отправьте фото или файл — поддержка ответит здесь.',
-  telegramCustomerNewTicketText: '🎫 Обращение #{shortId} создано\n\nОператор уже получил уведомление. Когда вопрос будет решён, закройте обращение кнопкой ниже.',
-  telegramCustomerReopenedText: '🔔 Ваше обращение снова открыто.',
-  telegramCustomerClosedText: 'Обращение закрыто. Напишите новое сообщение, чтобы снова обратиться в поддержку.',
+  telegramCustomerReopenClosed: false,
+  telegramCustomerWelcomeText: 'Здравствуйте! Тикет создан — напишите вопрос, отправьте фото или файл, и поддержка ответит здесь.',
+  telegramCustomerNewTicketText: 'Оператор уже получил уведомление. Напишите вопрос, отправьте фото или файл — вся переписка останется в этом чате до закрытия тикета.',
+  telegramCustomerReopenedText: 'Ваш тикет снова открыт.',
+  telegramCustomerClosedText: '{reason}\n\nИстория диалога очищена. Нажмите кнопку ниже, когда понадобится помощь.',
+  telegramCustomerClosedByUserText: 'Вы закрыли тикет.',
+  telegramCustomerClosedBySupportText: 'Тикет закрыл оператор поддержки.',
+  telegramCustomerClosedBySystemText: 'Тикет закрыт автоматически из-за отсутствия активности.',
+  telegramCustomerCloseButtonText: '✅ Закрыть тикет',
+  telegramCustomerNewButtonText: '🆕 Создать новый тикет',
+  telegramCustomerSendCloseButtonText: '📨 Отправить кнопку закрытия',
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
   telegramNewEmoji: '❗',
   telegramOpenEmoji: '🔵',
@@ -80,7 +86,7 @@ const DEFAULTS = {
   telegramReopenButtonStyle: 'success',
   telegramCloseButtonEmojiId: '',
   telegramReopenButtonEmojiId: '',
-  telegramNewTicketText: '🎫 *Новое обращение*\n👤 *{name}*\n🆔 `{shortId}`\n📅 {dateTime}',
+  telegramNewTicketText: '🎫 *Новый тикет*\n👤 *{name}*\n🆔 `{shortId}`\n📅 {dateTime}',
   telegramClosedByUserText: '🗑️ Закрыто пользователем',
   telegramClosedBySupportText: '🔴 Тикет закрыт',
   telegramReopenedText: '🔔 Тикет переоткрыт',
@@ -153,6 +159,12 @@ const KEY_MAP = {
   telegramCustomerNewTicketText: 'telegram_customer_new_ticket_text',
   telegramCustomerReopenedText: 'telegram_customer_reopened_text',
   telegramCustomerClosedText: 'telegram_customer_closed_text',
+  telegramCustomerClosedByUserText: 'telegram_customer_closed_by_user_text',
+  telegramCustomerClosedBySupportText: 'telegram_customer_closed_by_support_text',
+  telegramCustomerClosedBySystemText: 'telegram_customer_closed_by_system_text',
+  telegramCustomerCloseButtonText: 'telegram_customer_close_button_text',
+  telegramCustomerNewButtonText: 'telegram_customer_new_button_text',
+  telegramCustomerSendCloseButtonText: 'telegram_customer_send_close_button_text',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -178,6 +190,10 @@ const TYPES = Object.fromEntries(Object.entries(DEFAULTS).map(([key, value]) => 
 const LEGACY_OFFHOURS_BANNER = 'Сейчас нерабочее время (МСК). Пожалуйста, напишите в рабочее время.';
 const LEGACY_OFFHOURS_REJECT = 'Сейчас нерабочее время. Напишите, пожалуйста, в рабочее время.';
 const LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET = '✅ Обращение создано. Оператор уже получил уведомление.';
+const LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET_CARD = '🎫 Обращение #{shortId} создано\n\nОператор уже получил уведомление. Когда вопрос будет решён, закройте обращение кнопкой ниже.';
+const LEGACY_TELEGRAM_CUSTOMER_WELCOME = 'Здравствуйте! Напишите вопрос, отправьте фото или файл — поддержка ответит здесь.';
+const LEGACY_TELEGRAM_CUSTOMER_REOPENED = '🔔 Ваше обращение снова открыто.';
+const LEGACY_TELEGRAM_CUSTOMER_CLOSED = 'Обращение закрыто. Напишите новое сообщение, чтобы снова обратиться в поддержку.';
 
 function clamp(n, min, max, fallback) {
   const value = Number(n);
@@ -231,6 +247,7 @@ function normalize(input = {}) {
   cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
   cfg.telegramUnansweredReminderMinutes = clamp(cfg.telegramUnansweredReminderMinutes, 1, 1440, DEFAULTS.telegramUnansweredReminderMinutes);
   cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);
+  cfg.telegramCustomerReopenClosed = false;
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
@@ -245,11 +262,27 @@ function normalize(input = {}) {
   cfg.inactivityCloseText = sanitizeText(cfg.inactivityCloseText, DEFAULTS.inactivityCloseText, 1000);
   cfg.telegramCustomerWelcomeText = sanitizeText(cfg.telegramCustomerWelcomeText, DEFAULTS.telegramCustomerWelcomeText, 1500);
   cfg.telegramCustomerNewTicketText = sanitizeText(cfg.telegramCustomerNewTicketText, DEFAULTS.telegramCustomerNewTicketText, 1000);
-  if (cfg.telegramCustomerNewTicketText === LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET) {
+  if (cfg.telegramCustomerWelcomeText === LEGACY_TELEGRAM_CUSTOMER_WELCOME) {
+    cfg.telegramCustomerWelcomeText = DEFAULTS.telegramCustomerWelcomeText;
+  }
+  if (cfg.telegramCustomerNewTicketText === LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET ||
+      cfg.telegramCustomerNewTicketText === LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET_CARD) {
     cfg.telegramCustomerNewTicketText = DEFAULTS.telegramCustomerNewTicketText;
   }
   cfg.telegramCustomerReopenedText = sanitizeText(cfg.telegramCustomerReopenedText, DEFAULTS.telegramCustomerReopenedText, 1000);
   cfg.telegramCustomerClosedText = sanitizeText(cfg.telegramCustomerClosedText, DEFAULTS.telegramCustomerClosedText, 1000);
+  if (cfg.telegramCustomerReopenedText === LEGACY_TELEGRAM_CUSTOMER_REOPENED) {
+    cfg.telegramCustomerReopenedText = DEFAULTS.telegramCustomerReopenedText;
+  }
+  if (cfg.telegramCustomerClosedText === LEGACY_TELEGRAM_CUSTOMER_CLOSED) {
+    cfg.telegramCustomerClosedText = DEFAULTS.telegramCustomerClosedText;
+  }
+  cfg.telegramCustomerClosedByUserText = sanitizeText(cfg.telegramCustomerClosedByUserText, DEFAULTS.telegramCustomerClosedByUserText, 500);
+  cfg.telegramCustomerClosedBySupportText = sanitizeText(cfg.telegramCustomerClosedBySupportText, DEFAULTS.telegramCustomerClosedBySupportText, 500);
+  cfg.telegramCustomerClosedBySystemText = sanitizeText(cfg.telegramCustomerClosedBySystemText, DEFAULTS.telegramCustomerClosedBySystemText, 500);
+  cfg.telegramCustomerCloseButtonText = sanitizeText(cfg.telegramCustomerCloseButtonText, DEFAULTS.telegramCustomerCloseButtonText, 64) || DEFAULTS.telegramCustomerCloseButtonText;
+  cfg.telegramCustomerNewButtonText = sanitizeText(cfg.telegramCustomerNewButtonText, DEFAULTS.telegramCustomerNewButtonText, 64) || DEFAULTS.telegramCustomerNewButtonText;
+  cfg.telegramCustomerSendCloseButtonText = sanitizeText(cfg.telegramCustomerSendCloseButtonText, DEFAULTS.telegramCustomerSendCloseButtonText, 64) || DEFAULTS.telegramCustomerSendCloseButtonText;
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
   cfg.telegramReopenButtonStyle = allowedButtonStyles.has(cfg.telegramReopenButtonStyle) ? cfg.telegramReopenButtonStyle : DEFAULTS.telegramReopenButtonStyle;
