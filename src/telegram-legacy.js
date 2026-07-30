@@ -103,6 +103,38 @@ function tgError(e) {
   return String(e?.response?.body?.description || e?.message || e || 'unknown error');
 }
 
+function isDisposableTelegramServiceMessage(msg) {
+  return !!(
+    msg?.pinned_message ||
+    msg?.forum_topic_edited ||
+    msg?.forum_topic_closed ||
+    msg?.forum_topic_reopened ||
+    msg?.general_forum_topic_hidden ||
+    msg?.general_forum_topic_unhidden ||
+    msg?.message_auto_delete_timer_changed
+  );
+}
+
+async function deleteTelegramServiceMessage(msg) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await bot.deleteMessage(msg.chat.id, msg.message_id);
+      return;
+    } catch (error) {
+      const description = tgError(error).toLowerCase();
+      if (description.includes('message to delete not found') ||
+          description.includes('message_id_invalid')) {
+        return;
+      }
+      if (attempt < 3) {
+        await wait(150 * attempt);
+        continue;
+      }
+      console.error('[TG] Delete service message failed:', tgError(error));
+    }
+  }
+}
+
 async function operationalAlert(key, text, details = '') {
   const settings = loadSettings();
   if (!settings.operationalAlertsEnabled) return;
@@ -377,16 +409,15 @@ async function handleMessage(msg) {
     const topicId = msg.message_thread_id;
     const rootCmd = parseCmd(msg.text || msg.caption || null);
 
-    if (rootCmd === '/admin') {
-      await announceAdminWebApp(topicId || null, msg.from);
+    if (isDisposableTelegramServiceMessage(msg)) {
+      if (s.telegramDeleteRenameNotices) {
+        await deleteTelegramServiceMessage(msg);
+      }
       return;
     }
 
-    if (msg.forum_topic_edited && topicId) {
-      if (s.telegramDeleteRenameNotices) {
-        try { await bot.deleteMessage(GROUP_ID, msg.message_id); }
-        catch (e) { console.error('[TG] Delete rename notice failed:', e.message); }
-      }
+    if (rootCmd === '/admin') {
+      await announceAdminWebApp(topicId || null, msg.from);
       return;
     }
 
