@@ -2,10 +2,11 @@ const { TelegramBot } = require('node-telegram-bot-api');
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./database');
 const push = require('./push');
-const { v4: uuidv4 } = require('uuid');
 const { loadSettings, formatTemplate } = require('./settings');
+const uuidv4 = () => crypto.randomUUID();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const ADMIN_IDS = new Set(
@@ -136,6 +137,11 @@ function tgEnabled() {
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function backgroundTimer(timer) {
+  timer.unref?.();
+  return timer;
 }
 
 function observeLatency(metric, startedAt) {
@@ -556,8 +562,11 @@ async function editRichOrDisable(chatId, messageId, markdown, replyMarkup, fallb
 }
 
 async function operationalAlert(key, text, details = '') {
+  const settings = loadSettings();
+  if (!settings.operationalAlertsEnabled) return;
   const now = Date.now();
-  if (now - (alertTimes.get(key) || 0) < 15 * 60 * 1000) return;
+  const cooldownMs = Number(settings.operationalAlertCooldownMinutes || 15) * 60 * 1000;
+  if (now - (alertTimes.get(key) || 0) < cooldownMs) return;
   alertTimes.set(key, now);
   console.error(`[Monitor] ${text}`, details);
   io?.to('admin').emit('operational_alert', {
@@ -587,14 +596,14 @@ function init(socketIo) {
     return null;
   }
   startBot();
-  deliveryTimer = setInterval(processDeliveryQueue, 15 * 1000);
+  deliveryTimer = backgroundTimer(setInterval(processDeliveryQueue, 15 * 1000));
   scheduleDeliveryQueue(1000);
-  setInterval(reconcileUnassignedTickets, 60 * 1000);
-  setTimeout(reconcileUnassignedTickets, 10000);
-  reminderTimer = setInterval(processUnansweredReminders, 30 * 1000);
-  setTimeout(processUnansweredReminders, 20000);
-  setInterval(cleanupOldTopics, 60 * 60 * 1000);
-  setTimeout(cleanupOldTopics, 15000);
+  backgroundTimer(setInterval(reconcileUnassignedTickets, 60 * 1000));
+  backgroundTimer(setTimeout(reconcileUnassignedTickets, 10000));
+  reminderTimer = backgroundTimer(setInterval(processUnansweredReminders, 30 * 1000));
+  backgroundTimer(setTimeout(processUnansweredReminders, 20000));
+  backgroundTimer(setInterval(cleanupOldTopics, 60 * 60 * 1000));
+  backgroundTimer(setTimeout(cleanupOldTopics, 15000));
   return bot;
 }
 

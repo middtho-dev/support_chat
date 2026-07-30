@@ -2,10 +2,11 @@ const { TelegramBot } = require('node-telegram-bot-api');
 const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./database');
 const push = require('./push');
-const { v4: uuidv4 } = require('uuid');
 const { loadSettings, formatTemplate } = require('./settings');
+const uuidv4 = () => crypto.randomUUID();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const GROUP_ID = process.env.TELEGRAM_GROUP_ID;
@@ -103,8 +104,11 @@ function tgError(e) {
 }
 
 async function operationalAlert(key, text, details = '') {
+  const settings = loadSettings();
+  if (!settings.operationalAlertsEnabled) return;
   const now = Date.now();
-  if (now - (alertTimes.get(key) || 0) < 15 * 60 * 1000) return;
+  const cooldownMs = Number(settings.operationalAlertCooldownMinutes || 15) * 60 * 1000;
+  if (now - (alertTimes.get(key) || 0) < cooldownMs) return;
   alertTimes.set(key, now);
   const message = `🚨 <b>Контроль доставки чата</b>\n${htmlEscape(text)}${details ? `\n<code>${htmlEscape(details).slice(0, 1500)}</code>` : ''}`;
   console.error(`[Monitor] ${text}`, details);

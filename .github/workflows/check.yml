@@ -24,3 +24,6 @@ jobs:
 
       - name: Syntax check
         run: npm run check
+
+      - name: Integration tests
+        run: npm test
