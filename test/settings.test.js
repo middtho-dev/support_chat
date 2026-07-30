@@ -84,10 +84,3 @@ test('legacy Telegram ticket confirmation is upgraded to the pinned card templat
   assert.doesNotMatch(saved.telegramCustomerNewTicketText, /обращени/i);
   assert.match(saved.telegramCustomerNewTicketText, /оператор/i);
 });
-
-test('legacy Telegram ticket confirmation is upgraded to the pinned card template', () => {
-  const saved = saveSettings({
-    telegramCustomerNewTicketText: '✅ Обращение создано. Оператор уже получил уведомление.'
-  });
-  assert.match(saved.telegramCustomerNewTicketText, /\{shortId\}/);
-});
