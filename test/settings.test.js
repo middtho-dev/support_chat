@@ -38,6 +38,7 @@ test('maintenance and alert settings persist and are normalized', () => {
     telegramCustomerNewTicketText: 'Тикет создан',
     telegramCustomerReopenedText: 'Тикет снова открыт',
     telegramCustomerClosedText: 'Тикет закрыт',
+    telegramCustomerClosePromptText: '  Если вопрос решён, закройте обращение  ',
     telegramCustomerCloseButtonText: 'Закрыть',
     telegramCustomerNewButtonText: 'Новый тикет',
     telegramCustomerSendCloseButtonText: 'Отправить закрытие'
@@ -72,6 +73,7 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.telegramCustomerFilesEnabled, false);
   assert.equal(loaded.telegramCustomerReopenClosed, false);
   assert.equal(loaded.telegramCustomerClosedText, 'Тикет закрыт');
+  assert.equal(loaded.telegramCustomerClosePromptText, 'Если вопрос решён, закройте обращение');
   assert.equal(loaded.telegramCustomerCloseButtonText, 'Закрыть');
   assert.equal(loaded.telegramCustomerNewButtonText, 'Новый тикет');
   assert.equal(loaded.telegramCustomerSendCloseButtonText, 'Отправить закрытие');
