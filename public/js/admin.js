@@ -9,7 +9,7 @@ const DEFAULT_TEMPLATES = [
   { label: 'Завершение', text: 'Спасибо, что написали в поддержку KV9RU! Будем рады помочь снова.' }
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
-const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
+const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
 const socket = io({ autoConnect: false });
 const $ = id => document.getElementById(id);
 const TG = window.Telegram?.WebApp || null;
@@ -151,6 +151,7 @@ async function loginWithTelegram() {
       throw new Error(data.error || 'Нет доступа');
     }
     S.token = data.adminSessionToken;
+    S.permissions = data.permissions || S.permissions;
     $('lerr').textContent = '';
     setConn('');
     socket.connect();
@@ -246,18 +247,24 @@ function bindStaticUi() {
 }
 
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
-function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
+function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; S.permissions = { canManageSettings: false }; document.querySelector('.navbtn[data-view="settings"]')?.setAttribute('hidden', ''); document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
 
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
 socket.io.on('reconnect_attempt', () => setConn('connecting'));
 
-socket.on('admin_auth_ok', () => {
+socket.on('admin_auth_ok', auth => {
+  S.permissions = auth?.permissions || S.permissions;
+  const settingsNav = document.querySelector('.navbtn[data-view="settings"]');
+  if (settingsNav) settingsNav.hidden = !S.permissions.canManageSettings;
   sessionStorage.setItem('admin_token', S.token);
   $('login').style.display = 'none';
   $('app').style.display = 'grid';
   tgImpact('medium');
-  socket.emit('admin_get_settings');
+  if (S.permissions.canManageSettings) {
+    socket.emit('admin_get_settings');
+    requestOperators();
+  }
 });
 socket.on('admin_settings', s => {
   S.settings = s || {};
@@ -272,6 +279,13 @@ socket.on('admin_settings_updated', s => {
   S.settings = s || {};
   window.supportAdminSettings = S.settings;
   if (S.view === 'settings') renderSettings();
+});
+socket.on('admin_settings_forbidden', () => {
+  S.permissions = { ...S.permissions, canManageSettings: false };
+  document.querySelector('.navbtn[data-view="settings"]')?.setAttribute('hidden', '');
+});
+socket.on('admin_operators_updated', () => {
+  if (S.permissions.canManageSettings) requestOperators();
 });
 
 socket.on('admin_auth_error', () => {
@@ -373,6 +387,9 @@ function setFilter(filter) {
 }
 
 function setView(view) {
+  if (view === 'settings' && !S.permissions.canManageSettings) {
+    return toast('У вас нет доступа к настройкам', 'err');
+  }
   S.view = view || 'chat';
   tgImpact('light');
   document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
@@ -546,6 +563,34 @@ function settingCard(category, title, description, content, accent = 'blue', key
     <div class="settings-card-body">${content}</div>
   </section>`;
 }
+function operatorSettingsCard() {
+  const rows = S.operators.length
+    ? S.operators.map(operator => `<div class="operator-row" data-operator-id="${esc(operator.telegramUserId)}">
+        <div class="operator-row-head"><b>${esc(operator.displayName)}</b><span>${operator.active ? 'Активен' : 'Отключён'} · ID ${esc(operator.telegramUserId)}</span></div>
+        <div class="operator-row-fields">
+          <input data-operator-name value="${esc(operator.displayName)}" aria-label="Имя оператора">
+          <input data-operator-username value="${esc(operator.username || '')}" placeholder="username (необязательно)" aria-label="Username Telegram">
+        </div>
+        <div class="operator-row-access">
+          <label><input data-operator-active type="checkbox" ${operator.active ? 'checked' : ''}> Принимает тикеты</label>
+          <label><input data-operator-settings type="checkbox" ${operator.canManageSettings ? 'checked' : ''}> Может менять настройки</label>
+          <button type="button" class="ghost" data-operator-save>Сохранить</button>
+        </div>
+      </div>`).join('')
+    : '<div class="settings-note">Операторов пока нет. Добавьте Telegram ID ниже.</div>';
+  return settingCard(
+    'operators',
+    'Операторы и права доступа',
+    'Добавьте сотрудника по Telegram ID и отдельно разрешите ему доступ к настройкам.',
+    '<p class="settings-note">Оператору достаточно открыть бота и нажать /start. Без права на настройки он увидит только рабочий чат.</p>' +
+    `<div class="operator-list">${rows}</div>` +
+    '<div class="operator-new"><b>Новый оператор</b>' +
+    '<div class="operator-row-fields"><input id="operator-new-id" inputmode="numeric" placeholder="Telegram ID"><input id="operator-new-name" placeholder="Имя оператора"><input id="operator-new-username" placeholder="username (необязательно)"></div>' +
+    '<div class="operator-row-access"><label><input id="operator-new-active" type="checkbox" checked> Принимает тикеты</label><label><input id="operator-new-settings" type="checkbox"> Может менять настройки</label><button id="operator-new-save" type="button" class="save">Добавить оператора</button></div></div>',
+    'violet',
+    'оператор доступ права Telegram ID настройки'
+  );
+}
 function val(id) { return $(id)?.value ?? ''; }
 function num(id) { return Number(val(id)); }
 function checked(id) { return !!$(id)?.checked; }
@@ -584,6 +629,7 @@ function saveSettingsLegacy() {
 
 function settingsCards(s, topicModeControl) {
   return [
+    operatorSettingsCard(),
     settingCard(
       'general',
       'Чат и график',
@@ -734,7 +780,7 @@ function renderSettings() {
   const topicModeControl = s.telegramMode === 'private'
     ? '<div class="settings-note">Приватная тема создаётся автоматически после назначения. У бота должен быть включён Threaded Mode.</div>'
     : check('set-tg-create-topics','Создавать темы тикетов в группе',s.telegramCreateTopics);
-  const filters = [['all','Все'],['general','Основные'],['automation','Автоматизация'],['telegram','Telegram'],['system','Система']];
+  const filters = [['all','Все'],['operators','Операторы'],['general','Основные'],['automation','Автоматизация'],['telegram','Telegram'],['system','Система']];
   $('settings').innerHTML = `<div class="section settings-section">
     <div class="settings-hero">
       <div><span class="settings-eyebrow">Центр управления</span><h2>Настройки проекта</h2><p>Все безопасные параметры собраны здесь и применяются только после подтверждения сервером.</p></div>
@@ -831,6 +877,32 @@ function updateSettingsDirtyState() {
   if (discard) discard.disabled = !S.settingsDirty || S.settingsSaving;
 }
 
+function requestOperators() {
+  socket.timeout(12000).emit('admin_get_operators', {}, (timeoutError, result) => {
+    if (timeoutError || !result?.ok) return;
+    S.operators = result.operators || [];
+    if (S.view === 'settings') renderSettings();
+  });
+}
+
+function saveManagedOperator(row) {
+  const payload = {
+    telegramUserId: row ? row.dataset.operatorId : val('operator-new-id'),
+    displayName: row ? row.querySelector('[data-operator-name]')?.value : val('operator-new-name'),
+    username: row ? row.querySelector('[data-operator-username]')?.value : val('operator-new-username'),
+    active: row ? !!row.querySelector('[data-operator-active]')?.checked : checked('operator-new-active'),
+    canManageSettings: row ? !!row.querySelector('[data-operator-settings]')?.checked : checked('operator-new-settings')
+  };
+  const button = row ? row.querySelector('[data-operator-save]') : $('operator-new-save');
+  if (button) button.disabled = true;
+  socket.timeout(12000).emit('admin_save_operator', payload, (timeoutError, result) => {
+    if (button) button.disabled = false;
+    if (timeoutError || !result?.ok) return toast(result?.error || 'Не удалось сохранить оператора', 'err');
+    toast('Права оператора сохранены', 'ok');
+    requestOperators();
+  });
+}
+
 function bindSettingsUi() {
   applySettingsDependencies();
   S.settingsSnapshot = JSON.stringify(settingsPayload());
@@ -844,7 +916,7 @@ function bindSettingsUi() {
     document.querySelectorAll('[data-settings-filter]').forEach(item => item.classList.toggle('on', item === button));
     applySettingsFilter();
   }));
-  document.querySelectorAll('#settings-grid input,#settings-grid textarea,#settings-grid select').forEach(control => {
+  document.querySelectorAll('#settings-grid input:not([data-operator-name]):not([data-operator-username]):not([data-operator-active]):not([data-operator-settings]),#settings-grid textarea,#settings-grid select').forEach(control => {
     control.addEventListener('input', updateSettingsDirtyState);
     control.addEventListener('change', () => {
       applySettingsDependencies();
@@ -855,6 +927,10 @@ function bindSettingsUi() {
   $('settings-discard')?.addEventListener('click', renderSettings);
   $('settings-export')?.addEventListener('click', exportSettings);
   $('settings-test-alert')?.addEventListener('click', testOperationalAlert);
+  document.querySelectorAll('[data-operator-save]').forEach(button => button.addEventListener('click', () => {
+    saveManagedOperator(button.closest('[data-operator-id]'));
+  }));
+  $('operator-new-save')?.addEventListener('click', () => saveManagedOperator(null));
   applySettingsFilter();
   updateSettingsDirtyState();
 }

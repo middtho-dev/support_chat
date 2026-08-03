@@ -167,13 +167,60 @@ function safeEqualString(a, b) {
 function isAdminToken(token) {
   if (!token || typeof token !== 'string') return false;
   if (ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) return true;
+  const session = getMiniAdminSession(token);
+  return !!session;
+}
+
+function getMiniAdminSession(token) {
+  if (!token || typeof token !== 'string') return null;
   const session = miniAdminSessions.get(token);
-  if (!session) return false;
+  if (!session) return null;
   if (session.expiresAt < Date.now()) {
     miniAdminSessions.delete(token);
-    return false;
+    return null;
   }
-  return true;
+  return session;
+}
+
+function getOperatorAccess(userId) {
+  const id = String(userId || '');
+  if (!id) return { allowed: false, canManageSettings: false };
+  if (TELEGRAM_ADMIN_IDS.has(id)) return { allowed: true, canManageSettings: true };
+  const operator = db.getTelegramOperator.get(id);
+  return {
+    allowed: !!operator?.active,
+    canManageSettings: !!operator?.active && !!operator?.can_manage_settings
+  };
+}
+
+function socketCanManageSettings(socket) {
+  if (!socket?.isAdmin) return false;
+  if (socket.adminUsesToken) return true;
+  return getOperatorAccess(socket.adminUserId).canManageSettings;
+}
+
+function emitToSettingsManagers(event, payload, excludedSocketId = '') {
+  for (const socket of io.sockets.sockets.values()) {
+    if (socket.id !== excludedSocketId && socketCanManageSettings(socket)) socket.emit(event, payload);
+  }
+}
+
+function normalizeManagedOperator(payload = {}) {
+  const telegramUserId = String(payload.telegramUserId || '').trim();
+  if (!/^\d{4,20}$/.test(telegramUserId)) return { error: 'Укажите корректный числовой Telegram ID' };
+  const displayName = String(payload.displayName || '').trim().slice(0, 80);
+  if (!displayName) return { error: 'Укажите имя оператора' };
+  const username = String(payload.username || '').trim().replace(/^@/, '');
+  if (username && !/^[a-zA-Z0-9_]{5,32}$/.test(username)) {
+    return { error: 'Username Telegram указан неверно' };
+  }
+  return {
+    telegramUserId,
+    displayName,
+    username: username || null,
+    active: payload.active !== false,
+    canManageSettings: !!payload.canManageSettings
+  };
 }
 
 function cleanupMiniAdminSessions() {
@@ -283,12 +330,20 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.post('/api/admin/telegram-auth', (req, res) => {
   const user = verifyTelegramInitData(req.body?.initData);
   if (!user) return res.status(401).json({ error: 'Telegram auth failed' });
-  if (!TELEGRAM_ADMIN_IDS.size) return res.status(403).json({ error: 'TELEGRAM_ADMIN_IDS is not configured' });
-  if (!TELEGRAM_ADMIN_IDS.has(String(user.id))) return res.status(403).json({ error: 'Access denied' });
+  const access = getOperatorAccess(user.id);
+  if (!access.allowed) return res.status(403).json({ error: 'Access denied' });
   cleanupMiniAdminSessions();
   const token = uuidv4();
-  miniAdminSessions.set(token, { userId: String(user.id), expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
-  res.json({ adminSessionToken: token, user: { id: user.id, first_name: user.first_name || '', username: user.username || '' } });
+  miniAdminSessions.set(token, {
+    userId: String(user.id),
+    canManageSettings: access.canManageSettings,
+    expiresAt: Date.now() + 12 * 60 * 60 * 1000
+  });
+  res.json({
+    adminSessionToken: token,
+    permissions: { canManageSettings: access.canManageSettings },
+    user: { id: user.id, first_name: user.first_name || '', username: user.username || '' }
+  });
 });
 
 app.get('/api/admin/maintenance', async (req, res) => {
@@ -663,8 +718,11 @@ io.on('connection', (socket) => {
   socket.on('admin_auth', ({ token }) => {
     if (!isAdminToken(token)) return socket.emit('admin_auth_error', { message: 'Invalid token' });
     socket.isAdmin = true;
+    socket.adminUsesToken = !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN));
+    socket.adminUserId = getMiniAdminSession(token)?.userId || null;
+    socket.canManageSettings = socketCanManageSettings(socket);
     socket.join('admin');
-    socket.emit('admin_auth_ok');
+    socket.emit('admin_auth_ok', { permissions: { canManageSettings: socket.canManageSettings } });
     socket.emit('admin_tickets', db.getTicketsForAdmin.all());
   });
 
@@ -701,6 +759,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin_get_settings', () => {
     if (!socket.isAdmin) return;
+    if (!socketCanManageSettings(socket)) return socket.emit('admin_settings_forbidden');
     socket.emit('admin_settings', {
       ...loadSettings(),
       telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
@@ -709,13 +768,14 @@ io.on('connection', (socket) => {
 
   socket.on('admin_update_settings', (payload = {}, ack) => {
     if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для изменения настроек' });
     try {
       const cfg = saveSettings(payload);
       const visibleCfg = {
         ...cfg,
         telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
       };
-      socket.broadcast.to('admin').emit('admin_settings_updated', visibleCfg);
+      emitToSettingsManagers('admin_settings_updated', visibleCfg, socket.id);
       maintenance.refreshStatus({ alertDisk: false }).then(status => {
         io.to('admin').emit('maintenance_updated', status);
       }).catch(() => {});
@@ -728,6 +788,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin_test_operational_alert', async (_payload = {}, ack) => {
     if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для настройки уведомлений' });
     const cfg = loadSettings();
     const telegramStatus = typeof telegram.status === 'function' ? telegram.status() : null;
     if (!cfg.operationalAlertsEnabled) {
@@ -737,7 +798,7 @@ io.on('connection', (socket) => {
       return ack?.({ error: 'Telegram-бот сейчас не подключён' });
     }
     if (telegramStatus.mode === 'private' && !telegramStatus.operatorAccessConfigured) {
-      return ack?.({ error: 'В TELEGRAM_ADMIN_IDS не настроен ни один оператор' });
+      return ack?.({ error: 'Не настроен ни один оператор Telegram' });
     }
     try {
       await telegram.notifyOperationalIssue(
@@ -748,6 +809,54 @@ io.on('connection', (socket) => {
       ack?.({ ok: true });
     } catch (error) {
       ack?.({ error: error?.message || 'Не удалось отправить тестовое уведомление' });
+    }
+  });
+
+  socket.on('admin_get_operators', (_payload = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для управления операторами' });
+    ack?.({
+      ok: true,
+      operators: db.listTelegramOperators.all().map(operator => ({
+        telegramUserId: operator.telegram_user_id,
+        displayName: operator.display_name,
+        username: operator.username || '',
+        active: !!operator.active,
+        canManageSettings: !!operator.can_manage_settings,
+        lastSeenAt: operator.last_seen_at || null
+      }))
+    });
+  });
+
+  socket.on('admin_save_operator', (payload = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для управления операторами' });
+    const operator = normalizeManagedOperator(payload);
+    if (operator.error) return ack?.({ error: operator.error });
+    try {
+      db.saveManagedTelegramOperator.run(
+        operator.telegramUserId,
+        operator.displayName,
+        operator.username,
+        operator.active ? 1 : 0,
+        operator.canManageSettings ? 1 : 0
+      );
+      const saved = db.getTelegramOperator.get(operator.telegramUserId);
+      emitToSettingsManagers('admin_operators_updated');
+      ack?.({
+        ok: true,
+        operator: {
+          telegramUserId: saved.telegram_user_id,
+          displayName: saved.display_name,
+          username: saved.username || '',
+          active: !!saved.active,
+          canManageSettings: !!saved.can_manage_settings,
+          lastSeenAt: saved.last_seen_at || null
+        }
+      });
+    } catch (error) {
+      console.error('[Operators] save:', error);
+      ack?.({ error: 'Не удалось сохранить оператора' });
     }
   });
 
