@@ -437,11 +437,11 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     },
     data: 'customer:new'
   });
-  const reopenedByButton = db.getOpenTicketByTelegramCustomer.get(customerId);
-  assert.ok(reopenedByButton, 'customer:new creates a new open ticket');
+  const newTicketByButton = db.getOpenTicketByTelegramCustomer.get(customerId);
+  assert.ok(newTicketByButton, 'customer:new creates a new open ticket');
   assert.ok(rich.some(item =>
     item.chatId === customerId &&
-    item.messageId === reopenedByButton.telegram_customer_control_message_id &&
+    item.messageId === newTicketByButton.telegram_customer_control_message_id &&
     item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
   ));
 });
@@ -533,11 +533,14 @@ test('close button responds immediately and closes a ticket from its operator to
   assert.equal(callbackAnswers.at(-1).id, 'close-ticket-query');
   assert.match(callbackAnswers.at(-1).options.text, /Закрываю тикет/);
   assert.equal(db.getTicketById.get(id).status, 'closed');
-  assert.ok(sent.some(item =>
-    item.chatId === '7001' &&
-    item.options?.message_thread_id === 909 &&
-    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === `reopen:${id}`
-  ));
+  const closeNotice = sent.findLast(item =>
+    item.chatId === '7001' && item.options?.message_thread_id === 909
+  );
+  assert.ok(closeNotice);
+  assert.equal(
+    closeNotice.options?.reply_markup?.inline_keyboard?.flat().some(button => button.callback_data),
+    false
+  );
 });
 
 test('single-operator auto assignment can be disabled in settings', async () => {

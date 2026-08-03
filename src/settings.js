@@ -55,7 +55,6 @@ const DEFAULTS = {
   telegramDeleteRenameNotices: true,
   telegramPinNewTicketMessage: true,
   telegramCloseTopicOnClose: true,
-  telegramReopenTopicOnReopen: true,
   telegramCleanupClosedTopics: true,
   telegramCleanupClosedHours: 24,
   telegramUnansweredReminderEnabled: true,
@@ -64,10 +63,8 @@ const DEFAULTS = {
   telegramCustomerEnabled: true,
   telegramCustomerFilesEnabled: true,
   telegramCustomerDeliverReplies: true,
-  telegramCustomerReopenClosed: false,
   telegramCustomerWelcomeText: 'Здравствуйте! Тикет создан — напишите вопрос, отправьте фото или файл, и поддержка ответит здесь.',
   telegramCustomerNewTicketText: 'Оператор уже получил уведомление. Напишите вопрос, отправьте фото или файл — вся переписка останется в этом чате до закрытия тикета.',
-  telegramCustomerReopenedText: 'Ваш тикет снова открыт.',
   telegramCustomerClosedText: '{reason}\n\nИстория диалога очищена. Нажмите кнопку ниже, когда понадобится помощь.',
   telegramCustomerClosedByUserText: 'Вы закрыли тикет.',
   telegramCustomerClosedBySupportText: 'Тикет закрыл оператор поддержки.',
@@ -82,16 +79,11 @@ const DEFAULTS = {
   telegramWaitEmoji: '🔔',
   telegramClosedEmoji: '🗑️',
   telegramCloseButtonText: '🗑️ Закрыть тикет',
-  telegramReopenButtonText: '🟢 Переоткрыть',
   telegramCloseButtonStyle: 'danger',
-  telegramReopenButtonStyle: 'success',
   telegramCloseButtonEmojiId: '',
-  telegramReopenButtonEmojiId: '',
   telegramNewTicketText: '🎫 *Новый тикет*\n👤 *{name}*\n🆔 `{shortId}`\n📅 {dateTime}',
   telegramClosedByUserText: '🗑️ Закрыто пользователем',
   telegramClosedBySupportText: '🔴 Тикет закрыт',
-  telegramReopenedText: '🔔 Тикет переоткрыт',
-  telegramReopenedByUserText: '🔔 Переоткрыто пользователем',
   telegramAutoCloseText: '⏱ Тикет закрыт автоматически — нет активности {minutes} минут',
   telegramWarnInactivityText: '⚠️ Нет активности {warnMinutes} минут — тикет будет закрыт через {remainingMinutes} минут',
   telegramTopicDeletedAdminText: 'Тема удалена — создайте новый тикет'
@@ -146,7 +138,6 @@ const KEY_MAP = {
   telegramDeleteRenameNotices: 'telegram_delete_rename_notices',
   telegramPinNewTicketMessage: 'telegram_pin_new_ticket_message',
   telegramCloseTopicOnClose: 'telegram_close_topic_on_close',
-  telegramReopenTopicOnReopen: 'telegram_reopen_topic_on_reopen',
   telegramCleanupClosedTopics: 'telegram_cleanup_closed_topics',
   telegramCleanupClosedHours: 'telegram_cleanup_closed_hours',
   telegramUnansweredReminderEnabled: 'telegram_unanswered_reminder_enabled',
@@ -155,10 +146,8 @@ const KEY_MAP = {
   telegramCustomerEnabled: 'telegram_customer_enabled',
   telegramCustomerFilesEnabled: 'telegram_customer_files_enabled',
   telegramCustomerDeliverReplies: 'telegram_customer_deliver_replies',
-  telegramCustomerReopenClosed: 'telegram_customer_reopen_closed',
   telegramCustomerWelcomeText: 'telegram_customer_welcome_text',
   telegramCustomerNewTicketText: 'telegram_customer_new_ticket_text',
-  telegramCustomerReopenedText: 'telegram_customer_reopened_text',
   telegramCustomerClosedText: 'telegram_customer_closed_text',
   telegramCustomerClosedByUserText: 'telegram_customer_closed_by_user_text',
   telegramCustomerClosedBySupportText: 'telegram_customer_closed_by_support_text',
@@ -173,16 +162,11 @@ const KEY_MAP = {
   telegramWaitEmoji: 'telegram_wait_emoji',
   telegramClosedEmoji: 'telegram_closed_emoji',
   telegramCloseButtonText: 'telegram_close_button_text',
-  telegramReopenButtonText: 'telegram_reopen_button_text',
   telegramCloseButtonStyle: 'telegram_close_button_style',
-  telegramReopenButtonStyle: 'telegram_reopen_button_style',
   telegramCloseButtonEmojiId: 'telegram_close_button_emoji_id',
-  telegramReopenButtonEmojiId: 'telegram_reopen_button_emoji_id',
   telegramNewTicketText: 'telegram_new_ticket_text',
   telegramClosedByUserText: 'telegram_closed_by_user_text',
   telegramClosedBySupportText: 'telegram_closed_by_support_text',
-  telegramReopenedText: 'telegram_reopened_text',
-  telegramReopenedByUserText: 'telegram_reopened_by_user_text',
   telegramAutoCloseText: 'telegram_auto_close_text',
   telegramWarnInactivityText: 'telegram_warn_inactivity_text',
   telegramTopicDeletedAdminText: 'telegram_topic_deleted_admin_text'
@@ -194,7 +178,6 @@ const LEGACY_OFFHOURS_REJECT = 'Сейчас нерабочее время. На
 const LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET = '✅ Обращение создано. Оператор уже получил уведомление.';
 const LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET_CARD = '🎫 Обращение #{shortId} создано\n\nОператор уже получил уведомление. Когда вопрос будет решён, закройте обращение кнопкой ниже.';
 const LEGACY_TELEGRAM_CUSTOMER_WELCOME = 'Здравствуйте! Напишите вопрос, отправьте фото или файл — поддержка ответит здесь.';
-const LEGACY_TELEGRAM_CUSTOMER_REOPENED = '🔔 Ваше обращение снова открыто.';
 const LEGACY_TELEGRAM_CUSTOMER_CLOSED = 'Обращение закрыто. Напишите новое сообщение, чтобы снова обратиться в поддержку.';
 
 function clamp(n, min, max, fallback) {
@@ -249,7 +232,6 @@ function normalize(input = {}) {
   cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
   cfg.telegramUnansweredReminderMinutes = clamp(cfg.telegramUnansweredReminderMinutes, 1, 1440, DEFAULTS.telegramUnansweredReminderMinutes);
   cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);
-  cfg.telegramCustomerReopenClosed = false;
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
@@ -271,11 +253,7 @@ function normalize(input = {}) {
       cfg.telegramCustomerNewTicketText === LEGACY_TELEGRAM_CUSTOMER_NEW_TICKET_CARD) {
     cfg.telegramCustomerNewTicketText = DEFAULTS.telegramCustomerNewTicketText;
   }
-  cfg.telegramCustomerReopenedText = sanitizeText(cfg.telegramCustomerReopenedText, DEFAULTS.telegramCustomerReopenedText, 1000);
   cfg.telegramCustomerClosedText = sanitizeText(cfg.telegramCustomerClosedText, DEFAULTS.telegramCustomerClosedText, 1000);
-  if (cfg.telegramCustomerReopenedText === LEGACY_TELEGRAM_CUSTOMER_REOPENED) {
-    cfg.telegramCustomerReopenedText = DEFAULTS.telegramCustomerReopenedText;
-  }
   if (cfg.telegramCustomerClosedText === LEGACY_TELEGRAM_CUSTOMER_CLOSED) {
     cfg.telegramCustomerClosedText = DEFAULTS.telegramCustomerClosedText;
   }
@@ -288,9 +266,7 @@ function normalize(input = {}) {
   cfg.telegramCustomerSendCloseButtonText = sanitizeText(cfg.telegramCustomerSendCloseButtonText, DEFAULTS.telegramCustomerSendCloseButtonText, 64) || DEFAULTS.telegramCustomerSendCloseButtonText;
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
-  cfg.telegramReopenButtonStyle = allowedButtonStyles.has(cfg.telegramReopenButtonStyle) ? cfg.telegramReopenButtonStyle : DEFAULTS.telegramReopenButtonStyle;
   cfg.telegramCloseButtonEmojiId = sanitizeText(cfg.telegramCloseButtonEmojiId, '', 128);
-  cfg.telegramReopenButtonEmojiId = sanitizeText(cfg.telegramReopenButtonEmojiId, '', 128);
 
   return cfg;
 }

@@ -35,8 +35,7 @@ socket.on('message',msg=>{
   if(msg.sender==='support'){hideSupportTyping();playNotifSound();showBrowserNotif(msg);}
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Тикет закрыт оператором':by==='inactivity'?'Тикет закрыт по неактивности':'Тикет закрыт','info')});
-socket.on('ticket_reopened',()=>{S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';saveMsgCache();showToast('Тикет переоткрыт','ok')});
-socket.on('ticket_orphaned',()=>{markClosedNoReopen();showToast('Тема удалена — начните новый чат','err',5000);});
+socket.on('ticket_orphaned',()=>{markClosed();showToast('Тема удалена — начните новый чат','err',5000);});
 socket.on('messages_read',()=>{/* support has opened the ticket */});
 socket.on('typing_support',()=>{showSupportTyping();});
 socket.on('message_reactions',({messageId,reactions})=>{applyMessageReactions(messageId,reactions);});
@@ -142,7 +141,7 @@ async function init(){
         if(!cached)loadDraft();
         if(ticket.status==='closed'){
           S.closed=true;
-          if(ticket.telegram_topic_deleted){markClosedNoReopen();}
+          if(ticket.telegram_topic_deleted){markClosed();}
           else{markClosed();}
         }else if(cached&&cached.closed){
           // Server says open — undo cached closed state
@@ -220,7 +219,6 @@ hcl.addEventListener('click',()=>{
   });
 });
 function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';saveMsgCache();}
-const markClosedNoReopen=markClosed;
 
 
 /* ── NEW CHAT ── */

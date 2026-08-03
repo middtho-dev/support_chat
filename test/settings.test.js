@@ -33,10 +33,8 @@ test('maintenance and alert settings persist and are normalized', () => {
     telegramCustomerEnabled: true,
     telegramCustomerFilesEnabled: false,
     telegramCustomerDeliverReplies: true,
-    telegramCustomerReopenClosed: false,
     telegramCustomerWelcomeText: '  Напишите нам в Telegram  ',
     telegramCustomerNewTicketText: 'Тикет создан',
-    telegramCustomerReopenedText: 'Тикет снова открыт',
     telegramCustomerClosedText: 'Тикет закрыт',
     telegramCustomerClosePromptText: '  Если вопрос решён, закройте обращение  ',
     telegramCustomerCloseButtonText: 'Закрыть',
@@ -60,7 +58,8 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(saved.telegramCustomerEnabled, true);
   assert.equal(saved.telegramCustomerFilesEnabled, false);
   assert.equal(saved.telegramCustomerDeliverReplies, true);
-  assert.equal(saved.telegramCustomerReopenClosed, false);
+  assert.equal('telegramCustomerReopenClosed' in saved, false);
+  assert.equal('telegramCustomerReopenedText' in saved, false);
   assert.equal(saved.telegramCustomerWelcomeText, 'Напишите нам в Telegram');
 
   const loaded = loadSettings();
@@ -71,7 +70,8 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.operationalAlertCooldownMinutes, 30);
   assert.equal(loaded.telegramAutoAssignSingleOperator, false);
   assert.equal(loaded.telegramCustomerFilesEnabled, false);
-  assert.equal(loaded.telegramCustomerReopenClosed, false);
+  assert.equal('telegramCustomerReopenClosed' in loaded, false);
+  assert.equal('telegramCustomerReopenedText' in loaded, false);
   assert.equal(loaded.telegramCustomerClosedText, 'Тикет закрыт');
   assert.equal(loaded.telegramCustomerClosePromptText, 'Если вопрос решён, закройте обращение');
   assert.equal(loaded.telegramCustomerCloseButtonText, 'Закрыть');

@@ -56,10 +56,6 @@ function kbClose(tid) {
   const s = cfg();
   return { inline_keyboard: [[tgButton(s.telegramCloseButtonText, `close:${tid}`, s.telegramCloseButtonStyle, s.telegramCloseButtonEmojiId)]] };
 }
-function kbReopen(tid) {
-  const s = cfg();
-  return { inline_keyboard: [[tgButton(s.telegramReopenButtonText, `reopen:${tid}`, s.telegramReopenButtonStyle, s.telegramReopenButtonEmojiId)]] };
-}
 function shortId(ticket) { return String(ticket?.id || '').slice(0, 8); }
 function mdEscape(value) { return String(value ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&'); }
 function htmlEscape(value) { return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch])); }
@@ -356,8 +352,7 @@ async function configureAdminWebApp(instance = bot) {
   if (!instance || !WEBAPP_URL || instance !== bot) return;
   await instance.setMyCommands([
     { command: 'admin', description: 'Открыть админку' },
-    { command: 'close', description: 'Закрыть тикет в текущей теме' },
-    { command: 'reopen', description: 'Переоткрыть тикет в текущей теме' }
+    { command: 'close', description: 'Закрыть тикет в текущей теме' }
   ]).catch(() => {});
   await instance.setChatMenuButton({
     menu_button: { type: 'web_app', text: 'Админка', web_app: { url: adminWebAppUrlWithCacheBust() } }
@@ -414,11 +409,6 @@ async function handleCallbackQuery(query) {
       if (!ticket) return;
       if (ticket.status === 'closed') return safeSend(GROUP_ID, '⚠️ Тикет уже закрыт', { message_thread_id: topicId });
       await closeTicketFromTelegram(ticket, topicId);
-    } else if (data.startsWith('reopen:')) {
-      const ticket = db.getTicketByTopicIdAny.get(topicId);
-      if (!ticket) return;
-      if (ticket.status !== 'closed') return safeSend(GROUP_ID, '⚠️ Тикет уже открыт', { message_thread_id: topicId });
-      await reopenTicketFromTelegram(ticket, topicId);
     }
   } catch (e) { console.error('[TG] handleCallbackQuery:', e.message); }
 }
@@ -511,19 +501,13 @@ async function handleMessage(msg) {
     const sendOpts = topicId ? { message_thread_id: topicId } : {};
 
     if (cmd === '/close') {
-      if (ticket.status === 'closed') return safeSend(GROUP_ID, 'Тикет уже закрыт. /reopen — переоткрыть', sendOpts);
+      if (ticket.status === 'closed') return safeSend(GROUP_ID, 'Тикет уже закрыт.', sendOpts);
       await closeTicketFromTelegram(ticket, topicId);
       return;
     }
 
-    if (cmd === '/reopen') {
-      if (ticket.status !== 'closed') return safeSend(GROUP_ID, 'Тикет уже открыт', sendOpts);
-      await reopenTicketFromTelegram(ticket, topicId);
-      return;
-    }
-
     if (ticket.status === 'closed') {
-      await safeSend(GROUP_ID, 'Тикет закрыт. /reopen — переоткрыть', sendOpts);
+      await safeSend(GROUP_ID, 'Тикет закрыт. Создайте новое обращение, если снова понадобится помощь.', sendOpts);
       return;
     }
 
@@ -587,20 +571,9 @@ async function closeTicketFromTelegram(ticket, topicId) {
   io?.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'support' });
   io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
   if (topicId) await setTopicStatus(topicId, ticket, s.telegramClosedEmoji);
-  await safeSend(GROUP_ID, s.telegramClosedBySupportText, topicId ? { message_thread_id: topicId, reply_markup: kbReopen(topicId) } : {});
+  await safeSend(GROUP_ID, s.telegramClosedBySupportText, topicId ? { message_thread_id: topicId } : {});
   if (topicId && s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, topicId).catch(() => {});
   if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
-}
-
-async function reopenTicketFromTelegram(ticket, topicId) {
-  const s = cfg();
-  db.reopenTicket.run(ticket.id);
-  if (topicId && s.telegramReopenTopicOnReopen) await bot.reopenForumTopic(GROUP_ID, topicId).catch(() => {});
-  if (topicId) topicStatus.delete(topicId);
-  if (topicId) await setTopicStatus(topicId, ticket, s.telegramWaitEmoji);
-  await safeSend(GROUP_ID, s.telegramReopenedText, topicId ? { message_thread_id: topicId, reply_markup: kbClose(topicId) } : {});
-  io?.to(`ticket:${ticket.id}`).emit('ticket_reopened');
-  io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'open' });
 }
 
 async function setTopicStatus(topicId, ticket, emoji) {
@@ -816,37 +789,10 @@ async function notifyTicketClosed(ticket) {
   const tid = ticket.telegram_topic_id;
   try {
     await setTopicStatus(tid, ticket, s.telegramClosedEmoji);
-    await safeSend(GROUP_ID, s.telegramClosedByUserText, { message_thread_id: tid, reply_markup: kbReopen(tid) });
+    await safeSend(GROUP_ID, s.telegramClosedByUserText, { message_thread_id: tid });
     if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, tid).catch(() => {});
     if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
   } catch (e) { console.error('[TG] notifyTicketClosed:', e.message); }
-}
-
-async function notifyTicketReopened(ticket) {
-  const s = cfg();
-  if (!tgEnabled()) return;
-  if (!ticket.telegram_topic_id && !s.telegramCreateTopics) {
-    await safeSend(GROUP_ID, singleChatStatus(ticket, s.telegramReopenedByUserText), { parse_mode: 'HTML' });
-    return;
-  }
-  if (!ticket.telegram_topic_id) return;
-  const tid = ticket.telegram_topic_id;
-  try {
-    if (s.telegramReopenTopicOnReopen) {
-      try { await bot.reopenForumTopic(GROUP_ID, tid); }
-      catch (reopenErr) {
-        if (isThreadNotFound(reopenErr)) {
-          db.markTopicDeleted.run(ticket.id);
-          const err = new Error('Telegram topic deleted');
-          err.topicDeleted = true;
-          throw err;
-        }
-      }
-    }
-    topicStatus.delete(tid);
-    await setTopicStatus(tid, ticket, s.telegramWaitEmoji);
-    await safeSend(GROUP_ID, s.telegramReopenedByUserText, { message_thread_id: tid, reply_markup: kbClose(tid) });
-  } catch (e) { if (e.topicDeleted) throw e; console.error('[TG] notifyTicketReopened:', e.message); }
 }
 
 async function autoCloseTicket(ticket, extra = {}) {
@@ -861,7 +807,7 @@ async function autoCloseTicket(ticket, extra = {}) {
   try {
     topicStatus.delete(tid);
     await setTopicStatus(tid, ticket, s.telegramClosedEmoji);
-    await safeSend(GROUP_ID, formatTemplate(s.telegramAutoCloseText, { ...values(ticket), ...extra }), { message_thread_id: tid, reply_markup: kbReopen(tid) });
+    await safeSend(GROUP_ID, formatTemplate(s.telegramAutoCloseText, { ...values(ticket), ...extra }), { message_thread_id: tid });
     if (s.telegramCloseTopicOnClose) await bot.closeForumTopic(GROUP_ID, tid).catch(() => {});
     if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
   } catch (e) { console.error('[TG] autoCloseTicket:', e.message); }
@@ -967,7 +913,6 @@ module.exports = {
   createTopic,
   forwardMessage,
   notifyTicketClosed,
-  notifyTicketReopened,
   autoCloseTicket,
   sendTyping,
   warnInactivity,

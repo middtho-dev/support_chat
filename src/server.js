@@ -495,33 +495,6 @@ app.post('/api/tickets/:ticketId/close', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/tickets/:ticketId/reopen', async (req, res) => {
-  const { sessionToken } = req.body;
-  const ticket = db.getTicketById.get(req.params.ticketId);
-  if (!ticket) return res.status(404).json({ error: 'Not found' });
-  if (!sessionToken || ticket.session_token !== sessionToken) return res.status(403).json({ error: 'Forbidden' });
-  if (usesLegacyTelegramTopics() && ticket.telegram_topic_deleted) {
-    return res.status(409).json({ error: 'Topic deleted' });
-  }
-
-  db.reopenTicket.run(ticket.id);
-  try {
-    await telegram.notifyTicketReopened(ticket);
-  } catch (e) {
-    if (e.topicDeleted) {
-      db.closeTicket.run(ticket.id);
-      cancelOperatorWait(ticket.id);
-      io.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'system' });
-      io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
-      return res.status(409).json({ error: 'Topic deleted' });
-    }
-  }
-  io.to(`ticket:${ticket.id}`).emit('ticket_reopened');
-  io.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'open' });
-  broadcastAdminTickets();
-  res.json({ ok: true });
-});
-
 app.get('/api/push/vapid-key', (req, res) => {
   const key = push.getPublicKey();
   if (!key) return res.status(503).json({ error: 'Push not configured' });
@@ -947,36 +920,6 @@ io.on('connection', (socket) => {
     }).catch(() => {});
   });
 
-  socket.on('admin_reopen_ticket', async ({ ticketId }) => {
-    if (!socket.isAdmin) return;
-    const ticket = db.getTicketById.get(ticketId);
-    if (!ticket || ticket.status !== 'closed') return;
-    if (ticket.source === 'telegram' && ticket.telegram_customer_id) {
-      const existing = db.getOpenTicketByTelegramCustomer.get(String(ticket.telegram_customer_id));
-      if (existing && existing.id !== ticket.id) {
-        return socket.emit('admin_error', {
-          message: `У этого Telegram-клиента уже открыт тикет #${existing.id.slice(0, 8)}`
-        });
-      }
-    }
-    if (usesLegacyTelegramTopics() && ticket.telegram_topic_deleted) {
-      return socket.emit('admin_error', { message: loadSettings().telegramTopicDeletedAdminText });
-    }
-    db.reopenTicket.run(ticket.id);
-    try {
-      await telegram.notifyTicketReopened(ticket);
-    } catch (e) {
-      if (e.topicDeleted) {
-        db.closeTicket.run(ticket.id);
-        cancelOperatorWait(ticket.id);
-        socket.emit('admin_error', { message: loadSettings().telegramTopicDeletedAdminText });
-        return broadcastAdminTickets();
-      }
-    }
-    io.to(`ticket:${ticketId}`).emit('ticket_reopened');
-    io.to('admin').emit('admin_ticket_status', { ticketId, status: 'open' });
-    broadcastAdminTickets();
-  });
 });
 
 const staleTicketsQuery = db.db.prepare(`
