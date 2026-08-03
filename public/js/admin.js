@@ -19,7 +19,7 @@ const IS_TG_MINI = !!TG?.initData ||
   ['/miniapp', '/tg-admin'].includes(location.pathname.replace(/\/+$/, '') || '/');
 let pendingTargetTicketId = PAGE_PARAMS.get('ticket') || '';
 let telegramFullscreenRequested = false;
-const TELEGRAM_FULLSCREEN_TOP_CLEARANCE = 80;
+const TELEGRAM_FULLSCREEN_TOP_CLEARANCE = 84;
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 function adminMediaFailed(el) {
