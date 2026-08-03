@@ -153,6 +153,23 @@ test('empty ticket creates a topic after a transient Telegram failure', async ()
   assert.match(intro.markdown, /Создан/);
 });
 
+test('an operator added from settings can use the bot without settings access', async () => {
+  db.saveManagedTelegramOperator.run('7002', 'Новый оператор', null, 1, 0);
+
+  await fakeBot.handlers.message({
+    message_id: 702,
+    chat: { id: 7002, type: 'private' },
+    from: { id: 7002, first_name: 'Новый', last_name: 'оператор' },
+    text: '/start'
+  });
+
+  const operator = db.getTelegramOperator.get('7002');
+  assert.equal(operator.active, 1);
+  assert.equal(operator.can_manage_settings, 0);
+  assert.ok(rich.some(item => item.chatId === '7002'));
+  db.deactivateTelegramOperator.run('7002');
+});
+
 test('the shared database lease allows only one polling owner', async () => {
   let secondStarted = false;
   const secondLease = createTelegramPollingLease({

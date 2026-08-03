@@ -319,7 +319,9 @@ function customerProfile(ticket) {
 }
 
 function isAuthorized(userId) {
-  return ADMIN_IDS.has(String(userId || ''));
+  const id = String(userId || '');
+  if (ADMIN_IDS.has(id)) return true;
+  return !!db.getTelegramOperator.get(id)?.active;
 }
 
 function adminWebAppUrl(ticketId = '') {
@@ -2939,7 +2941,7 @@ function status() {
   return {
     mode: 'private',
     configured: !!TOKEN,
-    operatorAccessConfigured: ADMIN_IDS.size > 0,
+    operatorAccessConfigured: ADMIN_IDS.size > 0 || db.getActiveTelegramOperators.all().length > 0,
     enabled: !!cfg().telegramEnabled,
     botStarted: !!bot,
     connected,
@@ -2950,7 +2952,7 @@ function status() {
       ...(pollingLease?.status() || { owner: false, pausedUntil: null }),
       ...pollingStats
     },
-    allowedOperators: ADMIN_IDS.size,
+    allowedOperators: Math.max(ADMIN_IDS.size, db.getActiveTelegramOperators.all().length),
     registeredOperators,
     unassignedTickets,
     assignedOpenTickets,

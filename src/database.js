@@ -72,6 +72,7 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_first_name TEXT`
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_last_name TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_language_code TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_control_message_id INTEGER`); } catch {}
+try { db.exec(`ALTER TABLE telegram_operators ADD COLUMN can_manage_settings INTEGER NOT NULL DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_chat_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_message_id INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_message_id INTEGER`); } catch {}
@@ -112,6 +113,7 @@ db.exec(`
     display_name TEXT NOT NULL,
     username TEXT,
     active INTEGER NOT NULL DEFAULT 1,
+    can_manage_settings INTEGER NOT NULL DEFAULT 0,
     registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -624,6 +626,20 @@ module.exports = {
   getActiveTelegramOperators: db.prepare(`
     SELECT * FROM telegram_operators WHERE active = 1
     ORDER BY registered_at ASC
+  `),
+  listTelegramOperators: db.prepare(`
+    SELECT * FROM telegram_operators
+    ORDER BY active DESC, registered_at ASC
+  `),
+  saveManagedTelegramOperator: db.prepare(`
+    INSERT INTO telegram_operators
+      (telegram_user_id, display_name, username, active, can_manage_settings)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(telegram_user_id) DO UPDATE SET
+      display_name = excluded.display_name,
+      username = excluded.username,
+      active = excluded.active,
+      can_manage_settings = excluded.can_manage_settings
   `),
   deactivateTelegramOperator: db.prepare(`
     UPDATE telegram_operators SET active = 0 WHERE telegram_user_id = ?
