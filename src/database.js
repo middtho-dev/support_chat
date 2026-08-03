@@ -274,11 +274,10 @@ module.exports = {
 
   setTopicId:   db.prepare(`UPDATE tickets SET telegram_topic_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
   closeTicket:  db.prepare(`UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
-  reopenTicket: db.prepare(`UPDATE tickets SET status = 'open', closed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
 
   // Returns only open tickets (for forwarding messages)
   getTicketByTopicId:    db.prepare(`SELECT * FROM tickets WHERE telegram_topic_id = ? AND status = 'open'`),
-  // Returns ticket regardless of status (for handling /close, /reopen commands)
+  // Returns ticket regardless of status (for handling closure notifications)
   getTicketByTopicIdAny: db.prepare(`SELECT * FROM tickets WHERE telegram_topic_id = ?`),
 
   getAllOpenTickets: db.prepare(`SELECT * FROM tickets WHERE status = 'open' ORDER BY updated_at DESC`),
@@ -683,11 +682,6 @@ module.exports = {
     UPDATE telegram_ticket_threads
     SET status = 'closed', updated_at = CURRENT_TIMESTAMP
     WHERE ticket_id = ? AND status = 'active'
-  `),
-  reopenTelegramThread: db.prepare(`
-    UPDATE telegram_ticket_threads
-    SET status = 'active', updated_at = CURRENT_TIMESTAMP
-    WHERE ticket_id = ? AND operator_id = ?
   `),
   deleteTelegramThread: db.prepare(`
     DELETE FROM telegram_ticket_threads WHERE ticket_id = ? AND operator_id = ?

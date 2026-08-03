@@ -139,8 +139,7 @@ const reminderStats = {
 const latencySamples = {
   topicCreateMs: [],
   deliveryMs: [],
-  closeMs: [],
-  reopenMs: []
+  closeMs: []
 };
 
 function cfg() {
@@ -353,14 +352,7 @@ function ticketKeyboard(ticket, state = 'open') {
   const rows = [];
   if (state === 'unassigned') {
     rows.push([tgButton('🙋 Взять тикет', `take:${ticket.id}`, 'primary')]);
-  } else if (state === 'closed') {
-    rows.push([tgButton(
-      settings.telegramReopenButtonText,
-      `reopen:${ticket.id}`,
-      settings.telegramReopenButtonStyle,
-      settings.telegramReopenButtonEmojiId
-    )]);
-  } else {
+  } else if (state !== 'closed') {
     rows.push([tgButton(
       settings.telegramCloseButtonText,
       `close:${ticket.id}`,
@@ -507,14 +499,15 @@ function listTicketButton(ticket, view, page) {
   if (view === 'waiting') {
     return tgButton(`🙋 Взять · ${name}`, `claim:${ticket.id}:${page}`, 'primary');
   }
-  if (view === 'closed') {
-    return tgButton(`🟢 Переоткрыть · ${name}`, `restore:${ticket.id}:${page}`, 'success');
-  }
+  if (view === 'closed') return null;
   return tgButton(`↗️ Поднять тему · ${name}`, `focus:${ticket.id}:${page}`, 'primary');
 }
 
 function ticketListKeyboard(tickets, view, page, total) {
-  const rows = tickets.map(ticket => [listTicketButton(ticket, view, page)]);
+  const rows = tickets
+    .map(ticket => listTicketButton(ticket, view, page))
+    .filter(Boolean)
+    .map(button => [button]);
   const nav = [];
   if (page > 0) nav.push({ text: '← Назад', callback_data: `list:${view}:${page - 1}` });
   if ((page + 1) * TICKET_LIST_PAGE_SIZE < total) {
@@ -819,8 +812,7 @@ async function configureBot(instance = bot) {
     { command: 'open', description: 'Мои открытые тикеты' },
     { command: 'closed', description: 'Мои закрытые тикеты' },
     { command: 'admin', description: 'Открыть админку' },
-    { command: 'close', description: 'Закрыть текущий тикет' },
-    { command: 'reopen', description: 'Переоткрыть текущий тикет' }
+    { command: 'close', description: 'Закрыть текущий тикет' }
   ];
   await instance.setMyCommands(customerCommands).catch(() => {});
   for (const operatorId of ADMIN_IDS) {
@@ -1223,15 +1215,15 @@ async function ensureCustomerTicket(msg, { forceNew = false } = {}) {
   let ticket = db.getOpenTicketByTelegramCustomer.get(customerId);
   if (ticket && !forceNew) {
     updateCustomerProfile(msg.from, msg.chat.id);
-    return { ticket: db.getTicketById.get(ticket.id), created: false, reopened: false };
+    return { ticket: db.getTicketById.get(ticket.id), created: false };
   }
   if (ticket && forceNew) {
-    return { ticket: db.getTicketById.get(ticket.id), created: false, reopened: false };
+    return { ticket: db.getTicketById.get(ticket.id), created: false };
   }
 
   await removePreviousCustomerLauncher(customerId);
   ticket = createCustomerTicket(msg.from, msg.chat.id);
-  return { ticket, created: true, reopened: false };
+  return { ticket, created: true };
 }
 
 function customerRateLimited(customerId) {
@@ -1627,7 +1619,7 @@ async function reconcileUnassignedTickets() {
       continue;
     }
     await claimAndOpenTicket(ticket.id, operator.telegram_user_id).catch(error => {
-      console.warn(`[TG private] restore thread ${shortId(ticket)}:`, tgError(error));
+      console.warn(`[TG private] recover thread ${shortId(ticket)}:`, tgError(error));
     });
     await wait(150);
   }
@@ -1954,21 +1946,6 @@ async function handleCallbackQuery(query) {
       await focusTicketTopic(ticket, operator);
       return;
     }
-    if (action === 'restore') {
-      if (String(ticket.assigned_operator_id || '') !== userId) {
-        await bot.answerCallbackQuery(query.id, {
-          text: 'Тикет назначен другому оператору',
-          show_alert: true
-        });
-        return;
-      }
-      await answer({ text: 'Открываю тикет…' });
-      if (ticket.status === 'closed') {
-        await reopenTicketFromTelegram(ticket, operator);
-      }
-      await editPanel(query.message, ticketListModel(operator, 'closed', sourcePage));
-      return;
-    }
     if (action === 'take') {
       await answer({ text: 'Создаю тему…' });
       const thread = await claimAndOpenTicket(ticket.id, userId);
@@ -1999,15 +1976,6 @@ async function handleCallbackQuery(query) {
       } else {
         await answer({ text: 'Закрываю тикет…' });
         await closeTicketFromTelegram(ticket);
-      }
-      return;
-    }
-    if (action === 'reopen') {
-      if (ticket.status === 'open') {
-        await bot.answerCallbackQuery(query.id, { text: 'Тикет уже открыт' });
-      } else {
-        await answer({ text: 'Открываю тикет…' });
-        await reopenTicketFromTelegram(ticket, operator);
       }
       return;
     }
@@ -2087,14 +2055,8 @@ async function handleMessage(msg) {
     }
     return closeTicketFromTelegram(ticket);
   }
-  if (command === '/reopen') {
-    if (ticket.status === 'open') {
-      return bot.sendMessage(msg.chat.id, 'Тикет уже открыт.', { message_thread_id: threadId });
-    }
-    return reopenTicketFromTelegram(ticket, operator);
-  }
   if (ticket.status === 'closed') {
-    await bot.sendMessage(msg.chat.id, 'Тикет закрыт. Используйте /reopen.', {
+    await bot.sendMessage(msg.chat.id, 'Тикет закрыт. Создайте новое обращение, если снова понадобится помощь.', {
       message_thread_id: threadId,
       reply_markup: ticketKeyboard(ticket, 'closed')
     });
@@ -2551,71 +2513,6 @@ async function closeTicketFromTelegram(ticket) {
   observeLatency('closeMs', startedAt);
 }
 
-async function reopenTicketFromTelegram(ticket, operatorOverride = null) {
-  const startedAt = Date.now();
-  const settings = cfg();
-  if (ticket.source === 'telegram' && ticket.telegram_customer_id) {
-    const existing = db.getOpenTicketByTelegramCustomer.get(String(ticket.telegram_customer_id));
-    if (existing && existing.id !== ticket.id) {
-      const error = new Error(`У клиента уже открыт тикет ${shortId(existing)}`);
-      error.alreadyAssigned = true;
-      throw error;
-    }
-  }
-  db.reopenTicket.run(ticket.id);
-  let fresh = db.getTicketById.get(ticket.id);
-  let operator = operatorOverride;
-  if (!operator && fresh.assigned_operator_id) {
-    operator = db.getTelegramOperator.get(String(fresh.assigned_operator_id));
-  }
-  if (!operator || !operator.active) {
-    db.unassignTicket.run(fresh.id);
-    fresh = db.getTicketById.get(fresh.id);
-    await reconcileUnassignedTickets();
-    if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-      await ensureCustomerControlMessage(fresh, {
-        forceNew: true,
-        repin: true
-      }).catch(() => {});
-    }
-    observeLatency('reopenMs', startedAt);
-    return;
-  }
-  let thread = db.getTelegramThreadForTicketOperatorAny.get(fresh.id, operator.telegram_user_id);
-  if (thread) {
-    try {
-      if (settings.telegramReopenTopicOnReopen) {
-        await bot.reopenForumTopic(thread.chat_id, thread.thread_id);
-      }
-      db.reopenTelegramThread.run(fresh.id, operator.telegram_user_id);
-      thread = db.getTelegramThreadForTicketOperator.get(fresh.id, operator.telegram_user_id);
-    } catch (error) {
-      if (!isThreadNotFound(error)) throw error;
-      db.deleteTelegramThread.run(fresh.id, operator.telegram_user_id);
-      thread = null;
-    }
-  }
-  if (!thread) thread = await ensurePrivateThread(fresh, operator);
-  await Promise.allSettled([
-    setTopicStatus(thread, fresh, settings.telegramWaitEmoji),
-    bot.sendMessage(thread.chat_id, settings.telegramReopenedText, {
-      message_thread_id: thread.thread_id,
-      reply_markup: ticketKeyboard(fresh, 'open')
-    }),
-    updateAssignmentNotifications(fresh, operator)
-  ]);
-  io?.to(`ticket:${fresh.id}`).emit('ticket_reopened');
-  io?.to('admin').emit('admin_ticket_status', { ticketId: fresh.id, status: 'open' });
-  io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
-  if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    await ensureCustomerControlMessage(fresh, {
-      forceNew: true,
-      repin: true
-    }).catch(() => {});
-  }
-  observeLatency('reopenMs', startedAt);
-}
-
 async function notifyTicketClosed(ticket, {
   customerReason = cfg().telegramCustomerClosedBySupportText,
   extraMessageIds = []
@@ -2642,14 +2539,6 @@ async function notifyTicketClosed(ticket, {
     ? db.getTelegramOperator.get(String(fresh.assigned_operator_id))
     : null;
   await updateAssignmentNotifications(fresh, operator);
-}
-
-async function notifyTicketReopened(ticket) {
-  const fresh = db.getTicketById.get(ticket.id) || ticket;
-  const operator = fresh.assigned_operator_id
-    ? db.getTelegramOperator.get(String(fresh.assigned_operator_id))
-    : null;
-  return reopenTicketFromTelegram(fresh, operator);
 }
 
 async function autoCloseTicket(ticket, extra = {}) {
@@ -3077,7 +2966,6 @@ module.exports = {
   deliverCustomerReply,
   sendCustomerControl,
   notifyTicketClosed,
-  notifyTicketReopened,
   autoCloseTicket,
   sendTyping,
   sendCustomerTyping,
