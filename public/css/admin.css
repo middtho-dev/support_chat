@@ -553,15 +553,15 @@ body.tg-mini input,body.tg-mini textarea,body.tg-mini select{font-size:16px!impo
 
 @media(max-width:560px){
   body.tg-mini .top{padding:var(--tg-top-ui) 10px 0!important}
-  body.tg-mini .side{inset:calc(58px + var(--tg-top-ui)) 0 calc(58px + var(--tg-bottom-ui) + env(safe-area-inset-bottom,0px)) 0!important}
-  body.tg-mini .main{inset:calc(58px + var(--tg-top-ui)) 0 calc(58px + var(--tg-bottom-ui) + env(safe-area-inset-bottom,0px)) 0!important}
+  body.tg-mini .side{inset:calc(58px + var(--tg-top-ui)) 0 calc(54px + var(--tg-bottom-ui)) 0!important}
+  body.tg-mini .main{inset:calc(58px + var(--tg-top-ui)) 0 calc(54px + var(--tg-bottom-ui)) 0!important}
   body.tg-mini .rail{
-    position:fixed!important;left:0!important;right:0!important;bottom:var(--tg-bottom-ui)!important;
-    height:calc(58px + env(safe-area-inset-bottom,0px))!important;
-    padding:5px 18px calc(5px + env(safe-area-inset-bottom,0px))!important;
+    position:fixed!important;left:0!important;right:0!important;bottom:0!important;
+    height:calc(54px + var(--tg-bottom-ui))!important;
+    padding:4px 18px calc(4px + var(--tg-bottom-ui))!important;
     background:var(--panel)!important;
   }
-  body.tg-mini .navbtn{width:auto!important;height:47px!important;max-width:92px!important}
+  body.tg-mini .navbtn{width:auto!important;height:46px!important;max-width:92px!important}
   body.tg-mini .composer{position:static!important;padding:7px 7px calc(7px + env(safe-area-inset-bottom,0px))!important}
   body.tg-mini .msgs{padding:10px 8px!important}
   body.tg-mini .panel{padding:14px 10px!important}

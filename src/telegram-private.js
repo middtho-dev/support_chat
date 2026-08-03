@@ -1317,16 +1317,6 @@ async function handleCustomerMessage(msg) {
     return handleCustomerStart(msg);
   }
   const currentTicket = db.getOpenTicketByTelegramCustomer.get(String(msg.from.id));
-  if (!currentTicket) {
-    const latest = db.getLatestTicketByTelegramCustomer.get(String(msg.from.id));
-    if (latest?.status === 'closed') {
-      await deleteTelegramMessage(msg.chat.id, msg.message_id);
-      return ensureCustomerControlMessage(latest, {
-        preserveExisting: true,
-        repin: true
-      }).catch(() => {});
-    }
-  }
   if (customerRateLimited(String(msg.from.id))) {
     const markdown = '## ⏳ Слишком много сообщений\n\nПодождите минуту и попробуйте снова.';
     const fallback = 'Слишком много сообщений. Подождите минуту и попробуйте снова.';

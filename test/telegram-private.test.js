@@ -455,6 +455,34 @@ test('/start immediately creates a ticket and replaces the command with a Rich c
   ));
 });
 
+test('a customer message opens a new ticket after a previous ticket was closed', async () => {
+  const customerId = '8005';
+  await fakeBot.handlers.message({
+    message_id: 805,
+    chat: { id: customerId, type: 'private' },
+    from: { id: Number(customerId), first_name: 'Ольга' },
+    text: '/start'
+  });
+  const previous = db.getOpenTicketByTelegramCustomer.get(customerId);
+  assert.ok(previous);
+  db.closeTicket.run(previous.id);
+
+  await fakeBot.handlers.message({
+    message_id: 806,
+    chat: { id: customerId, type: 'private' },
+    from: { id: Number(customerId), first_name: 'Ольга' },
+    text: 'Хочу открыть новое обращение'
+  });
+
+  const current = db.getOpenTicketByTelegramCustomer.get(customerId);
+  assert.ok(current);
+  assert.notEqual(current.id, previous.id);
+  assert.equal(
+    db.getMessages.all(current.id).find(message => message.sender === 'user').content,
+    'Хочу открыть новое обращение'
+  );
+});
+
 test('close button responds immediately and closes a ticket from its operator topic', async () => {
   const id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   db.createTicket.run(id, 'Закрытие из темы', 'session-close-button');
