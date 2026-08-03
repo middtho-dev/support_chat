@@ -395,6 +395,23 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.ok(launcher);
   assert.match(launcher.markdown, /Вы закрыли тикет/);
   assert.equal(closedTicket.telegram_customer_control_message_id, launcher.messageId);
+
+  await fakeBot.handlers.callback_query({
+    id: 'customer-new-query',
+    from: { id: Number(customerId), first_name: 'Анна', username: 'anna_client' },
+    message: {
+      message_id: launcher.messageId,
+      chat: { id: Number(customerId), type: 'private' }
+    },
+    data: 'customer:new'
+  });
+  const reopenedByButton = db.getOpenTicketByTelegramCustomer.get(customerId);
+  assert.ok(reopenedByButton, 'customer:new creates a new open ticket');
+  assert.ok(rich.some(item =>
+    item.chatId === customerId &&
+    item.messageId === reopenedByButton.telegram_customer_control_message_id &&
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
+  ));
 });
 
 test('/start immediately creates a ticket and replaces the command with a Rich control', async () => {
@@ -454,7 +471,26 @@ test('single-operator auto assignment can be disabled in settings', async () => 
   saveSettings({ telegramAutoAssignSingleOperator: true });
 });
 
-test('a getUpdates conflict stops this polling instance without sending a Telegram alert', async () => {
+test('a transient Telegram fetch error alerts only after repeated failures', async () => {
+  const alertsBefore = sent.filter(item => item.text.includes('Контроль доставки чата')).length;
+  const error = new Error('EFATAL: fetch failed');
+  fakeBot.handlers.polling_error(error);
+  fakeBot.handlers.polling_error(error);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(
+    sent.filter(item => item.text.includes('Контроль доставки чата')).length,
+    alertsBefore
+  );
+
+  fakeBot.handlers.polling_error(error);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(
+    sent.filter(item => item.text.includes('Контроль доставки чата')).length,
+    alertsBefore + 1
+  );
+});
+
+test('a getUpdates conflict keeps polling available without sending a Telegram alert', async () => {
   const telegramAlertsBefore = sent.filter(item => item.text.includes('Контроль доставки чата')).length;
   const stopsBefore = stopPollingCalls;
   fakeBot.handlers.polling_error({
@@ -467,11 +503,11 @@ test('a getUpdates conflict stops this polling instance without sending a Telegr
   });
   await new Promise(resolve => setTimeout(resolve, 20));
 
-  assert.ok(stopPollingCalls > stopsBefore);
+  assert.equal(stopPollingCalls, stopsBefore);
   assert.equal(
     sent.filter(item => item.text.includes('Контроль доставки чата')).length,
     telegramAlertsBefore
   );
-  assert.equal(telegram.status().polling.owner, false);
+  assert.equal(telegram.status().polling.owner, true);
   assert.equal(telegram.status().polling.conflicts, 1);
 });
