@@ -329,6 +329,13 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     )
   );
   assert.ok(operatorDelivery, 'each customer message has a direct Mini App chat button');
+  assert.equal(
+    rich.filter(item =>
+      item.chatId === '7001' && item.markdown.includes('Нужна помощь с подключением')
+    ).length,
+    1,
+    'the first customer message is delivered to the operator only once'
+  );
   assert.ok(operatorWaits.some(item =>
     item.ticketId === ticket.id && item.afterMessageId === userMessage.id
   ));
@@ -391,6 +398,11 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   ));
   assert.ok(unpins.some(item => item.chatId === customerId));
   assert.ok(pins.length > pinsBeforeOperatorAction);
+  const closePrompt = rich.find(item =>
+    item.chatId === customerId &&
+    item.messageId === refreshedTicket.telegram_customer_control_message_id
+  );
+  assert.match(closePrompt.markdown, /Если ваш вопрос решён/);
 
   const activeControlMessageId = refreshedTicket.telegram_customer_control_message_id;
   await fakeBot.handlers.callback_query({

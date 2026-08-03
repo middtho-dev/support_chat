@@ -900,7 +900,7 @@ function customerKeyboard(ticket) {
   return { inline_keyboard: rows };
 }
 
-function customerControlModel(ticket, reason = '') {
+function customerControlModel(ticket, reason = '', { showClosePrompt = false } = {}) {
   const settings = cfg();
   const values = {
     name: ticket.user_name || 'Клиент',
@@ -926,15 +926,26 @@ function customerControlModel(ticket, reason = '') {
     };
   }
   const body = formatTemplate(settings.telegramCustomerNewTicketText, values);
+  const closePrompt = showClosePrompt
+    ? formatTemplate(settings.telegramCustomerClosePromptText, values)
+    : '';
   return {
     markdown: [
       `## 🎫 Тикет #${markdownEscape(shortId(ticket))} создан`,
       '',
       body,
+      ...(closePrompt ? ['', closePrompt] : []),
       '',
       `**Статус:** открыт`
     ].join('\n'),
-    fallback: [`🎫 Тикет #${shortId(ticket)} создан`, '', body, '', 'Статус: открыт'].join('\n')
+    fallback: [
+      `🎫 Тикет #${shortId(ticket)} создан`,
+      '',
+      body,
+      ...(closePrompt ? ['', closePrompt] : []),
+      '',
+      'Статус: открыт'
+    ].join('\n')
   };
 }
 
@@ -1027,7 +1038,8 @@ async function ensureCustomerControlMessage(ticket, {
   repin = false,
   forceNew = false,
   preserveExisting = false,
-  reason = ''
+  reason = '',
+  showClosePrompt = false
 } = {}) {
   const fresh = db.getTicketById.get(ticket?.id);
   if (!tgEnabled() || fresh?.source !== 'telegram' || !fresh.telegram_customer_chat_id) {
@@ -1038,7 +1050,7 @@ async function ensureCustomerControlMessage(ticket, {
   }
   const task = (async () => {
     const chatId = String(fresh.telegram_customer_chat_id);
-    const model = customerControlModel(fresh, reason);
+    const model = customerControlModel(fresh, reason, { showClosePrompt });
     const replyMarkup = customerKeyboard(fresh);
     let controlMessageId = Number(fresh.telegram_customer_control_message_id || 0) || null;
     if (preserveExisting && controlMessageId) {
@@ -1146,7 +1158,8 @@ async function sendCustomerControl(ticket, options = {}) {
   return ensureCustomerControlMessage(ticket, {
     ...options,
     forceNew: true,
-    repin: true
+    repin: true,
+    showClosePrompt: true
   });
 }
 
@@ -1157,15 +1170,20 @@ async function removePreviousCustomerLauncher(customerId) {
   }
 }
 
-async function startCustomerTicketExperience(ticket, { replaceMessageId = null } = {}) {
+async function startCustomerTicketExperience(ticket, {
+  replaceMessageId = null,
+  createOperatorTopic = true
+} = {}) {
   if (replaceMessageId) {
     await deleteTelegramMessage(String(ticket.telegram_customer_chat_id), replaceMessageId);
   }
   await ensureCustomerControlMessage(ticket, { forceNew: true });
   lifecycle.scheduleWelcomeMessages?.(ticket.id);
-  createTopic(ticket.id).catch(error => {
-    console.error('[TG private] customer topic:', tgError(error));
-  });
+  if (createOperatorTopic) {
+    createTopic(ticket.id).catch(error => {
+      console.error('[TG private] customer topic:', tgError(error));
+    });
+  }
 }
 
 function updateCustomerProfile(from, chatId) {
@@ -1369,7 +1387,7 @@ async function handleCustomerMessage(msg) {
   const result = await ensureCustomerTicket(msg);
   const ticket = result.ticket;
   if (result.created) {
-    await startCustomerTicketExperience(ticket);
+    await startCustomerTicketExperience(ticket, { createOperatorTopic: false });
   }
   let replyToId = null;
   if (msg.reply_to_message?.message_id) {
@@ -1552,12 +1570,13 @@ async function reportAssignmentFailure(ticket, operator, error) {
 async function autoAssignTicket(ticket, operator, options = {}) {
   if (assigningTickets.has(ticket.id)) return assigningTickets.get(ticket.id);
   const assignment = (async () => {
-    await sendAssignmentNotification(ticket, operator, {
-      forceNew: false,
-      message: options.message
-    }).catch(error => {
-      console.warn('[TG private] new ticket notification:', tgError(error));
-    });
+    if (!options.message) {
+      await sendAssignmentNotification(ticket, operator, {
+        forceNew: false
+      }).catch(error => {
+        console.warn('[TG private] new ticket notification:', tgError(error));
+      });
+    }
     try {
       return await claimAndOpenTicket(ticket.id, operator.telegram_user_id, {
         replay: options.replay
@@ -1972,7 +1991,7 @@ async function handleCallbackQuery(query) {
         return;
       }
       await answer({ text: 'Закрепляю кнопку у клиента…' });
-      await ensureCustomerControlMessage(ticket, { forceNew: true, repin: true });
+      await sendCustomerControl(ticket);
       return;
     }
     if (action === 'close') {

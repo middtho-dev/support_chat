@@ -72,6 +72,7 @@ const DEFAULTS = {
   telegramCustomerClosedByUserText: 'Вы закрыли тикет.',
   telegramCustomerClosedBySupportText: 'Тикет закрыл оператор поддержки.',
   telegramCustomerClosedBySystemText: 'Тикет закрыт автоматически из-за отсутствия активности.',
+  telegramCustomerClosePromptText: 'Если ваш вопрос решён, нажмите кнопку ниже — мы закроем обращение. Если нужна помощь, просто продолжайте диалог.',
   telegramCustomerCloseButtonText: '✅ Закрыть тикет',
   telegramCustomerNewButtonText: '🆕 Создать новый тикет',
   telegramCustomerSendCloseButtonText: '📨 Отправить кнопку закрытия',
@@ -162,6 +163,7 @@ const KEY_MAP = {
   telegramCustomerClosedByUserText: 'telegram_customer_closed_by_user_text',
   telegramCustomerClosedBySupportText: 'telegram_customer_closed_by_support_text',
   telegramCustomerClosedBySystemText: 'telegram_customer_closed_by_system_text',
+  telegramCustomerClosePromptText: 'telegram_customer_close_prompt_text',
   telegramCustomerCloseButtonText: 'telegram_customer_close_button_text',
   telegramCustomerNewButtonText: 'telegram_customer_new_button_text',
   telegramCustomerSendCloseButtonText: 'telegram_customer_send_close_button_text',
@@ -280,6 +282,7 @@ function normalize(input = {}) {
   cfg.telegramCustomerClosedByUserText = sanitizeText(cfg.telegramCustomerClosedByUserText, DEFAULTS.telegramCustomerClosedByUserText, 500);
   cfg.telegramCustomerClosedBySupportText = sanitizeText(cfg.telegramCustomerClosedBySupportText, DEFAULTS.telegramCustomerClosedBySupportText, 500);
   cfg.telegramCustomerClosedBySystemText = sanitizeText(cfg.telegramCustomerClosedBySystemText, DEFAULTS.telegramCustomerClosedBySystemText, 500);
+  cfg.telegramCustomerClosePromptText = sanitizeText(cfg.telegramCustomerClosePromptText, DEFAULTS.telegramCustomerClosePromptText, 500);
   cfg.telegramCustomerCloseButtonText = sanitizeText(cfg.telegramCustomerCloseButtonText, DEFAULTS.telegramCustomerCloseButtonText, 64) || DEFAULTS.telegramCustomerCloseButtonText;
   cfg.telegramCustomerNewButtonText = sanitizeText(cfg.telegramCustomerNewButtonText, DEFAULTS.telegramCustomerNewButtonText, 64) || DEFAULTS.telegramCustomerNewButtonText;
   cfg.telegramCustomerSendCloseButtonText = sanitizeText(cfg.telegramCustomerSendCloseButtonText, DEFAULTS.telegramCustomerSendCloseButtonText, 64) || DEFAULTS.telegramCustomerSendCloseButtonText;
