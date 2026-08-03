@@ -18,6 +18,8 @@ const IS_TG_MINI = !!TG?.initData ||
   PAGE_PARAMS.get('tg') === '1' ||
   ['/miniapp', '/tg-admin'].includes(location.pathname.replace(/\/+$/, '') || '/');
 let pendingTargetTicketId = PAGE_PARAMS.get('ticket') || '';
+let telegramFullscreenRequested = false;
+const TELEGRAM_FULLSCREEN_TOP_CLEARANCE = 56;
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 function adminMediaFailed(el) {
@@ -116,7 +118,12 @@ function initTelegramMiniApp() {
 
   TG.ready();
   TG.expand();
-  try { TG.requestFullscreen?.(); } catch {}
+  try {
+    if (typeof TG.requestFullscreen === 'function') {
+      telegramFullscreenRequested = true;
+      TG.requestFullscreen();
+    }
+  } catch {}
   TG.disableVerticalSwipes?.();
   applyTelegramTheme();
   applyTelegramViewport();
@@ -124,7 +131,7 @@ function initTelegramMiniApp() {
   TG.onEvent?.('viewportChanged', applyTelegramViewport);
   TG.onEvent?.('safeAreaChanged', applyTelegramViewport);
   TG.onEvent?.('contentSafeAreaChanged', applyTelegramViewport);
-  TG.onEvent?.('fullscreenChanged', applyTelegramViewport);
+  TG.onEvent?.('fullscreenChanged', updateTelegramFullscreenViewport);
   TG.BackButton?.onClick(handleTelegramBack);
 }
 
@@ -180,7 +187,8 @@ function applyTelegramViewport() {
   const topInset = Math.max(
     0,
     Number(contentInsets.top) || 0,
-    Number(safeInsets.top) || 0
+    Number(safeInsets.top) || 0,
+    (TG?.isFullscreen || telegramFullscreenRequested) ? TELEGRAM_FULLSCREEN_TOP_CLEARANCE : 0
   );
   const bottomInset = Math.max(
     0,
@@ -189,6 +197,12 @@ function applyTelegramViewport() {
   );
   document.documentElement.style.setProperty('--tg-top-ui', `${Math.round(topInset)}px`);
   document.documentElement.style.setProperty('--tg-bottom-ui', `${Math.round(bottomInset)}px`);
+}
+
+function updateTelegramFullscreenViewport(payload = {}) {
+  if (typeof payload.isFullscreen === 'boolean') telegramFullscreenRequested = payload.isFullscreen;
+  if (typeof payload.is_fullscreen === 'boolean') telegramFullscreenRequested = payload.is_fullscreen;
+  applyTelegramViewport();
 }
 
 function tgImpact(style = 'light') {
