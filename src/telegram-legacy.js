@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const db = require('./database');
 const push = require('./push');
 const { loadSettings, formatTemplate } = require('./settings');
+const { createTelegramPollingLease } = require('./telegram-lease');
 const uuidv4 = () => crypto.randomUUID();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -15,8 +16,8 @@ const TELEGRAM_ADMIN_IDS = new Set(String(process.env.TELEGRAM_ADMIN_IDS || '').
 
 let bot = null;
 let io = null;
-let reconnectTimer = null;
 let connected = false;
+let pollingLease = null;
 const topicStatus = new Map();
 const creatingTopics = new Map();
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
@@ -27,9 +28,14 @@ const forwardingMessages = new Set();
 const incomingMessages = new Set();
 const alertTimes = new Map();
 const deliveryStats = { delivered: 0, failed: 0, retried: 0, incomingDuplicates: 0, mediaFailures: 0, lastError: null, lastSuccessAt: null };
+const pollingStats = { conflicts: 0, lastConflictAt: null, lastConflict: null };
+const POLLING_CONFLICT_PAUSE_MS = Math.max(
+  30000,
+  Math.min(15 * 60 * 1000, Number(process.env.TELEGRAM_CONFLICT_PAUSE_MS) || 30000)
+);
 
 function cfg() { return loadSettings(); }
-function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID; }
+function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID && !!pollingLease?.isOwner(); }
 function scheduleCleanupOldTopics(delayMs = 10000) {
   clearTimeout(cleanupTimer);
   cleanupTimer = setTimeout(() => {
@@ -101,6 +107,34 @@ function isThreadNotFound(e) {
 
 function tgError(e) {
   return String(e?.response?.body?.description || e?.message || e || 'unknown error');
+}
+
+function isPollingConflict(error) {
+  const status = Number(error?.response?.statusCode || error?.response?.status || 0);
+  const message = tgError(error).toLowerCase();
+  return status === 409 || (
+    message.includes('conflict') &&
+    (message.includes('getupdates') || message.includes('get updates'))
+  );
+}
+
+function reportPollingConflict(error) {
+  const details = tgError(error);
+  pollingStats.conflicts++;
+  pollingStats.lastConflictAt = new Date().toISOString();
+  pollingStats.lastConflict = details;
+  console.error('[TG] Another getUpdates consumer is active; this instance stopped polling:', details);
+  const key = 'telegram-polling-conflict';
+  const now = Date.now();
+  const cooldownMs = Number(cfg().operationalAlertCooldownMinutes || 15) * 60 * 1000;
+  if (now - (alertTimes.get(key) || 0) < cooldownMs) return;
+  alertTimes.set(key, now);
+  io?.to('admin').emit('operational_alert', {
+    key,
+    message: 'Обнаружен второй экземпляр Telegram-бота',
+    details: `${details}. Конфликтующий polling остановлен без Telegram-уведомления.`,
+    createdAt: new Date().toISOString()
+  });
 }
 
 function isDisposableTelegramServiceMessage(msg) {
@@ -238,7 +272,13 @@ function init(socketIo) {
     console.warn('[TG] BOT_TOKEN / GROUP_ID not set — disabled');
     return null;
   }
-  startBot();
+  pollingLease = createTelegramPollingLease({
+    database: db,
+    logPrefix: '[TG]',
+    onAcquired: startBot,
+    onLost: stopBot
+  });
+  pollingLease.start();
   setTimeout(cleanupOldTopics, 15000);
   setInterval(cleanupOldTopics, 60 * 60 * 1000);
   setInterval(retryMissingTopics, 60 * 1000);
@@ -248,63 +288,64 @@ function init(socketIo) {
   return bot;
 }
 
-function startBot() {
-  clearTimeout(reconnectTimer);
-  reconnectTimer = null;
+async function startBot() {
+  if (bot) return bot;
   console.log('[TG] Starting...');
+  let instance = null;
   try {
-    bot = new TelegramBot(TOKEN, {
+    instance = new TelegramBot(TOKEN, {
       polling: {
         interval: 2000,
         autoStart: false,
         params: { timeout: 30, allowed_updates: ['message', 'callback_query', 'message_reaction', 'message_reaction_count'] }
       }
     });
-    bot.on('polling_error', err => {
+    bot = instance;
+    instance.on('polling_error', err => {
+      if (instance !== bot) return;
       if (connected) { connected = false; console.error('[TG] Lost:', err.message); }
+      if (isPollingConflict(err)) {
+        reportPollingConflict(err);
+        pollingLease?.pause(POLLING_CONFLICT_PAUSE_MS, 'polling-conflict').catch(() => {});
+        return;
+      }
       operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(err)).catch(() => {});
-      scheduleReconnect();
     });
-    bot.on('error', err => { console.error('[TG] Error:', err.message); scheduleReconnect(); });
-    bot.on('message', async msg => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessage(msg); });
-    bot.on('callback_query', async query => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleCallbackQuery(query); });
-    bot.on('message_reaction', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
-    bot.on('message_reaction_count', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
-    bot.startPolling().catch(err => {
-      connected = false;
-      console.error('[TG] startPolling:', tgError(err));
-      scheduleReconnect();
-    });
+    instance.on('error', err => { if (instance === bot) console.error('[TG] Error:', err.message); });
+    instance.on('message', async msg => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessage(msg); });
+    instance.on('callback_query', async query => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleCallbackQuery(query); });
+    instance.on('message_reaction', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
+    instance.on('message_reaction_count', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
+    await instance.startPolling();
     connected = true;
-    configureAdminWebApp().catch(e => console.error('[TG] Mini App setup:', e.message));
+    await configureAdminWebApp(instance);
+    return instance;
   } catch (e) {
+    if (bot === instance) bot = null;
+    await instance?.stopPolling?.({ cancel: true, reason: 'Polling startup failed' }).catch(() => {});
     console.error('[TG] Failed to start:', e.message);
-    scheduleReconnect();
+    throw e;
   }
 }
 
-async function configureAdminWebApp() {
-  if (!bot || !WEBAPP_URL) return;
-  await bot.setMyCommands([
+async function stopBot(reason = 'lease-lost') {
+  const previous = bot;
+  bot = null;
+  connected = false;
+  if (previous) await previous.stopPolling({ cancel: true, reason }).catch(() => {});
+}
+
+async function configureAdminWebApp(instance = bot) {
+  if (!instance || !WEBAPP_URL || instance !== bot) return;
+  await instance.setMyCommands([
     { command: 'admin', description: 'Открыть админку' },
     { command: 'close', description: 'Закрыть тикет в текущей теме' },
     { command: 'reopen', description: 'Переоткрыть тикет в текущей теме' }
   ]).catch(() => {});
-  await bot.setChatMenuButton({
+  await instance.setChatMenuButton({
     menu_button: { type: 'web_app', text: 'Админка', web_app: { url: adminWebAppUrlWithCacheBust() } }
   }).catch(() => {});
   console.log(`[TG] Admin Mini App: ${WEBAPP_URL}`);
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    try {
-      if (bot) bot.stopPolling().catch(() => {}).finally(() => { bot = null; startBot(); });
-      else startBot();
-    } catch { bot = null; startBot(); }
-  }, 5000);
 }
 
 function status() {
@@ -319,6 +360,10 @@ function status() {
     createTopics: !!s.telegramCreateTopics,
     botStarted: !!bot,
     connected,
+    polling: {
+      ...(pollingLease?.status() || { owner: false, pausedUntil: null }),
+      ...pollingStats
+    },
     miniAppConfigured: !!WEBAPP_URL,
     miniAppUrl: WEBAPP_URL || null,
     miniAppAllowedAdmins: TELEGRAM_ADMIN_IDS.size,
@@ -326,6 +371,16 @@ function status() {
     openTicketsWithoutTopic,
     delivery: { ...deliveryStats, inFlight: forwardingMessages.size }
   };
+}
+
+async function shutdown() {
+  clearTimeout(cleanupTimer);
+  clearInterval(deliveryTimer);
+  cleanupTimer = null;
+  deliveryTimer = null;
+  await pollingLease?.stop();
+  pollingLease = null;
+  await stopBot('shutdown');
 }
 
 async function handleCallbackQuery(query) {
@@ -901,5 +956,6 @@ module.exports = {
   warnInactivity,
   checkTopicAlive,
   status,
-  notifyOperationalIssue: operationalAlert
+  notifyOperationalIssue: operationalAlert,
+  shutdown
 };

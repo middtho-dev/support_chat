@@ -92,6 +92,18 @@ db.exec(`
     ON messages(telegram_customer_message_id, telegram_customer_next_retry_at, created_at);
 `);
 
+// Only one process may consume getUpdates for a bot token. Keeping the lease in
+// the shared application database also covers overlapping containers during a
+// rolling restart, while allowing a standby process to take over after expiry.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telegram_runtime_leases (
+    name TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // Private Telegram operator inbox. A private topic id is scoped to its chat, so
 // never store or look it up without the operator chat id.
 db.exec(`
@@ -567,6 +579,27 @@ module.exports = {
       telegram_customer_last_error = ?,
       telegram_customer_next_retry_at = datetime('now', ?)
     WHERE id = ? AND telegram_customer_message_id IS NULL
+  `),
+  acquireTelegramRuntimeLease: db.prepare(`
+    INSERT INTO telegram_runtime_leases (name, owner_id, expires_at, updated_at)
+    VALUES (?, ?, datetime('now', ?), CURRENT_TIMESTAMP)
+    ON CONFLICT(name) DO UPDATE SET
+      owner_id = excluded.owner_id,
+      expires_at = excluded.expires_at,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE telegram_runtime_leases.owner_id = excluded.owner_id
+       OR telegram_runtime_leases.expires_at <= CURRENT_TIMESTAMP
+  `),
+  renewTelegramRuntimeLease: db.prepare(`
+    UPDATE telegram_runtime_leases
+    SET expires_at = datetime('now', ?), updated_at = CURRENT_TIMESTAMP
+    WHERE name = ? AND owner_id = ?
+  `),
+  releaseTelegramRuntimeLease: db.prepare(`
+    DELETE FROM telegram_runtime_leases WHERE name = ? AND owner_id = ?
+  `),
+  getTelegramRuntimeLease: db.prepare(`
+    SELECT * FROM telegram_runtime_leases WHERE name = ?
   `),
   updateMessageReactions: db.prepare(`UPDATE messages SET reactions = ? WHERE id = ?`),
 

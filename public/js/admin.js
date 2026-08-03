@@ -116,6 +116,7 @@ function initTelegramMiniApp() {
 
   TG.ready();
   TG.expand();
+  try { TG.requestFullscreen?.(); } catch {}
   TG.disableVerticalSwipes?.();
   applyTelegramTheme();
   applyTelegramViewport();

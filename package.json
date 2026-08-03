@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/maintenance.js && node --check src/telegram.js && node --check src/telegram-private.js && node --check src/telegram-legacy.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js && node --check public/js/admin-enhance.js",
+    "check": "node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/maintenance.js && node --check src/telegram.js && node --check src/telegram-lease.js && node --check src/telegram-private.js && node --check src/telegram-legacy.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js && node --check public/js/admin-enhance.js",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {

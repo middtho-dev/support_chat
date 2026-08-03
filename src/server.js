@@ -967,3 +967,23 @@ app.get('/health', (req, res) => res.json({
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
 server.listen(PORT, HOST, () => console.log(`[Server] Running on http://${HOST}:${PORT}`));
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Server] ${signal}: stopping gracefully`);
+  const forceExit = setTimeout(() => process.exit(1), 10000);
+  forceExit.unref?.();
+  await telegram.shutdown?.().catch(error => {
+    console.error('[Server] Telegram shutdown:', error?.message || error);
+  });
+  server.close(error => {
+    clearTimeout(forceExit);
+    try { if (db.db.open) db.db.close(); } catch {}
+    process.exit(error ? 1 : 0);
+  });
+}
+
+process.once('SIGTERM', () => { shutdown('SIGTERM').catch(() => process.exit(1)); });
+process.once('SIGINT', () => { shutdown('SIGINT').catch(() => process.exit(1)); });
