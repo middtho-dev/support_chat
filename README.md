@@ -126,6 +126,7 @@ sudo bash setup.sh
 | `TELEGRAM_MODE` | `private` или временный `legacy` | `private` |
 | `TELEGRAM_ADMIN_IDS` | Разрешённые ID операторов через запятую | обязательно |
 | `TELEGRAM_POLL_INTERVAL_MS` | Интервал получения обновлений Telegram, мс | `300` |
+| `TELEGRAM_CONFLICT_PAUSE_MS` | Пауза перед повторной попыткой после внешнего конфликта `getUpdates`, мс | `30000` |
 | `ADMIN_TOKEN` | Токен входа в `/admin` | обязательно |
 | `PUBLIC_URL` | Публичный HTTPS URL проекта | — |
 | `TELEGRAM_WEBAPP_URL` | Необязательный URL Mini App вместо `PUBLIC_URL/miniapp` | — |
@@ -178,7 +179,8 @@ docker compose restart
 docker compose down
 ```
 
-В `/health` Telegram-секция показывает соединение, доступность Rich Messages и
+В `/health` Telegram-секция показывает соединение, владельца polling-аренды, последнюю
+ошибку `getUpdates`, доступность Rich Messages и
 Threaded Mode, количество зарегистрированных операторов, неназначенные тикеты,
 открытые тикеты из Telegram, возраст очереди и задержки создания темы,
 доставки, закрытия и переоткрытия

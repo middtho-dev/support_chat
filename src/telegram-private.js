@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const db = require('./database');
 const push = require('./push');
 const { loadSettings, formatTemplate } = require('./settings');
+const { createTelegramPollingLease } = require('./telegram-lease');
 const uuidv4 = () => crypto.randomUUID();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -28,6 +29,10 @@ const TOPIC_CREATE_ATTEMPTS = Math.max(
 const TOPIC_CREATE_RETRY_MS = Math.max(
   100,
   Math.min(10000, Number(process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS) || 1000)
+);
+const POLLING_CONFLICT_PAUSE_MS = Math.max(
+  30000,
+  Math.min(15 * 60 * 1000, Number(process.env.TELEGRAM_CONFLICT_PAUSE_MS) || 30000)
 );
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
@@ -85,7 +90,6 @@ const MIME_BY_EXTENSION = {
 let bot = null;
 let io = null;
 let lifecycle = {};
-let reconnectTimer = null;
 let cleanupTimer = null;
 let deliveryTimer = null;
 let reminderTimer = null;
@@ -97,6 +101,7 @@ let connected = false;
 let threadedModeEnabled = false;
 let richMessagesAvailable = true;
 let botUsername = '';
+let pollingLease = null;
 
 const creatingThreads = new Map();
 const assigningTickets = new Map();
@@ -121,6 +126,11 @@ const deliveryStats = {
   lastError: null,
   lastSuccessAt: null
 };
+const pollingStats = {
+  conflicts: 0,
+  lastConflictAt: null,
+  lastConflict: null
+};
 const reminderStats = {
   sent: 0,
   failed: 0,
@@ -139,7 +149,7 @@ function cfg() {
 }
 
 function tgEnabled() {
-  return cfg().telegramEnabled && !!bot && !!TOKEN;
+  return cfg().telegramEnabled && !!bot && !!TOKEN && !!pollingLease?.isOwner();
 }
 
 function wait(ms) {
@@ -195,6 +205,38 @@ function shortId(ticket) {
 
 function tgError(error) {
   return String(error?.response?.body?.description || error?.message || error || 'unknown error');
+}
+
+function isPollingConflict(error) {
+  const status = Number(error?.response?.statusCode || error?.response?.status || 0);
+  const message = tgError(error).toLowerCase();
+  return status === 409 || (
+    message.includes('conflict') &&
+    (message.includes('getupdates') || message.includes('get updates'))
+  );
+}
+
+function reportPollingConflict(error) {
+  const details = tgError(error);
+  pollingStats.conflicts++;
+  pollingStats.lastConflictAt = new Date().toISOString();
+  pollingStats.lastConflict = details;
+  console.error(
+    '[TG private] Another getUpdates consumer is active; this instance stopped polling:',
+    details
+  );
+
+  const key = 'telegram-polling-conflict';
+  const now = Date.now();
+  const cooldownMs = Number(cfg().operationalAlertCooldownMinutes || 15) * 60 * 1000;
+  if (now - (alertTimes.get(key) || 0) < cooldownMs) return;
+  alertTimes.set(key, now);
+  io?.to('admin').emit('operational_alert', {
+    key,
+    message: 'Обнаружен второй экземпляр Telegram-бота',
+    details: `${details}. Конфликтующий polling остановлен без Telegram-уведомления.`,
+    createdAt: new Date().toISOString()
+  });
 }
 
 function normalizeIncomingDocument(fileName, declaredMime) {
@@ -316,7 +358,7 @@ function ticketKeyboard(ticket, state = 'open') {
     )]);
   }
   const webAppUrl = adminWebAppUrl(ticket.id);
-  if (webAppUrl) rows.push([{ text: '📋 Открыть карточку', web_app: { url: webAppUrl } }]);
+  if (webAppUrl) rows.push([{ text: '💬 Открыть чат', web_app: { url: webAppUrl } }]);
   const customer = customerProfile(ticket);
   if (ticket.source === 'telegram' && customer.telegramId) {
     const profileButtons = [];
@@ -652,7 +694,13 @@ function init(socketIo, hooks = {}) {
   if (!ADMIN_IDS.size) {
     console.warn('[TG private] TELEGRAM_ADMIN_IDS not set — customer channel only');
   }
-  startBot();
+  pollingLease = createTelegramPollingLease({
+    database: db,
+    logPrefix: '[TG private]',
+    onAcquired: startBot,
+    onLost: stopBot
+  });
+  pollingLease.start();
   deliveryTimer = backgroundTimer(setInterval(processDeliveryQueue, 15 * 1000));
   scheduleDeliveryQueue(1000);
   backgroundTimer(setInterval(reconcileUnassignedTickets, 60 * 1000));
@@ -664,12 +712,12 @@ function init(socketIo, hooks = {}) {
   return bot;
 }
 
-function startBot() {
-  clearTimeout(reconnectTimer);
-  reconnectTimer = null;
+async function startBot() {
+  if (bot) return bot;
   console.log('[TG private] Starting...');
+  let instance = null;
   try {
-    bot = new TelegramBot(TOKEN, {
+    instance = new TelegramBot(TOKEN, {
       polling: {
         interval: POLLING_INTERVAL_MS,
         autoStart: false,
@@ -679,37 +727,50 @@ function startBot() {
         }
       }
     });
-    bot.on('polling_error', error => {
+    bot = instance;
+    instance.on('polling_error', error => {
+      if (instance !== bot) return;
       connected = false;
+      if (isPollingConflict(error)) {
+        reportPollingConflict(error);
+        pollingLease?.pause(POLLING_CONFLICT_PAUSE_MS, 'polling-conflict').catch(() => {});
+        return;
+      }
       console.error('[TG private] Polling:', tgError(error));
       operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(error)).catch(() => {});
-      scheduleReconnect();
     });
-    bot.on('error', error => {
+    instance.on('error', error => {
+      if (instance !== bot) return;
       console.error('[TG private] Error:', tgError(error));
-      scheduleReconnect();
     });
-    bot.on('message', handleMessage);
-    bot.on('callback_query', handleCallbackQuery);
-    bot.on('message_reaction', handleMessageReaction);
-    bot.on('message_reaction_count', handleMessageReactionCount);
-    bot.startPolling().catch(error => {
-      connected = false;
-      console.error('[TG private] startPolling:', tgError(error));
-      scheduleReconnect();
-    });
-    configureBot().catch(error => {
-      console.error('[TG private] configuration:', tgError(error));
-      scheduleReconnect();
-    });
+    instance.on('message', handleMessage);
+    instance.on('callback_query', handleCallbackQuery);
+    instance.on('message_reaction', handleMessageReaction);
+    instance.on('message_reaction_count', handleMessageReactionCount);
+    await instance.startPolling();
+    await configureBot(instance);
+    return instance;
   } catch (error) {
+    if (bot === instance) bot = null;
+    await instance?.stopPolling?.({ cancel: true, reason: 'Polling startup failed' }).catch(() => {});
     console.error('[TG private] Failed to start:', tgError(error));
-    scheduleReconnect();
+    throw error;
   }
 }
 
-async function configureBot() {
-  const me = await bot.getMe();
+async function stopBot(reason = 'lease-lost') {
+  const previous = bot;
+  bot = null;
+  connected = false;
+  if (previous) {
+    await previous.stopPolling({ cancel: true, reason }).catch(() => {});
+  }
+}
+
+async function configureBot(instance = bot) {
+  if (!instance) return;
+  const me = await instance.getMe();
+  if (instance !== bot) return;
   connected = true;
   botUsername = me.username || '';
   threadedModeEnabled = !!me.has_topics_enabled;
@@ -729,39 +790,25 @@ async function configureBot() {
     { command: 'close', description: 'Закрыть текущий тикет' },
     { command: 'reopen', description: 'Переоткрыть текущий тикет' }
   ];
-  await bot.setMyCommands(customerCommands).catch(() => {});
+  await instance.setMyCommands(customerCommands).catch(() => {});
   for (const operatorId of ADMIN_IDS) {
-    await bot.setMyCommands(operatorCommands, {
+    await instance.setMyCommands(operatorCommands, {
       scope: { type: 'chat', chat_id: operatorId }
     }).catch(() => {});
   }
   const webAppUrl = adminWebAppUrl();
-  await bot.setChatMenuButton({
+  await instance.setChatMenuButton({
     menu_button: { type: 'commands' }
   }).catch(() => {});
   if (webAppUrl) {
     for (const operatorId of ADMIN_IDS) {
-      await bot.setChatMenuButton({
+      await instance.setChatMenuButton({
         chat_id: operatorId,
         menu_button: { type: 'web_app', text: 'Админка', web_app: { url: webAppUrl } }
       }).catch(() => {});
     }
   }
   console.log(`[TG private] Connected as @${botUsername || 'bot'}; threaded=${threadedModeEnabled}`);
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    const previous = bot;
-    bot = null;
-    if (previous) {
-      previous.stopPolling().catch(() => {}).finally(startBot);
-    } else {
-      startBot();
-    }
-  }, 5000);
 }
 
 function registerOperator(from) {
@@ -2132,7 +2179,12 @@ async function sendWithDocumentFallback(primary, chatId, filePath, options) {
 }
 
 async function sendMessageToThread(ticket, message, thread) {
-  const options = { message_thread_id: thread.thread_id };
+  const options = {
+    message_thread_id: thread.thread_id,
+    ...(message.sender === 'user'
+      ? { reply_markup: ticketKeyboard(ticket, ticket.status === 'closed' ? 'closed' : 'open') }
+      : {})
+  };
   const filePath = publicUploadPath(message.file_url);
   const content = String(message.content || '').trim();
   if (message.message_type === 'text') {
@@ -2866,6 +2918,10 @@ function status() {
     botUsername: botUsername || null,
     threadedModeEnabled,
     richMessagesAvailable,
+    polling: {
+      ...(pollingLease?.status() || { owner: false, pausedUntil: null }),
+      ...pollingStats
+    },
     allowedOperators: ADMIN_IDS.size,
     registeredOperators,
     unassignedTickets,
@@ -2893,6 +2949,20 @@ function status() {
       inFlight: reminderRunning
     }
   };
+}
+
+async function shutdown() {
+  clearTimeout(cleanupTimer);
+  clearInterval(deliveryTimer);
+  clearInterval(reminderTimer);
+  clearTimeout(deliveryWakeTimer);
+  cleanupTimer = null;
+  deliveryTimer = null;
+  reminderTimer = null;
+  deliveryWakeTimer = null;
+  await pollingLease?.stop();
+  pollingLease = null;
+  await stopBot('shutdown');
 }
 
 async function createTopic(ticketId) {
@@ -2967,5 +3037,6 @@ module.exports = {
   checkTopicAlive,
   status,
   processUnansweredReminders,
-  notifyOperationalIssue: operationalAlert
+  notifyOperationalIssue: operationalAlert,
+  shutdown
 };

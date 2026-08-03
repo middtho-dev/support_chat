@@ -20,9 +20,11 @@ const edits = [];
 const deleted = [];
 const welcomeTickets = [];
 const operatorWaits = [];
+const socketEmits = [];
 let topicAttempts = 0;
 let nextTopicId = 500;
 let messageId = 10;
+let stopPollingCalls = 0;
 
 class FakeBot {
   constructor() {
@@ -35,6 +37,7 @@ class FakeBot {
     return Promise.resolve();
   }
   stopPolling() {
+    stopPollingCalls++;
     return Promise.resolve();
   }
   getMe() {
@@ -106,9 +109,14 @@ require.cache[telegramModule] = {
 };
 const db = require('../src/database');
 const { saveSettings } = require('../src/settings');
+const { createTelegramPollingLease } = require('../src/telegram-lease');
 const telegram = require('../src/telegram-private');
 const fakeBot = telegram.init(
-  { to: () => ({ emit: () => {} }) },
+  {
+    to: room => ({
+      emit: (event, payload) => socketEmits.push({ room, event, payload })
+    })
+  },
   {
     scheduleWelcomeMessages: ticketId => welcomeTickets.push(ticketId),
     scheduleOperatorWaitMessage: (ticketId, afterMessageId) => {
@@ -117,7 +125,8 @@ const fakeBot = telegram.init(
   }
 );
 
-test.after(() => {
+test.after(async () => {
+  await telegram.shutdown();
   if (db.db.open) db.db.close();
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -140,6 +149,53 @@ test('empty ticket creates a topic after a transient Telegram failure', async ()
   assert.doesNotMatch(intro.markdown, /Клиент открыл новое обращение|^> /m);
   assert.match(intro.markdown, /Оператор/);
   assert.match(intro.markdown, /Создан/);
+});
+
+test('the shared database lease allows only one polling owner', async () => {
+  let secondStarted = false;
+  const secondLease = createTelegramPollingLease({
+    database: db,
+    retryMs: 60000,
+    onAcquired: () => { secondStarted = true; },
+    logPrefix: '[TG standby test]'
+  });
+  secondLease.start();
+  await new Promise(resolve => setTimeout(resolve, 10));
+
+  assert.equal(secondStarted, false);
+  assert.equal(secondLease.status().owner, false);
+  await secondLease.stop();
+});
+
+test('an operator reply from a Telegram topic is persisted and emitted to the web customer', async () => {
+  const ticketId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const messagesBefore = db.getMessages.all(ticketId).length;
+  await fakeBot.handlers.message({
+    message_id: 880,
+    message_thread_id: 501,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    text: 'Ответ через Telegram'
+  });
+
+  const messages = db.getMessages.all(ticketId);
+  assert.equal(messages.length, messagesBefore + 1);
+  assert.equal(messages.at(-1).sender, 'support');
+  assert.equal(messages.at(-1).content, 'Ответ через Telegram');
+  assert.ok(socketEmits.some(item =>
+    item.room === `ticket:${ticketId}` &&
+    item.event === 'message' &&
+    item.payload?.content === 'Ответ через Telegram'
+  ));
+
+  await fakeBot.handlers.message({
+    message_id: 880,
+    message_thread_id: 501,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    text: 'Ответ через Telegram'
+  });
+  assert.equal(db.getMessages.all(ticketId).length, messagesBefore + 1);
 });
 
 test('Telegram service messages are removed before bot and topic routing', async () => {
@@ -247,6 +303,13 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.equal(userMessage.content, 'Нужна помощь с подключением');
   assert.equal(userMessage.telegram_source_message_id, 801);
   assert.ok(userMessage.telegram_message_id);
+  const operatorDelivery = rich.find(item =>
+    item.markdown.includes('Нужна помощь с подключением') &&
+    item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
+      button.web_app?.url?.includes(`ticket=${ticket.id}`) && button.text.includes('Открыть чат')
+    )
+  );
+  assert.ok(operatorDelivery, 'each customer message has a direct Mini App chat button');
   assert.ok(operatorWaits.some(item =>
     item.ticketId === ticket.id && item.afterMessageId === userMessage.id
   ));
@@ -389,4 +452,26 @@ test('single-operator auto assignment can be disabled in settings', async () => 
     item.chatId === '7001' && item.markdown.includes('Ждёт оператора')
   ));
   saveSettings({ telegramAutoAssignSingleOperator: true });
+});
+
+test('a getUpdates conflict stops this polling instance without sending a Telegram alert', async () => {
+  const telegramAlertsBefore = sent.filter(item => item.text.includes('Контроль доставки чата')).length;
+  const stopsBefore = stopPollingCalls;
+  fakeBot.handlers.polling_error({
+    response: {
+      status: 409,
+      body: {
+        description: 'Conflict: terminated by other getUpdates request; make sure that only one bot instance is running'
+      }
+    }
+  });
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  assert.ok(stopPollingCalls > stopsBefore);
+  assert.equal(
+    sent.filter(item => item.text.includes('Контроль доставки чата')).length,
+    telegramAlertsBefore
+  );
+  assert.equal(telegram.status().polling.owner, false);
+  assert.equal(telegram.status().polling.conflicts, 1);
 });
