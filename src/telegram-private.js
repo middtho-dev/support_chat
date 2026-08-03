@@ -30,10 +30,6 @@ const TOPIC_CREATE_RETRY_MS = Math.max(
   100,
   Math.min(10000, Number(process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS) || 1000)
 );
-const POLLING_CONFLICT_PAUSE_MS = Math.max(
-  30000,
-  Math.min(15 * 60 * 1000, Number(process.env.TELEGRAM_CONFLICT_PAUSE_MS) || 30000)
-);
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
 const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.opus']);
@@ -129,8 +125,11 @@ const deliveryStats = {
 const pollingStats = {
   conflicts: 0,
   lastConflictAt: null,
-  lastConflict: null
+  lastConflict: null,
+  consecutiveErrors: 0,
+  lastError: null
 };
+const POLLING_ALERT_AFTER_ERRORS = 3;
 const reminderStats = {
   sent: 0,
   failed: 0,
@@ -222,7 +221,7 @@ function reportPollingConflict(error) {
   pollingStats.lastConflictAt = new Date().toISOString();
   pollingStats.lastConflict = details;
   console.error(
-    '[TG private] Another getUpdates consumer is active; this instance stopped polling:',
+    '[TG private] Another getUpdates consumer is active; polling will retry automatically:',
     details
   );
 
@@ -234,9 +233,19 @@ function reportPollingConflict(error) {
   io?.to('admin').emit('operational_alert', {
     key,
     message: 'Обнаружен второй экземпляр Telegram-бота',
-    details: `${details}. Конфликтующий polling остановлен без Telegram-уведомления.`,
+    details: `${details}. Повторная попытка polling выполняется автоматически без Telegram-уведомления.`,
     createdAt: new Date().toISOString()
   });
+}
+
+function recordPollingError(error) {
+  pollingStats.consecutiveErrors++;
+  pollingStats.lastError = tgError(error);
+  return pollingStats.consecutiveErrors >= POLLING_ALERT_AFTER_ERRORS;
+}
+
+function resetPollingErrors() {
+  pollingStats.consecutiveErrors = 0;
 }
 
 function normalizeIncomingDocument(fileName, declaredMime) {
@@ -733,20 +742,25 @@ async function startBot() {
       connected = false;
       if (isPollingConflict(error)) {
         reportPollingConflict(error);
-        pollingLease?.pause(POLLING_CONFLICT_PAUSE_MS, 'polling-conflict').catch(() => {});
         return;
       }
-      console.error('[TG private] Polling:', tgError(error));
-      operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(error)).catch(() => {});
+      const notify = recordPollingError(error);
+      console.error(
+        `[TG private] Polling (${pollingStats.consecutiveErrors}/${POLLING_ALERT_AFTER_ERRORS}):`,
+        tgError(error)
+      );
+      if (notify) {
+        operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(error)).catch(() => {});
+      }
     });
     instance.on('error', error => {
       if (instance !== bot) return;
       console.error('[TG private] Error:', tgError(error));
     });
     instance.on('message', handleMessage);
-    instance.on('callback_query', handleCallbackQuery);
-    instance.on('message_reaction', handleMessageReaction);
-    instance.on('message_reaction_count', handleMessageReactionCount);
+    instance.on('callback_query', query => { resetPollingErrors(); return handleCallbackQuery(query); });
+    instance.on('message_reaction', update => { resetPollingErrors(); return handleMessageReaction(update); });
+    instance.on('message_reaction_count', update => { resetPollingErrors(); return handleMessageReactionCount(update); });
     await instance.startPolling();
     await configureBot(instance);
     return instance;
@@ -772,6 +786,7 @@ async function configureBot(instance = bot) {
   const me = await instance.getMe();
   if (instance !== bot) return;
   connected = true;
+  resetPollingErrors();
   botUsername = me.username || '';
   threadedModeEnabled = !!me.has_topics_enabled;
   const customerCommands = [
@@ -1081,11 +1096,15 @@ async function clearCustomerTicketChat(ticket, { extraMessageIds = [] } = {}) {
   }
   db.clearTelegramCustomerChatMessages.run(fresh.id);
   if (failed.length) {
-    await operationalAlert(
-      `tg-customer-cleanup-${fresh.id}`,
-      `Не удалось полностью очистить чат тикета ${shortId(fresh)}`,
-      `Не удалены сообщения: ${failed.join(', ')}`
-    );
+    const details = `Не удалены сообщения: ${failed.join(', ')}`;
+    deliveryStats.lastError = `Очистка чата ${shortId(fresh)}: ${details}`;
+    console.warn(`[TG private] Не удалось полностью очистить чат тикета ${shortId(fresh)}. ${details}`);
+    io?.to('admin').emit('operational_alert', {
+      key: `tg-customer-cleanup-${fresh.id}`,
+      message: `Не удалось полностью очистить чат тикета ${shortId(fresh)}`,
+      details,
+      createdAt: new Date().toISOString()
+    });
   }
 }
 
@@ -1820,6 +1839,7 @@ async function focusTicketTopic(ticket, operator) {
 }
 
 async function handleCallbackQuery(query) {
+  resetPollingErrors();
   if (!tgEnabled()) return;
   const userId = String(query.from?.id || '');
   if (query.message?.chat?.type !== 'private') {
@@ -1830,23 +1850,31 @@ async function handleCallbackQuery(query) {
     const action = String(query.data || '');
     await bot.answerCallbackQuery(query.id).catch(() => {});
     if (!cfg().telegramCustomerEnabled) return;
-    if (action === 'customer:close') return closeCustomerTicket({
-      from: query.from,
-      chat: query.message.chat,
-      message_id: query.message.message_id
-    });
-    if (action === 'customer:new') {
-      const existing = db.getOpenTicketByTelegramCustomer.get(userId);
-      if (existing) {
-        return ensureCustomerControlMessage(existing, { forceNew: true, repin: true });
-      }
-      const result = await ensureCustomerTicket({
+    try {
+      if (action === 'customer:close') return closeCustomerTicket({
         from: query.from,
-        chat: query.message.chat
-      }, { forceNew: true });
-      return startCustomerTicketExperience(result.ticket, {
-        replaceMessageId: query.message.message_id
+        chat: query.message.chat,
+        message_id: query.message.message_id
       });
+      if (action === 'customer:new') {
+        const existing = db.getOpenTicketByTelegramCustomer.get(userId);
+        if (existing) {
+          return ensureCustomerControlMessage(existing, { forceNew: true, repin: true });
+        }
+        const result = await ensureCustomerTicket({
+          from: query.from,
+          chat: query.message.chat
+        }, { forceNew: true });
+        return startCustomerTicketExperience(result.ticket, {
+          replaceMessageId: query.message.message_id
+        });
+      }
+    } catch (error) {
+      console.error('[TG private] customer callback:', tgError(error));
+      await bot.sendMessage(
+        query.message.chat.id,
+        '⚠️ Не удалось создать тикет. Попробуйте нажать кнопку ещё раз.'
+      ).catch(() => {});
     }
     return;
   }
@@ -1983,6 +2011,7 @@ function parseCommand(text) {
 
 async function handleMessage(msg) {
   connected = true;
+  resetPollingErrors();
   if (!tgEnabled() || msg.chat?.type !== 'private') return;
   if (await handleTelegramServiceMessage(msg)) return;
   if (msg.from?.is_bot) return;

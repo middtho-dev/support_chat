@@ -28,11 +28,14 @@ const forwardingMessages = new Set();
 const incomingMessages = new Set();
 const alertTimes = new Map();
 const deliveryStats = { delivered: 0, failed: 0, retried: 0, incomingDuplicates: 0, mediaFailures: 0, lastError: null, lastSuccessAt: null };
-const pollingStats = { conflicts: 0, lastConflictAt: null, lastConflict: null };
-const POLLING_CONFLICT_PAUSE_MS = Math.max(
-  30000,
-  Math.min(15 * 60 * 1000, Number(process.env.TELEGRAM_CONFLICT_PAUSE_MS) || 30000)
-);
+const pollingStats = {
+  conflicts: 0,
+  lastConflictAt: null,
+  lastConflict: null,
+  consecutiveErrors: 0,
+  lastError: null
+};
+const POLLING_ALERT_AFTER_ERRORS = 3;
 
 function cfg() { return loadSettings(); }
 function tgEnabled() { const s = cfg(); return s.telegramEnabled && !!bot && !!GROUP_ID && !!pollingLease?.isOwner(); }
@@ -123,7 +126,7 @@ function reportPollingConflict(error) {
   pollingStats.conflicts++;
   pollingStats.lastConflictAt = new Date().toISOString();
   pollingStats.lastConflict = details;
-  console.error('[TG] Another getUpdates consumer is active; this instance stopped polling:', details);
+  console.error('[TG] Another getUpdates consumer is active; polling will retry automatically:', details);
   const key = 'telegram-polling-conflict';
   const now = Date.now();
   const cooldownMs = Number(cfg().operationalAlertCooldownMinutes || 15) * 60 * 1000;
@@ -132,9 +135,19 @@ function reportPollingConflict(error) {
   io?.to('admin').emit('operational_alert', {
     key,
     message: 'Обнаружен второй экземпляр Telegram-бота',
-    details: `${details}. Конфликтующий polling остановлен без Telegram-уведомления.`,
+    details: `${details}. Повторная попытка polling выполняется автоматически без Telegram-уведомления.`,
     createdAt: new Date().toISOString()
   });
+}
+
+function recordPollingError(error) {
+  pollingStats.consecutiveErrors++;
+  pollingStats.lastError = tgError(error);
+  return pollingStats.consecutiveErrors >= POLLING_ALERT_AFTER_ERRORS;
+}
+
+function resetPollingErrors() {
+  pollingStats.consecutiveErrors = 0;
 }
 
 function isDisposableTelegramServiceMessage(msg) {
@@ -306,18 +319,22 @@ async function startBot() {
       if (connected) { connected = false; console.error('[TG] Lost:', err.message); }
       if (isPollingConflict(err)) {
         reportPollingConflict(err);
-        pollingLease?.pause(POLLING_CONFLICT_PAUSE_MS, 'polling-conflict').catch(() => {});
         return;
       }
-      operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(err)).catch(() => {});
+      const notify = recordPollingError(err);
+      console.error(`[TG] Polling (${pollingStats.consecutiveErrors}/${POLLING_ALERT_AFTER_ERRORS}):`, tgError(err));
+      if (notify) {
+        operationalAlert('telegram-polling', 'Потеряно соединение с Telegram', tgError(err)).catch(() => {});
+      }
     });
     instance.on('error', err => { if (instance === bot) console.error('[TG] Error:', err.message); });
-    instance.on('message', async msg => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessage(msg); });
-    instance.on('callback_query', async query => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleCallbackQuery(query); });
-    instance.on('message_reaction', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
-    instance.on('message_reaction_count', async update => { if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
+    instance.on('message', async msg => { resetPollingErrors(); if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessage(msg); });
+    instance.on('callback_query', async query => { resetPollingErrors(); if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleCallbackQuery(query); });
+    instance.on('message_reaction', async update => { resetPollingErrors(); if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReaction(update); });
+    instance.on('message_reaction_count', async update => { resetPollingErrors(); if (!connected) { connected = true; console.log('[TG] Connected ✓'); } await handleMessageReactionCount(update); });
     await instance.startPolling();
     connected = true;
+    resetPollingErrors();
     await configureAdminWebApp(instance);
     return instance;
   } catch (e) {

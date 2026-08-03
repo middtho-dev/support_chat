@@ -122,6 +122,9 @@ function initTelegramMiniApp() {
   applyTelegramViewport();
   TG.onEvent?.('themeChanged', applyTelegramTheme);
   TG.onEvent?.('viewportChanged', applyTelegramViewport);
+  TG.onEvent?.('safeAreaChanged', applyTelegramViewport);
+  TG.onEvent?.('contentSafeAreaChanged', applyTelegramViewport);
+  TG.onEvent?.('fullscreenChanged', applyTelegramViewport);
   TG.BackButton?.onClick(handleTelegramBack);
 }
 
@@ -172,6 +175,20 @@ function applyTelegramViewport() {
   if (stableHeight > 0) {
     document.documentElement.style.setProperty('--tg-stable-height', `${stableHeight}px`);
   }
+  const contentInsets = TG?.contentSafeAreaInset || {};
+  const safeInsets = TG?.safeAreaInset || {};
+  const topInset = Math.max(
+    0,
+    Number(contentInsets.top) || 0,
+    Number(safeInsets.top) || 0
+  );
+  const bottomInset = Math.max(
+    0,
+    Number(contentInsets.bottom) || 0,
+    Number(safeInsets.bottom) || 0
+  );
+  document.documentElement.style.setProperty('--tg-top-ui', `${Math.round(topInset)}px`);
+  document.documentElement.style.setProperty('--tg-bottom-ui', `${Math.round(bottomInset)}px`);
 }
 
 function tgImpact(style = 'light') {
