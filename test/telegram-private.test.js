@@ -18,6 +18,7 @@ const pins = [];
 const unpins = [];
 const edits = [];
 const deleted = [];
+const callbackAnswers = [];
 const welcomeTickets = [];
 const operatorWaits = [];
 const socketEmits = [];
@@ -86,7 +87,8 @@ class FakeBot {
     deleted.push({ chatId: String(chatId), messageId: Number(deletedMessageId) });
     return Promise.resolve();
   }
-  answerCallbackQuery() {
+  answerCallbackQuery(id, options) {
+    callbackAnswers.push({ id, options });
     return Promise.resolve();
   }
   createForumTopic() {
@@ -450,6 +452,33 @@ test('/start immediately creates a ticket and replaces the command with a Rich c
   assert.ok(deleted.some(item =>
     item.chatId === customerId &&
     item.messageId === control.messageId
+  ));
+});
+
+test('close button responds immediately and closes a ticket from its operator topic', async () => {
+  const id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  db.createTicket.run(id, 'Закрытие из темы', 'session-close-button');
+  db.saveTelegramThread.run(id, '7001', '7001', 909, null);
+
+  const answersBefore = callbackAnswers.length;
+  await fakeBot.handlers.callback_query({
+    id: 'close-ticket-query',
+    from: { id: 7001, first_name: 'Оператор' },
+    message: {
+      chat: { id: 7001, type: 'private' },
+      message_thread_id: 909
+    },
+    data: `close:${id}`
+  });
+
+  assert.equal(callbackAnswers.length, answersBefore + 1);
+  assert.equal(callbackAnswers.at(-1).id, 'close-ticket-query');
+  assert.match(callbackAnswers.at(-1).options.text, /Закрываю тикет/);
+  assert.equal(db.getTicketById.get(id).status, 'closed');
+  assert.ok(sent.some(item =>
+    item.chatId === '7001' &&
+    item.options?.message_thread_id === 909 &&
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === `reopen:${id}`
   ));
 });
 

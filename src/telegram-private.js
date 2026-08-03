@@ -389,6 +389,21 @@ function ticketKeyboard(ticket, state = 'open') {
   return { inline_keyboard: rows };
 }
 
+function operatorCanControlTicket(ticket, operatorId, query) {
+  if (String(ticket.assigned_operator_id || '') === String(operatorId)) return true;
+
+  const chatId = String(query?.message?.chat?.id || '');
+  const threadId = Number(query?.message?.message_thread_id || 0);
+  if (!chatId || !threadId) return false;
+
+  const thread = db.getTelegramThreadByDestination.get(chatId, threadId);
+  return Boolean(
+    thread
+    && thread.ticket_id === ticket.id
+    && String(thread.operator_id || '') === String(operatorId)
+  );
+}
+
 function dashboardKeyboard(counts = {}) {
   const rows = [[
     { text: `🔔 Новые · ${Number(counts.waiting || 0)}`, callback_data: 'list:waiting:0' },
@@ -1888,26 +1903,22 @@ async function handleCallbackQuery(query) {
   };
   try {
     if (data === 'dashboard:refresh' || data === 'dashboard:show' || data === 'queue:refresh') {
+      await answer();
       await editPanel(query.message, dashboardModel(operator));
-      await bot.answerCallbackQuery(query.id, {
-        text: data === 'dashboard:refresh' || data === 'queue:refresh'
-          ? 'Данные обновлены'
-          : 'Панель оператора'
-      });
       return;
     }
     if (data === 'queue:list') {
+      await answer();
       await editPanel(query.message, ticketListModel(operator, 'waiting', 0));
-      await bot.answerCallbackQuery(query.id, { text: 'Очередь открыта' });
       return;
     }
     const listMatch = data.match(/^list:(waiting|mine|closed):(\d+)$/);
     if (listMatch) {
+      await answer();
       await editPanel(
         query.message,
         ticketListModel(operator, listMatch[1], Number(listMatch[2]))
       );
-      await bot.answerCallbackQuery(query.id);
       return;
     }
     const parts = data.split(':');
@@ -1929,10 +1940,8 @@ async function handleCallbackQuery(query) {
       return;
     }
     if (action === 'focus') {
+      await answer();
       await focusTicketTopic(ticket, operator);
-      await bot.answerCallbackQuery(query.id, {
-        text: 'Тема поднята наверх списка'
-      });
       return;
     }
     if (action === 'restore') {
@@ -1958,7 +1967,7 @@ async function handleCallbackQuery(query) {
       }
       return;
     }
-    if (String(ticket.assigned_operator_id || '') !== userId) {
+    if (!operatorCanControlTicket(ticket, userId, query)) {
       await bot.answerCallbackQuery(query.id, { text: 'Тикет назначен другому оператору', show_alert: true });
       return;
     }
