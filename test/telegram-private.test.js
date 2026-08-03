@@ -403,6 +403,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.messageId === refreshedTicket.telegram_customer_control_message_id
   );
   assert.match(closePrompt.markdown, /Если ваш вопрос решён/);
+  assert.doesNotMatch(closePrompt.markdown, /Тикет #|Оператор уже получил|Статус:/);
 
   const activeControlMessageId = refreshedTicket.telegram_customer_control_message_id;
   await fakeBot.handlers.callback_query({

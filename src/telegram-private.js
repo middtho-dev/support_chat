@@ -925,16 +925,16 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
       fallback: [`✅ Тикет #${shortId(ticket)} закрыт`, '', `${body}${fallbackReason}`].join('\n')
     };
   }
+  if (showClosePrompt) {
+    const prompt = formatTemplate(settings.telegramCustomerClosePromptText, values);
+    return { markdown: prompt, fallback: prompt };
+  }
   const body = formatTemplate(settings.telegramCustomerNewTicketText, values);
-  const closePrompt = showClosePrompt
-    ? formatTemplate(settings.telegramCustomerClosePromptText, values)
-    : '';
   return {
     markdown: [
       `## 🎫 Тикет #${markdownEscape(shortId(ticket))} создан`,
       '',
       body,
-      ...(closePrompt ? ['', closePrompt] : []),
       '',
       `**Статус:** открыт`
     ].join('\n'),
@@ -942,7 +942,6 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
       `🎫 Тикет #${shortId(ticket)} создан`,
       '',
       body,
-      ...(closePrompt ? ['', closePrompt] : []),
       '',
       'Статус: открыт'
     ].join('\n')
