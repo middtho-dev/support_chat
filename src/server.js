@@ -425,6 +425,14 @@ app.post('/api/session/resume', (req, res) => {
   const cfg = loadSettings();
   res.json({ ticket, messages, hasMore: total > PAGE, settings: cfg, online: isWithinWorkHours(cfg) });
 });
+
+app.post('/api/session/messages-seen', (req, res) => {
+  const { sessionToken, ticketId, messageIds } = req.body || {};
+  if (!sessionToken || !ticketId) return res.status(400).json({ error: 'Missing params' });
+  const ticket = db.getTicketBySessionAny.get(sessionToken);
+  if (!ticket || ticket.id !== ticketId) return res.status(403).json({ error: 'Forbidden' });
+  res.json({ ok: true, delivered: confirmCustomerMessagesSeen(ticket, messageIds) });
+});
 app.get('/api/chat-config', (req, res) => res.json(publicConfig()));
 
 app.get('/api/tickets/:ticketId/messages', (req, res) => {
@@ -602,6 +610,20 @@ function ticketSnapshot(ticket) {
   };
 }
 
+function confirmCustomerMessagesSeen(ticket, messageIds) {
+  const ids = Array.isArray(messageIds)
+    ? [...new Set(messageIds.filter(id => typeof id === 'string'))].slice(0, 100)
+    : [];
+  for (const id of ids) {
+    if (typeof telegram.confirmWebCustomerDelivery === 'function') {
+      telegram.confirmWebCustomerDelivery(ticket.id, id);
+    } else {
+      db.markWebMessageDelivered.run(ticket.id, id);
+    }
+  }
+  return ids.length;
+}
+
 io.on('connection', (socket) => {
   console.log('[Socket] Connected:', socket.id);
 
@@ -636,11 +658,7 @@ io.on('connection', (socket) => {
     if (!ticket || ticket.id !== ticketId || socket.ticketId !== ticketId) {
       return ack?.({ error: 'Unauthorized' });
     }
-    const ids = Array.isArray(messageIds)
-      ? [...new Set(messageIds.filter(id => typeof id === 'string'))].slice(0, 100)
-      : [];
-    for (const id of ids) db.markWebMessageDelivered.run(ticketId, id);
-    ack?.({ ok: true, delivered: ids.length });
+    ack?.({ ok: true, delivered: confirmCustomerMessagesSeen(ticket, messageIds) });
   });
 
   socket.on('typing', () => {
