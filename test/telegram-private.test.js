@@ -170,6 +170,18 @@ test('an operator added from settings can use the bot without settings access', 
   db.deactivateTelegramOperator.run('7002');
 });
 
+test('a managed operator remains visible in the operator list after access is granted', () => {
+  db.saveManagedTelegramOperator.run('7003', 'Видимый оператор', 'visible_operator', 1, 1);
+
+  const operator = db.listTelegramOperators.all().find(item => item.telegram_user_id === '7003');
+  assert.ok(operator);
+  assert.equal(operator.display_name, 'Видимый оператор');
+  assert.equal(operator.active, 1);
+  assert.equal(operator.can_manage_settings, 1);
+
+  db.deactivateTelegramOperator.run('7003');
+});
+
 test('the shared database lease allows only one polling owner', async () => {
   let secondStarted = false;
   const secondLease = createTelegramPollingLease({

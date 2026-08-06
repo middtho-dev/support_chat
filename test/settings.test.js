@@ -86,3 +86,18 @@ test('legacy Telegram ticket confirmation is upgraded to the pinned card templat
   assert.doesNotMatch(saved.telegramCustomerNewTicketText, /обращени/i);
   assert.match(saved.telegramCustomerNewTicketText, /оператор/i);
 });
+
+test('failed Telegram chat cleanup remains queued for retry', () => {
+  const ticketId = 'cleanup-queue-ticket';
+  db.createTicket.run(ticketId, 'Очистка', 'cleanup-queue-session');
+  db.enqueueTelegramCustomerCleanup.run('9901', 42, ticketId, 'temporary Telegram error');
+
+  const queued = db.getPendingTelegramCustomerCleanup.all(10);
+  assert.ok(queued.some(item => item.chat_id === '9901' && item.message_id === 42));
+
+  db.markTelegramCustomerCleanupAttempt.run('temporary Telegram error', '+15 seconds', '9901', 42);
+  const retried = db.db.prepare('SELECT * FROM telegram_customer_cleanup_queue WHERE chat_id = ? AND message_id = ?').get('9901', 42);
+  assert.equal(retried.attempts, 1);
+
+  db.deleteTelegramCustomerCleanup.run('9901', 42);
+});

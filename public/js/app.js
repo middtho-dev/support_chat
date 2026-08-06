@@ -26,12 +26,10 @@ const newbtn=$('newbtn');
 const socket=io({autoConnect:false});
 socket.on('message',msg=>{
   if(msg?.id&&S._msgs.some(existing=>existing.id===msg.id))return;
-  const b=isBot();
   S._msgs.push(msg);
   renderMsg(msg);
   saveMsgCache();
-  if(b)scrollBot();
-  else{S.unread++;updSDB()}
+  scrollBot(false);
   if(msg.sender==='support'){hideSupportTyping();playNotifSound();showBrowserNotif(msg);}
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Тикет закрыт оператором':by==='inactivity'?'Тикет закрыт по неактивности':'Тикет закрыт','info')});
@@ -107,6 +105,9 @@ async function init(){
     if(document.visibilityState==='visible'&&S.tid)refreshMessages();
     if(document.visibilityState==='visible'&&socket.connected)setConnStatus('on');
   });
+  setInterval(()=>{
+    if(document.visibilityState==='visible'&&S.tid)refreshMessages();
+  },4000);
 
   // Bell button → request notification permission
   $('nbtn')?.addEventListener('click',requestNotifications);
@@ -436,7 +437,7 @@ function scrollBot(smooth=true){
 
 // Re-pin whenever content height grows (images loading, new messages, etc.)
 new ResizeObserver(()=>{
-  if(_pinToBottom) mwrap.scrollTo({top:mwrap.scrollHeight,behavior:'auto'});
+  mwrap.scrollTo({top:mwrap.scrollHeight,behavior:'auto'});
 }).observe(ml);
 
 function updSDB(){
@@ -555,8 +556,10 @@ function setConnStatus(s){
 }
 
 /* ── REFRESH MESSAGES ── */
+let _refreshMessagesPending=false;
 async function refreshMessages(){
-  if(!S.tid||!S.token)return;
+  if(!S.tid||!S.token||_refreshMessagesPending)return;
+  _refreshMessagesPending=true;
   try{
     const r=await fetch('/api/session/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
     if(!r.ok)return;
@@ -570,12 +573,11 @@ async function refreshMessages(){
     const knownIds=new Set(S._msgs.map(m=>m.id));
     const fresh=messages.filter(m=>m.id&&!knownIds.has(m.id));
     if(!fresh.length)return;
-    const atBottom=isBot();
     S._msgs.push(...fresh);
     fresh.forEach(renderMsg);
     saveMsgCache();
-    if(atBottom)scrollBot(false);
-  }catch{}
+    scrollBot(false);
+  }catch{}finally{_refreshMessagesPending=false;}
 }
 
 /* ── SUPPORT TYPING ── */
