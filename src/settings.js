@@ -95,12 +95,15 @@ const DEFAULTS = {
   telegramRichTranscriptGroupSpacing: 'compact',
   telegramRichTranscriptDensity: 'normal',
   telegramRichTranscriptOrder: 'oldest_first',
-  telegramRichTranscriptUserLabel: '👤 Клиент',
+  telegramRichTranscriptUserLabel: '👤 {name}',
   telegramRichTranscriptOperatorLabel: '🛟 {name}',
   telegramRichTranscriptShowMediaLabel: true,
   telegramRichTranscriptShowOmittedNotice: true,
   telegramRichTranscriptFooter: '',
   telegramRichTranscriptEmptyText: 'Пока нет сообщений',
+  telegramRichTranscriptEntryEffect: 'off',
+  telegramRichTranscriptEntryEffectDelayMs: 180,
+  telegramRichTranscriptEntryEffectText: 'Собираем диалог…',
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
   telegramNewEmoji: '❗',
   telegramOpenEmoji: '🔵',
@@ -212,6 +215,9 @@ const KEY_MAP = {
   telegramRichTranscriptShowOmittedNotice: 'telegram_rich_transcript_show_omitted_notice',
   telegramRichTranscriptFooter: 'telegram_rich_transcript_footer',
   telegramRichTranscriptEmptyText: 'telegram_rich_transcript_empty_text',
+  telegramRichTranscriptEntryEffect: 'telegram_rich_transcript_entry_effect',
+  telegramRichTranscriptEntryEffectDelayMs: 'telegram_rich_transcript_entry_effect_delay_ms',
+  telegramRichTranscriptEntryEffectText: 'telegram_rich_transcript_entry_effect_text',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -346,15 +352,23 @@ function normalize(input = {}) {
     telegramRichTranscriptGroupContinuation: ['time', 'none'],
     telegramRichTranscriptGroupSpacing: ['compact', 'inherit'],
     telegramRichTranscriptDensity: ['compact', 'normal', 'airy'],
-    telegramRichTranscriptOrder: ['oldest_first', 'newest_first']
+    telegramRichTranscriptOrder: ['oldest_first', 'newest_first'],
+    telegramRichTranscriptEntryEffect: ['off', 'draft']
   };
   for (const [key, allowed] of Object.entries(transcriptOptions)) {
     cfg[key] = allowed.includes(cfg[key]) ? cfg[key] : DEFAULTS[key];
   }
   cfg.telegramRichTranscriptUserLabel = sanitizeText(cfg.telegramRichTranscriptUserLabel, DEFAULTS.telegramRichTranscriptUserLabel, 80) || DEFAULTS.telegramRichTranscriptUserLabel;
+  // The original preset rendered the literal word "Клиент" even though each
+  // ticket already has a name. Upgrade that preset, but leave custom labels intact.
+  if (cfg.telegramRichTranscriptUserLabel === '👤 Клиент') {
+    cfg.telegramRichTranscriptUserLabel = DEFAULTS.telegramRichTranscriptUserLabel;
+  }
   cfg.telegramRichTranscriptOperatorLabel = sanitizeText(cfg.telegramRichTranscriptOperatorLabel, DEFAULTS.telegramRichTranscriptOperatorLabel, 120) || DEFAULTS.telegramRichTranscriptOperatorLabel;
   cfg.telegramRichTranscriptFooter = sanitizeText(cfg.telegramRichTranscriptFooter, DEFAULTS.telegramRichTranscriptFooter, 240);
   cfg.telegramRichTranscriptEmptyText = sanitizeText(cfg.telegramRichTranscriptEmptyText, DEFAULTS.telegramRichTranscriptEmptyText, 240) || DEFAULTS.telegramRichTranscriptEmptyText;
+  cfg.telegramRichTranscriptEntryEffectDelayMs = clamp(cfg.telegramRichTranscriptEntryEffectDelayMs, 0, 1200, DEFAULTS.telegramRichTranscriptEntryEffectDelayMs);
+  cfg.telegramRichTranscriptEntryEffectText = sanitizeText(cfg.telegramRichTranscriptEntryEffectText, DEFAULTS.telegramRichTranscriptEntryEffectText, 120) || DEFAULTS.telegramRichTranscriptEntryEffectText;
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
   cfg.telegramCloseButtonEmojiId = sanitizeText(cfg.telegramCloseButtonEmojiId, '', 128);

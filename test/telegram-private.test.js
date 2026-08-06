@@ -14,6 +14,7 @@ process.env.PUBLIC_URL = 'https://support.example';
 
 const sent = [];
 const rich = [];
+const richDrafts = [];
 const pins = [];
 const unpins = [];
 const edits = [];
@@ -76,6 +77,10 @@ class FakeBot {
       messageId: sentMessageId
     });
     return Promise.resolve({ message_id: sentMessageId });
+  }
+  sendRichMessageDraft(chatId, draftId, payload, options) {
+    richDrafts.push({ chatId: String(chatId), draftId, markdown: payload.markdown, options });
+    return Promise.resolve(true);
   }
   editMessageText(text, options) {
     edits.push({ text, options });
@@ -432,7 +437,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   const transcript = edits.findLast(item =>
     item.text?.rich_message?.markdown?.includes('Нужна помощь с подключением')
   )?.text.rich_message.markdown;
-  assert.match(transcript, /\*\*👤 Клиент\*\* · _\d{2}:\d{2}_/);
+  assert.match(transcript, /\*\*👤 Анна Клиент\*\* · _\d{2}:\d{2}_/);
   assert.equal(
     rich.filter(item =>
       item.chatId === '7001' && item.markdown.includes('Нужна помощь с подключением')
@@ -827,9 +832,59 @@ test('Rich transcript groups consecutive messages and keeps only time in continu
     await telegram.refreshOpenTicketTranscripts();
     const card = rich.findLast(item => item.options?.message_thread_id === 921);
     assert.ok(card);
-    assert.match(card.markdown, /\*\*👤 Клиент\*\* · _15:15_[\s\S]*Первая реплика/);
+    assert.match(card.markdown, /\*\*👤 Группа\*\* · _15:15_[\s\S]*Первая реплика/);
     assert.match(card.markdown, /_15:16_[\s\S]*Вторая реплика/);
-    assert.equal((card.markdown.match(/👤 Клиент/g) || []).length, 1);
+    assert.equal((card.markdown.match(/👤 Группа/g) || []).length, 1);
+  } finally {
+    saveSettings(previous);
+  }
+});
+
+test('Rich transcript uses the customer name in the default client label', async () => {
+  const previous = saveSettings({});
+  try {
+    saveSettings({
+      telegramRichTranscriptUserLabel: '👤 {name}',
+      telegramRichTranscriptShowAuthor: true,
+      telegramRichTranscriptShowTime: false
+    });
+    const id = 'rich-customer-name-ticket-0000-000000000';
+    db.createTicket.run(id, 'Имя из Telegram', 'session-rich-customer-name');
+    db.assignTicket.run('7001', id);
+    db.saveTelegramThread.run(id, '7001', '7001', 922, null);
+    db.saveMessage.run('rich-customer-name-message', id, 'user', 'Имя из Telegram', 'Здравствуйте', 'text', null, null, null, null, null);
+
+    await telegram.refreshOpenTicketTranscripts();
+    const card = rich.findLast(item => item.options?.message_thread_id === 922);
+    assert.ok(card);
+    assert.match(card.markdown, /👤 Имя из Telegram/);
+    assert.doesNotMatch(card.markdown, /👤 Клиент/);
+  } finally {
+    saveSettings(previous);
+  }
+});
+
+test('Rich transcript can stream an optional native entry effect without replacing the final card', async () => {
+  const previous = saveSettings({});
+  try {
+    saveSettings({
+      telegramRichTranscriptEntryEffect: 'draft',
+      telegramRichTranscriptEntryEffectDelayMs: 0,
+      telegramRichTranscriptEntryEffectText: 'Формируем карточку…'
+    });
+    const id = 'rich-entry-effect-ticket-0000-0000000000';
+    db.createTicket.run(id, 'Эффект', 'session-rich-entry-effect');
+    db.assignTicket.run('7001', id);
+    db.saveTelegramThread.run(id, '7001', '7001', 923, null);
+    db.saveMessage.run('rich-entry-effect-message', id, 'user', 'Эффект', 'Плавное появление', 'text', null, null, null, null, null);
+
+    const before = richDrafts.length;
+    await telegram.refreshOpenTicketTranscripts();
+    const drafts = richDrafts.slice(before).filter(item => item.options?.message_thread_id === 923);
+    assert.equal(drafts.length, 2);
+    assert.equal(drafts[0].markdown, '<tg-thinking>Формируем карточку…</tg-thinking>');
+    assert.match(drafts[1].markdown, /Плавное появление/);
+    assert.ok(rich.findLast(item => item.options?.message_thread_id === 923));
   } finally {
     saveSettings(previous);
   }

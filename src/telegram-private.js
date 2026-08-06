@@ -123,6 +123,7 @@ let reminderRunning = false;
 let connected = false;
 let threadedModeEnabled = false;
 let richMessagesAvailable = true;
+let richDraftsAvailable = true;
 let botUsername = '';
 let pollingLease = null;
 
@@ -141,6 +142,7 @@ const topicStatus = new Map();
 const topicStatusUpdates = new Map();
 const topicStatusVerificationTimers = new Map();
 const focusMarkers = new Map();
+let richDraftId = Math.max(1, Math.floor(Math.random() * 0x7fffffff));
 const deliveryStats = {
   delivered: 0,
   failed: 0,
@@ -970,6 +972,7 @@ async function publishTicketTranscript(ticket, thread) {
         const removed = await deleteTelegramMessage(activeThread.chat_id, rootMessageId);
         if (!removed) throw new Error('Unable to update ticket transcript');
       }
+      await showRichTranscriptEntryEffect(activeThread, model);
       const sent = await sendRichOrText(
         activeThread.chat_id,
         model.markdown,
@@ -991,6 +994,44 @@ async function publishTicketTranscript(ticket, thread) {
     return await state.promise;
   } finally {
     if (transcriptUpdates.get(key) === state) transcriptUpdates.delete(key);
+  }
+}
+
+function nextRichDraftId() {
+  richDraftId = richDraftId >= 0x7ffffffe ? 1 : richDraftId + 1;
+  return richDraftId;
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function showRichTranscriptEntryEffect(thread, model) {
+  const settings = cfg();
+  if (
+    settings.telegramRichTranscriptEntryEffect !== 'draft' ||
+    !richMessagesAvailable ||
+    !richDraftsAvailable ||
+    typeof bot?.sendRichMessageDraft !== 'function'
+  ) return;
+  const options = thread.thread_id ? { message_thread_id: thread.thread_id } : {};
+  const draftId = nextRichDraftId();
+  try {
+    await bot.sendRichMessageDraft(
+      thread.chat_id,
+      draftId,
+      { markdown: `<tg-thinking>${settings.telegramRichTranscriptEntryEffectText}</tg-thinking>` },
+      options
+    );
+    if (settings.telegramRichTranscriptEntryEffectDelayMs) {
+      await wait(settings.telegramRichTranscriptEntryEffectDelayMs);
+    }
+    await bot.sendRichMessageDraft(thread.chat_id, draftId, { markdown: model.markdown }, options);
+  } catch (error) {
+    // Drafts are available only in Telegram clients/chats that support Rich
+    // streaming. A final Rich message is still sent immediately below.
+    richDraftsAvailable = false;
+    console.warn('[TG private] Rich draft effect unavailable:', tgError(error));
   }
 }
 
