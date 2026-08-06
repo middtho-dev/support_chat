@@ -370,6 +370,10 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   );
   assert.ok(operatorDelivery, 'each customer message has a direct Mini App chat button');
   assert.ok(edits.some(item => item.text?.rich_message?.markdown?.includes('Нужна помощь с подключением')));
+  const transcript = edits.findLast(item =>
+    item.text?.rich_message?.markdown?.includes('Нужна помощь с подключением')
+  )?.text.rich_message.markdown;
+  assert.match(transcript, /> \*\*👤 Клиент\*\* · _\d{2}:\d{2}_/);
   assert.equal(
     rich.filter(item =>
       item.chatId === '7001' && item.markdown.includes('Нужна помощь с подключением')
