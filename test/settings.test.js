@@ -146,6 +146,22 @@ test('legacy Telegram ticket confirmation is upgraded to the pinned card templat
   assert.match(saved.telegramCustomerNewTicketText, /оператор/i);
 });
 
+test('legacy Rich client label is upgraded to the customer name placeholder', () => {
+  const saved = saveSettings({ telegramRichTranscriptUserLabel: '👤 Клиент' });
+  assert.equal(saved.telegramRichTranscriptUserLabel, '👤 {name}');
+});
+
+test('Rich entry effect settings are bounded and have a safe fallback', () => {
+  const saved = saveSettings({
+    telegramRichTranscriptEntryEffect: 'unsupported',
+    telegramRichTranscriptEntryEffectDelayMs: 9000,
+    telegramRichTranscriptEntryEffectText: '  Появление  '
+  });
+  assert.equal(saved.telegramRichTranscriptEntryEffect, 'off');
+  assert.equal(saved.telegramRichTranscriptEntryEffectDelayMs, 1200);
+  assert.equal(saved.telegramRichTranscriptEntryEffectText, 'Появление');
+});
+
 test('failed Telegram chat cleanup remains queued for retry', () => {
   const ticketId = 'cleanup-queue-ticket';
   db.createTicket.run(ticketId, 'Очистка', 'cleanup-queue-session');

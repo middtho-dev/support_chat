@@ -638,6 +638,46 @@ function saveSettingsLegacy() {
   toast('Настройки сохранены', 'ok');
 }
 
+function richSettingsSection(title, description, body, open = true) {
+  return `<details class="rich-settings-section" ${open ? 'open' : ''}><summary><span>${esc(title)}</span><small>${esc(description)}</small></summary><div class="rich-settings-section-body">${body}</div></details>`;
+}
+
+function richPresetControls() {
+  return `<div class="rich-preset-row"><button type="button" data-rich-preset="balanced">Сбалансированный</button><button type="button" data-rich-preset="compact">Компактный</button><button type="button" data-rich-preset="dialog">Диалог</button><button type="button" data-rich-preset="journal">Журнал</button><button type="button" data-rich-preset="minimal">Минимальный</button></div><div id="rich-transcript-preview" class="rich-transcript-preview"></div>`;
+}
+
+function renderRichTranscriptPreview() {
+  const preview = $('rich-transcript-preview');
+  if (!preview) return;
+  const replace = (value, name, role) => String(value || '').replace(/\{name\}/g, name).replace(/\{role\}/g, role);
+  const user = replace(val('set-tg-rich-user-label') || '👤 {name}', 'Алексей', 'Клиент');
+  const operator = replace(val('set-tg-rich-operator-label') || '🛟 {name}', 'Владислав', 'Оператор');
+  const grouped = val('set-tg-rich-author-mode') === 'grouped';
+  const time = checked('set-tg-rich-time');
+  const continuation = val('set-tg-rich-group-continuation') === 'time' && time ? '15:45 · ' : '';
+  const title = replace(val('set-tg-rich-title') || '💬 Диалог · {name}', 'Алексей', 'Клиент');
+  preview.innerHTML = `<div class="rich-preview-head"><span>Предпросмотр</span><b>${esc(title)}</b></div><div class="rich-preview-line"><strong>${esc(user)}</strong>${time ? ' · <i>15:44</i>' : ''}<em>Скриншот не подключается</em></div><div class="rich-preview-line">${grouped ? '' : `<strong>${esc(user)}</strong>${time ? ' · <i>15:45</i>' : ''}`}<em>${continuation}Отправляю ещё раз</em></div><div class="rich-preview-line"><strong>${esc(operator)}</strong>${time ? ' · <i>15:46</i>' : ''}<em>Проверяем</em></div>`;
+}
+
+function applyRichPreset(name) {
+  const presets = {
+    balanced: { 'set-tg-rich-title-size':'medium', 'set-tg-rich-title-style':'bold', 'set-tg-rich-layout':'plain', 'set-tg-rich-message-size':'normal', 'set-tg-rich-author-mode':'grouped', 'set-tg-rich-group-window':'10', 'set-tg-rich-group-continuation':'time', 'set-tg-rich-group-spacing':'compact', 'set-tg-rich-time-format':'time', 'set-tg-rich-separator':'space', 'set-tg-rich-density':'normal', 'set-tg-rich-max-messages':'8', 'set-tg-rich-max-chars':'360' },
+    compact: { 'set-tg-rich-title-size':'small', 'set-tg-rich-title-style':'bold', 'set-tg-rich-layout':'compact', 'set-tg-rich-message-size':'compact', 'set-tg-rich-author-mode':'grouped', 'set-tg-rich-group-window':'20', 'set-tg-rich-group-continuation':'time', 'set-tg-rich-group-spacing':'compact', 'set-tg-rich-time-format':'time', 'set-tg-rich-separator':'space', 'set-tg-rich-density':'compact', 'set-tg-rich-max-messages':'14', 'set-tg-rich-max-chars':'220' },
+    dialog: { 'set-tg-rich-title-size':'medium', 'set-tg-rich-title-style':'bold', 'set-tg-rich-layout':'quote', 'set-tg-rich-message-size':'normal', 'set-tg-rich-author-mode':'grouped', 'set-tg-rich-group-window':'7', 'set-tg-rich-group-continuation':'time', 'set-tg-rich-group-spacing':'inherit', 'set-tg-rich-time-format':'time', 'set-tg-rich-separator':'space', 'set-tg-rich-density':'normal', 'set-tg-rich-max-messages':'10', 'set-tg-rich-max-chars':'420' },
+    journal: { 'set-tg-rich-title-size':'large', 'set-tg-rich-title-style':'plain', 'set-tg-rich-layout':'quote', 'set-tg-rich-message-size':'normal', 'set-tg-rich-author-mode':'every', 'set-tg-rich-group-window':'0', 'set-tg-rich-group-continuation':'time', 'set-tg-rich-group-spacing':'inherit', 'set-tg-rich-time-format':'date_time', 'set-tg-rich-separator':'line', 'set-tg-rich-density':'airy', 'set-tg-rich-max-messages':'10', 'set-tg-rich-max-chars':'500' },
+    minimal: { 'set-tg-rich-title-size':'small', 'set-tg-rich-title-style':'plain', 'set-tg-rich-layout':'compact', 'set-tg-rich-message-size':'compact', 'set-tg-rich-author-mode':'hidden', 'set-tg-rich-group-window':'0', 'set-tg-rich-group-continuation':'text', 'set-tg-rich-group-spacing':'compact', 'set-tg-rich-time-format':'time', 'set-tg-rich-separator':'space', 'set-tg-rich-density':'compact', 'set-tg-rich-max-messages':'16', 'set-tg-rich-max-chars':'180', 'set-tg-rich-show-subtitle':false, 'set-tg-rich-author':false, 'set-tg-rich-time':true }
+  };
+  for (const [id, value] of Object.entries(presets[name] || {})) {
+    const control = $(id);
+    if (control) {
+      if (control.type === 'checkbox') control.checked = Boolean(value);
+      else control.value = value;
+    }
+  }
+  renderRichTranscriptPreview();
+  updateSettingsDirtyState();
+}
+
 function settingsCards(s, topicModeControl) {
   return [
     operatorSettingsCard(),
@@ -768,7 +808,15 @@ function settingsCards(s, topicModeControl) {
       'telegram',
       'Rich-диалог оператора',
       'Конструктор единого сообщения с историей тикета. После сохранения открытые тикеты перерисуются автоматически. Цвета и произвольные px Telegram не позволяет задавать ботам, остальные поддерживаемые стили доступны ниже.',
-      '<div class="settings-note">Шаблоны: {name}, {shortId}, {status}, {total}, {shown}, {hidden}. Для подписи оператора также доступны {name} и {role}.</div>' +
+      richSettingsSection('Быстрый старт', 'Выберите основу и сразу посмотрите результат.', richPresetControls() + '<div class="settings-note">Шаблоны: {name}, {shortId}, {status}, {total}, {shown}, {hidden}. В подписях доступны {name} и {role}.</div>') +
+      richSettingsSection('Появление карточки', 'Нативный эффект Telegram для нового диалога: не влияет на доставку сообщений.',
+      select('set-tg-rich-entry-effect','Эффект появления',s.telegramRichTranscriptEntryEffect || 'off',[
+        {value:'off',label:'Сразу, без эффекта (рекомендуется)'}, {value:'draft',label:'Мягкое появление текста'}
+      ]) +
+      input('set-tg-rich-entry-effect-delay','Скорость эффекта, мс',s.telegramRichTranscriptEntryEffectDelayMs ?? 180,'number','min="0" max="1200" step="20"') +
+      input('set-tg-rich-entry-effect-text','Текст в момент появления',s.telegramRichTranscriptEntryEffectText || 'Собираем диалог…') +
+      '<div class="settings-note">Эффект работает только там, где Telegram поддерживает Rich-черновики. При отсутствии поддержки карточка сразу отправляется обычным надёжным способом.</div>', false) +
+      richSettingsSection('Шапка диалога', 'Название, статус и масштаб верхней части карточки.',
       input('set-tg-rich-title','Заголовок',s.telegramRichTranscriptTitle || '💬 Диалог · {name}') +
       input('set-tg-rich-subtitle','Подзаголовок',s.telegramRichTranscriptSubtitle ?? 'Тикет {shortId} · {status}') +
       check('set-tg-rich-show-header','Показывать заголовок',s.telegramRichTranscriptShowHeader ?? true) +
@@ -781,7 +829,8 @@ function settingsCards(s, topicModeControl) {
       ]) +
       select('set-tg-rich-subtitle-style','Начертание подзаголовка',s.telegramRichTranscriptSubtitleStyle || 'muted',[
         {value:'muted',label:'Приглушённый курсив'}, {value:'plain',label:'Обычное'}, {value:'code',label:'Моноширинное'}
-      ]) +
+      ])) +
+      richSettingsSection('Реплики и история', 'Сколько сообщений попадёт в карточку и как будет выглядеть текст.',
       input('set-tg-rich-max-messages','Сколько последних реплик показывать',s.telegramRichTranscriptMaxMessages ?? 8,'number','min="1" max="30"') +
       input('set-tg-rich-max-chars','Максимум символов в одной реплике',s.telegramRichTranscriptMessageMaxChars ?? 360,'number','min="80" max="700"') +
       select('set-tg-rich-order','Порядок реплик',s.telegramRichTranscriptOrder || 'oldest_first',[
@@ -795,7 +844,8 @@ function settingsCards(s, topicModeControl) {
       ]) +
       select('set-tg-rich-message-header-style','Начертание автора',s.telegramRichTranscriptMessageHeaderStyle || 'bold',[
         {value:'bold',label:'Жирное'}, {value:'plain',label:'Обычное'}, {value:'italic',label:'Курсив'}
-      ]) +
+      ]), false) +
+      richSettingsSection('Имена и группы', 'Уберите повторяющиеся ники: имя останется только в начале серии сообщений.',
       check('set-tg-rich-author','Показывать автора реплики',s.telegramRichTranscriptShowAuthor ?? true) +
       select('set-tg-rich-author-mode','Повтор автора в соседних репликах',s.telegramRichTranscriptAuthorMode || 'grouped',[
         {value:'grouped',label:'Показывать только в начале группы'}, {value:'every',label:'Показывать в каждой реплике'}, {value:'hidden',label:'Не показывать автора'}
@@ -807,12 +857,13 @@ function settingsCards(s, topicModeControl) {
       select('set-tg-rich-group-spacing','Отступы внутри группы',s.telegramRichTranscriptGroupSpacing || 'compact',[
         {value:'compact',label:'Плотно'}, {value:'inherit',label:'Как между всеми репликами'}
       ]) +
+      input('set-tg-rich-user-label','Подпись клиента ({name} — имя клиента)',s.telegramRichTranscriptUserLabel || '👤 {name}') +
+      input('set-tg-rich-operator-label','Подпись оператора',s.telegramRichTranscriptOperatorLabel || '🛟 {name}')) +
+      richSettingsSection('Время и разделители', 'Тонкая настройка плотности, отметок времени и вложений.',
       check('set-tg-rich-time','Показывать время реплики',s.telegramRichTranscriptShowTime ?? true) +
       select('set-tg-rich-time-format','Формат времени',s.telegramRichTranscriptTimestampFormat || 'time',[
         {value:'time',label:'Только время'}, {value:'date_time',label:'Дата и время'}
       ]) +
-      input('set-tg-rich-user-label','Подпись клиента',s.telegramRichTranscriptUserLabel || '👤 Клиент') +
-      input('set-tg-rich-operator-label','Подпись оператора',s.telegramRichTranscriptOperatorLabel || '🛟 {name}') +
       check('set-tg-rich-media-label','Подписывать вложения в истории',s.telegramRichTranscriptShowMediaLabel ?? true) +
       check('set-tg-rich-omitted','Показывать число скрытых реплик',s.telegramRichTranscriptShowOmittedNotice ?? true) +
       select('set-tg-rich-separator','Разделять реплики',s.telegramRichTranscriptSeparator || 'space',[
@@ -824,7 +875,7 @@ function settingsCards(s, topicModeControl) {
         {value:'compact',label:'Плотно'}, {value:'normal',label:'Обычно'}, {value:'airy',label:'Свободно'}
       ]) +
       input('set-tg-rich-footer','Нижняя подпись (необязательно)',s.telegramRichTranscriptFooter || '') +
-      input('set-tg-rich-empty','Текст пустого диалога',s.telegramRichTranscriptEmptyText || 'Пока нет сообщений'),
+      input('set-tg-rich-empty','Текст пустого диалога',s.telegramRichTranscriptEmptyText || 'Пока нет сообщений'), false),
       'blue',
       'rich диалог история реплики текст автор время цитаты размер шрифт подписи footer оформление'
     ),
@@ -879,7 +930,7 @@ function settingsPayload() {
     backupEnabled: checked('set-backup-enabled'), backupIntervalHours: num('set-backup-interval'), backupRetention: num('set-backup-retention'), backupUploadsEnabled: checked('set-backup-uploads'), uploadCleanupEnabled: checked('set-upload-cleanup'), uploadCleanupIntervalHours: num('set-upload-cleanup-interval'), uploadOrphanGraceHours: num('set-upload-orphan-grace'), diskMonitoringEnabled: checked('set-disk-monitoring'), diskWarnPercent: num('set-disk-warning'), diskCriticalPercent: num('set-disk-critical'), operationalAlertsEnabled: checked('set-operational-alerts'), operationalAlertCooldownMinutes: num('set-operational-alert-cooldown'),
     telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: checked('set-tg-auto-assign'), telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramUnansweredReminderEnabled: checked('set-tg-reminders'), telegramUnansweredReminderMinutes: num('set-tg-reminder-first'), telegramUnansweredRepeatMinutes: num('set-tg-reminder-repeat'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
     telegramCustomerEnabled: checked('set-tg-customer-enabled'), telegramCustomerFilesEnabled: checked('set-tg-customer-files'), telegramCustomerDeliverReplies: checked('set-tg-customer-replies'), telegramCustomerNewTicketText: val('set-tg-customer-new'), telegramCustomerClosedText: val('set-tg-customer-closed'), telegramCustomerClosedByUserText: val('set-tg-customer-closed-user'), telegramCustomerClosedBySupportText: val('set-tg-customer-closed-support'), telegramCustomerClosedBySystemText: val('set-tg-customer-closed-system'), telegramCustomerClosePromptText: val('set-tg-customer-close-prompt'), telegramCustomerCloseButtonText: val('set-tg-customer-close-btn'), telegramCustomerNewButtonText: val('set-tg-customer-new-btn'), telegramCustomerSendCloseButtonText: val('set-tg-customer-send-close-btn'),
-    telegramRichTranscriptTitle: val('set-tg-rich-title'), telegramRichTranscriptSubtitle: val('set-tg-rich-subtitle'), telegramRichTranscriptMaxMessages: num('set-tg-rich-max-messages'), telegramRichTranscriptMessageMaxChars: num('set-tg-rich-max-chars'), telegramRichTranscriptShowAuthor: checked('set-tg-rich-author'), telegramRichTranscriptAuthorMode: val('set-tg-rich-author-mode'), telegramRichTranscriptGroupWindowMinutes: num('set-tg-rich-group-window'), telegramRichTranscriptGroupContinuation: val('set-tg-rich-group-continuation'), telegramRichTranscriptGroupSpacing: val('set-tg-rich-group-spacing'), telegramRichTranscriptShowTime: checked('set-tg-rich-time'), telegramRichTranscriptSeparator: val('set-tg-rich-separator'), telegramRichTranscriptShowHeader: checked('set-tg-rich-show-header'), telegramRichTranscriptShowSubtitle: checked('set-tg-rich-show-subtitle'), telegramRichTranscriptTitleSize: val('set-tg-rich-title-size'), telegramRichTranscriptTitleStyle: val('set-tg-rich-title-style'), telegramRichTranscriptSubtitleStyle: val('set-tg-rich-subtitle-style'), telegramRichTranscriptMessageLayout: val('set-tg-rich-layout'), telegramRichTranscriptMessageSize: val('set-tg-rich-message-size'), telegramRichTranscriptMessageHeaderStyle: val('set-tg-rich-message-header-style'), telegramRichTranscriptTimestampFormat: val('set-tg-rich-time-format'), telegramRichTranscriptDensity: val('set-tg-rich-density'), telegramRichTranscriptOrder: val('set-tg-rich-order'), telegramRichTranscriptUserLabel: val('set-tg-rich-user-label'), telegramRichTranscriptOperatorLabel: val('set-tg-rich-operator-label'), telegramRichTranscriptShowMediaLabel: checked('set-tg-rich-media-label'), telegramRichTranscriptShowOmittedNotice: checked('set-tg-rich-omitted'), telegramRichTranscriptFooter: val('set-tg-rich-footer'), telegramRichTranscriptEmptyText: val('set-tg-rich-empty'),
+    telegramRichTranscriptTitle: val('set-tg-rich-title'), telegramRichTranscriptSubtitle: val('set-tg-rich-subtitle'), telegramRichTranscriptMaxMessages: num('set-tg-rich-max-messages'), telegramRichTranscriptMessageMaxChars: num('set-tg-rich-max-chars'), telegramRichTranscriptShowAuthor: checked('set-tg-rich-author'), telegramRichTranscriptAuthorMode: val('set-tg-rich-author-mode'), telegramRichTranscriptGroupWindowMinutes: num('set-tg-rich-group-window'), telegramRichTranscriptGroupContinuation: val('set-tg-rich-group-continuation'), telegramRichTranscriptGroupSpacing: val('set-tg-rich-group-spacing'), telegramRichTranscriptShowTime: checked('set-tg-rich-time'), telegramRichTranscriptSeparator: val('set-tg-rich-separator'), telegramRichTranscriptShowHeader: checked('set-tg-rich-show-header'), telegramRichTranscriptShowSubtitle: checked('set-tg-rich-show-subtitle'), telegramRichTranscriptTitleSize: val('set-tg-rich-title-size'), telegramRichTranscriptTitleStyle: val('set-tg-rich-title-style'), telegramRichTranscriptSubtitleStyle: val('set-tg-rich-subtitle-style'), telegramRichTranscriptMessageLayout: val('set-tg-rich-layout'), telegramRichTranscriptMessageSize: val('set-tg-rich-message-size'), telegramRichTranscriptMessageHeaderStyle: val('set-tg-rich-message-header-style'), telegramRichTranscriptTimestampFormat: val('set-tg-rich-time-format'), telegramRichTranscriptDensity: val('set-tg-rich-density'), telegramRichTranscriptOrder: val('set-tg-rich-order'), telegramRichTranscriptUserLabel: val('set-tg-rich-user-label'), telegramRichTranscriptOperatorLabel: val('set-tg-rich-operator-label'), telegramRichTranscriptShowMediaLabel: checked('set-tg-rich-media-label'), telegramRichTranscriptShowOmittedNotice: checked('set-tg-rich-omitted'), telegramRichTranscriptFooter: val('set-tg-rich-footer'), telegramRichTranscriptEmptyText: val('set-tg-rich-empty'), telegramRichTranscriptEntryEffect: val('set-tg-rich-entry-effect'), telegramRichTranscriptEntryEffectDelayMs: num('set-tg-rich-entry-effect-delay'), telegramRichTranscriptEntryEffectText: val('set-tg-rich-entry-effect-text'),
     telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'),
     telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
   };
@@ -1008,6 +1059,7 @@ function saveManagedOperator(row) {
 
 function bindSettingsUi() {
   applySettingsDependencies();
+  renderRichTranscriptPreview();
   S.settingsSnapshot = JSON.stringify(settingsPayload());
   S.settingsDirty = false;
   $('settings-search')?.addEventListener('input', event => {
@@ -1020,12 +1072,19 @@ function bindSettingsUi() {
     applySettingsFilter();
   }));
   document.querySelectorAll('#settings-grid input:not([data-operator-name]):not([data-operator-username]):not([data-operator-active]):not([data-operator-settings]),#settings-grid textarea,#settings-grid select').forEach(control => {
-    control.addEventListener('input', updateSettingsDirtyState);
+    control.addEventListener('input', () => {
+      renderRichTranscriptPreview();
+      updateSettingsDirtyState();
+    });
     control.addEventListener('change', () => {
       applySettingsDependencies();
+      renderRichTranscriptPreview();
       updateSettingsDirtyState();
     });
   });
+  document.querySelectorAll('[data-rich-preset]').forEach(button => button.addEventListener('click', () => {
+    applyRichPreset(button.dataset.richPreset);
+  }));
   $('set-save')?.addEventListener('click', saveSettings);
   $('settings-discard')?.addEventListener('click', renderSettings);
   $('settings-export')?.addEventListener('click', exportSettings);
