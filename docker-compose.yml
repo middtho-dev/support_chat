@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+      - APP_VERSION=${APP_VERSION:-unknown}
       - PORT=${PORT:-3001}
       - HOST=127.0.0.1
       - DB_PATH=/app/data/support.db

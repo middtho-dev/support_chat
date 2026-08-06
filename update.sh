@@ -22,6 +22,18 @@ echo -e "${NC}"
 command -v docker >/dev/null 2>&1 || err "Docker не установлен"
 docker compose version >/dev/null 2>&1 || err "Docker Compose недоступен"
 
+# Build first, then replace the running container. This keeps the current
+# service available if the image cannot be assembled or pulled.
+if [ -d .git ]; then
+  info "Получаю актуальную версию из Git..."
+  git pull --ff-only
+  APP_VERSION="$(git rev-parse --short HEAD)"
+else
+  APP_VERSION="manual-$(date -u +%Y%m%d%H%M%S)"
+fi
+export APP_VERSION
+log "Будет запущена версия ${APP_VERSION}"
+
 # Проверка обязательных переменных
 set -a
 source .env
@@ -71,21 +83,27 @@ if [ "${TELEGRAM_MODE:-private}" = "private" ]; then
   warn "Проверьте Threaded Mode в @BotFather и выполните /start от каждого ID из TELEGRAM_ADMIN_IDS"
 fi
 
-info "Останавливаю контейнер..."
-docker compose down --remove-orphans
+PREVIOUS_CONTAINER_ID="$(docker compose ps -q support-chat 2>/dev/null || true)"
 
-info "Пересобираю образ..."
-docker compose build --no-cache
+info "Пересобираю свежий образ, не останавливая работающий контейнер..."
+docker compose build --pull --no-cache support-chat
 
-info "Запускаю контейнер..."
-docker compose up -d --remove-orphans
+info "Принудительно пересоздаю контейнер приложения..."
+docker compose up -d --force-recreate --remove-orphans support-chat
+CURRENT_CONTAINER_ID="$(docker compose ps -q support-chat 2>/dev/null || true)"
+[ -n "$CURRENT_CONTAINER_ID" ] || err "Docker Compose не создал контейнер support-chat"
+if [ -n "$PREVIOUS_CONTAINER_ID" ] && [ "$PREVIOUS_CONTAINER_ID" = "$CURRENT_CONTAINER_ID" ]; then
+  err "Контейнер не был пересоздан"
+fi
 
 info "Жду готовность приложения..."
 PORT_TO_CHECK="${PORT:-3001}"
 for i in {1..30}; do
   if docker ps --filter "name=^/support-chat$" --filter "status=running" --format '{{.Names}}' | grep -qx "support-chat"; then
-    if docker exec support-chat sh -lc "wget -qO- http://127.0.0.1:${PORT_TO_CHECK}/health >/dev/null" 2>/dev/null; then
-      log "Контейнер запущен и healthcheck отвечает"
+    HEALTH="$(docker exec support-chat sh -lc "wget -qO- http://127.0.0.1:${PORT_TO_CHECK}/health" 2>/dev/null || true)"
+    if printf '%s' "$HEALTH" | grep -q '"ok":true' \
+      && printf '%s' "$HEALTH" | grep -q "\"version\":\"${APP_VERSION}\""; then
+      log "Контейнер пересоздан и healthcheck подтвердил версию ${APP_VERSION}"
       break
     fi
   fi
@@ -97,6 +115,10 @@ for i in {1..30}; do
   fi
   sleep 1
 done
+
+info "Удаляю только висячие старые образы (данные и named volumes не затрагиваются)..."
+docker image prune -f >/dev/null
+log "Старые висячие образы очищены"
 
 echo ""
 log "Обновление завершено!"
