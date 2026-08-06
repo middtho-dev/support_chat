@@ -20,6 +20,7 @@ const edits = [];
 const markupEdits = [];
 const deleted = [];
 const callbackAnswers = [];
+const topicEdits = [];
 const welcomeTickets = [];
 const operatorWaits = [];
 const socketEmits = [];
@@ -98,6 +99,10 @@ class FakeBot {
     return topicAttempts === 1
       ? Promise.reject(new Error('temporary Telegram error'))
       : Promise.resolve({ message_thread_id: ++nextTopicId });
+  }
+  editForumTopic(chatId, threadId, options) {
+    topicEdits.push({ chatId: String(chatId), threadId: Number(threadId), options });
+    return Promise.resolve(true);
   }
   closeForumTopic() {
     return Promise.resolve();
@@ -683,9 +688,25 @@ test('Rich transcript settings immediately control the operator ticket card', as
       telegramRichTranscriptSubtitle: 'Статус: {status}',
       telegramRichTranscriptMaxMessages: 2,
       telegramRichTranscriptMessageMaxChars: 80,
-      telegramRichTranscriptShowAuthor: false,
+      telegramRichTranscriptShowHeader: true,
+      telegramRichTranscriptShowSubtitle: true,
+      telegramRichTranscriptTitleSize: 'large',
+      telegramRichTranscriptTitleStyle: 'plain',
+      telegramRichTranscriptSubtitleStyle: 'code',
+      telegramRichTranscriptMessageLayout: 'quote',
+      telegramRichTranscriptMessageSize: 'normal',
+      telegramRichTranscriptMessageHeaderStyle: 'italic',
+      telegramRichTranscriptShowAuthor: true,
       telegramRichTranscriptShowTime: false,
-      telegramRichTranscriptSeparator: 'dots'
+      telegramRichTranscriptTimestampFormat: 'time',
+      telegramRichTranscriptUserLabel: 'Клиент: {name}',
+      telegramRichTranscriptOperatorLabel: 'Оператор: {name}',
+      telegramRichTranscriptShowMediaLabel: true,
+      telegramRichTranscriptShowOmittedNotice: true,
+      telegramRichTranscriptSeparator: 'dots',
+      telegramRichTranscriptDensity: 'normal',
+      telegramRichTranscriptOrder: 'oldest_first',
+      telegramRichTranscriptFooter: 'Показано {shown} из {total}'
     });
     const id = 'rich-settings-ticket-0000-0000-000000000000';
     db.createTicket.run(id, 'Настройка', 'session-rich-settings');
@@ -697,10 +718,12 @@ test('Rich transcript settings immediately control the operator ticket card', as
     await telegram.refreshOpenTicketTranscripts();
     const card = rich.findLast(item => item.options?.message_thread_id === 919);
     assert.ok(card);
-    assert.match(card.markdown, /Журнал Настройка/);
-    assert.match(card.markdown, /Статус: 🔵 открыт/);
-    assert.match(card.markdown, /Первое сообщение[\s\S]*· · ·[\s\S]*Второе сообщение/);
-    assert.doesNotMatch(card.markdown, /👤 Клиент|🛟 Оператор/);
+    assert.match(card.markdown, /# Журнал Настройка/);
+    assert.match(card.markdown, /`Статус: 🔵 открыт`/);
+    assert.match(card.markdown, /> _Клиент: Настройка_[\s\S]*Первое сообщение/);
+    assert.match(card.markdown, /> _Оператор: Оператор_[\s\S]*Второе сообщение/);
+    assert.match(card.markdown, /· · ·/);
+    assert.match(card.markdown, /Показано 2 из 2/);
   } finally {
     saveSettings(previous);
   }

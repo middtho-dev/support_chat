@@ -767,20 +767,56 @@ function settingsCards(s, topicModeControl) {
     settingCard(
       'telegram',
       'Rich-диалог оператора',
-      'Внешний вид единого сообщения с историей тикета. После сохранения открытые тикеты перерисуются автоматически.',
+      'Конструктор единого сообщения с историей тикета. После сохранения открытые тикеты перерисуются автоматически. Цвета и произвольные px Telegram не позволяет задавать ботам, остальные поддерживаемые стили доступны ниже.',
+      '<div class="settings-note">Шаблоны: {name}, {shortId}, {status}, {total}, {shown}, {hidden}. Для подписи оператора также доступны {name} и {role}.</div>' +
       input('set-tg-rich-title','Заголовок',s.telegramRichTranscriptTitle || '💬 Диалог · {name}') +
       input('set-tg-rich-subtitle','Подзаголовок',s.telegramRichTranscriptSubtitle ?? 'Тикет {shortId} · {status}') +
+      check('set-tg-rich-show-header','Показывать заголовок',s.telegramRichTranscriptShowHeader ?? true) +
+      check('set-tg-rich-show-subtitle','Показывать подзаголовок',s.telegramRichTranscriptShowSubtitle ?? true) +
+      select('set-tg-rich-title-size','Размер заголовка',s.telegramRichTranscriptTitleSize || 'medium',[
+        {value:'large',label:'Крупный'}, {value:'medium',label:'Средний'}, {value:'small',label:'Малый'}, {value:'compact',label:'Компактный'}
+      ]) +
+      select('set-tg-rich-title-style','Начертание заголовка',s.telegramRichTranscriptTitleStyle || 'bold',[
+        {value:'bold',label:'Жирное'}, {value:'plain',label:'Обычное'}, {value:'italic',label:'Курсив'}
+      ]) +
+      select('set-tg-rich-subtitle-style','Начертание подзаголовка',s.telegramRichTranscriptSubtitleStyle || 'muted',[
+        {value:'muted',label:'Приглушённый курсив'}, {value:'plain',label:'Обычное'}, {value:'code',label:'Моноширинное'}
+      ]) +
       input('set-tg-rich-max-messages','Сколько последних реплик показывать',s.telegramRichTranscriptMaxMessages ?? 8,'number','min="1" max="30"') +
       input('set-tg-rich-max-chars','Максимум символов в одной реплике',s.telegramRichTranscriptMessageMaxChars ?? 360,'number','min="80" max="700"') +
+      select('set-tg-rich-order','Порядок реплик',s.telegramRichTranscriptOrder || 'oldest_first',[
+        {value:'oldest_first',label:'Старые сверху, новые снизу'}, {value:'newest_first',label:'Новые сверху, старые снизу'}
+      ]) +
+      select('set-tg-rich-layout','Вид реплик',s.telegramRichTranscriptMessageLayout || 'plain',[
+        {value:'plain',label:'Обычный текст'}, {value:'quote',label:'Цитаты'}, {value:'compact',label:'Компактные строки'}
+      ]) +
+      select('set-tg-rich-message-size','Масштаб текста реплик',s.telegramRichTranscriptMessageSize || 'normal',[
+        {value:'compact',label:'Компактный'}, {value:'normal',label:'Обычный'}, {value:'large',label:'Крупный'}
+      ]) +
+      select('set-tg-rich-message-header-style','Начертание автора',s.telegramRichTranscriptMessageHeaderStyle || 'bold',[
+        {value:'bold',label:'Жирное'}, {value:'plain',label:'Обычное'}, {value:'italic',label:'Курсив'}
+      ]) +
       check('set-tg-rich-author','Показывать автора реплики',s.telegramRichTranscriptShowAuthor ?? true) +
       check('set-tg-rich-time','Показывать время реплики',s.telegramRichTranscriptShowTime ?? true) +
+      select('set-tg-rich-time-format','Формат времени',s.telegramRichTranscriptTimestampFormat || 'time',[
+        {value:'time',label:'Только время'}, {value:'date_time',label:'Дата и время'}
+      ]) +
+      input('set-tg-rich-user-label','Подпись клиента',s.telegramRichTranscriptUserLabel || '👤 Клиент') +
+      input('set-tg-rich-operator-label','Подпись оператора',s.telegramRichTranscriptOperatorLabel || '🛟 {name}') +
+      check('set-tg-rich-media-label','Подписывать вложения в истории',s.telegramRichTranscriptShowMediaLabel ?? true) +
+      check('set-tg-rich-omitted','Показывать число скрытых реплик',s.telegramRichTranscriptShowOmittedNotice ?? true) +
       select('set-tg-rich-separator','Разделять реплики',s.telegramRichTranscriptSeparator || 'space',[
         {value:'space',label:'Свободным отступом'},
         {value:'dots',label:'Строкой с точками'},
         {value:'line',label:'Тонкой линией'}
-      ]),
+      ]) +
+      select('set-tg-rich-density','Плотность диалога',s.telegramRichTranscriptDensity || 'normal',[
+        {value:'compact',label:'Плотно'}, {value:'normal',label:'Обычно'}, {value:'airy',label:'Свободно'}
+      ]) +
+      input('set-tg-rich-footer','Нижняя подпись (необязательно)',s.telegramRichTranscriptFooter || '') +
+      input('set-tg-rich-empty','Текст пустого диалога',s.telegramRichTranscriptEmptyText || 'Пока нет сообщений'),
       'blue',
-      'rich диалог история реплики текст автор время оформление'
+      'rich диалог история реплики текст автор время цитаты размер шрифт подписи footer оформление'
     ),
     settingCard(
       'telegram',
@@ -833,7 +869,7 @@ function settingsPayload() {
     backupEnabled: checked('set-backup-enabled'), backupIntervalHours: num('set-backup-interval'), backupRetention: num('set-backup-retention'), backupUploadsEnabled: checked('set-backup-uploads'), uploadCleanupEnabled: checked('set-upload-cleanup'), uploadCleanupIntervalHours: num('set-upload-cleanup-interval'), uploadOrphanGraceHours: num('set-upload-orphan-grace'), diskMonitoringEnabled: checked('set-disk-monitoring'), diskWarnPercent: num('set-disk-warning'), diskCriticalPercent: num('set-disk-critical'), operationalAlertsEnabled: checked('set-operational-alerts'), operationalAlertCooldownMinutes: num('set-operational-alert-cooldown'),
     telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: checked('set-tg-auto-assign'), telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramUnansweredReminderEnabled: checked('set-tg-reminders'), telegramUnansweredReminderMinutes: num('set-tg-reminder-first'), telegramUnansweredRepeatMinutes: num('set-tg-reminder-repeat'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
     telegramCustomerEnabled: checked('set-tg-customer-enabled'), telegramCustomerFilesEnabled: checked('set-tg-customer-files'), telegramCustomerDeliverReplies: checked('set-tg-customer-replies'), telegramCustomerNewTicketText: val('set-tg-customer-new'), telegramCustomerClosedText: val('set-tg-customer-closed'), telegramCustomerClosedByUserText: val('set-tg-customer-closed-user'), telegramCustomerClosedBySupportText: val('set-tg-customer-closed-support'), telegramCustomerClosedBySystemText: val('set-tg-customer-closed-system'), telegramCustomerClosePromptText: val('set-tg-customer-close-prompt'), telegramCustomerCloseButtonText: val('set-tg-customer-close-btn'), telegramCustomerNewButtonText: val('set-tg-customer-new-btn'), telegramCustomerSendCloseButtonText: val('set-tg-customer-send-close-btn'),
-    telegramRichTranscriptTitle: val('set-tg-rich-title'), telegramRichTranscriptSubtitle: val('set-tg-rich-subtitle'), telegramRichTranscriptMaxMessages: num('set-tg-rich-max-messages'), telegramRichTranscriptMessageMaxChars: num('set-tg-rich-max-chars'), telegramRichTranscriptShowAuthor: checked('set-tg-rich-author'), telegramRichTranscriptShowTime: checked('set-tg-rich-time'), telegramRichTranscriptSeparator: val('set-tg-rich-separator'),
+    telegramRichTranscriptTitle: val('set-tg-rich-title'), telegramRichTranscriptSubtitle: val('set-tg-rich-subtitle'), telegramRichTranscriptMaxMessages: num('set-tg-rich-max-messages'), telegramRichTranscriptMessageMaxChars: num('set-tg-rich-max-chars'), telegramRichTranscriptShowAuthor: checked('set-tg-rich-author'), telegramRichTranscriptShowTime: checked('set-tg-rich-time'), telegramRichTranscriptSeparator: val('set-tg-rich-separator'), telegramRichTranscriptShowHeader: checked('set-tg-rich-show-header'), telegramRichTranscriptShowSubtitle: checked('set-tg-rich-show-subtitle'), telegramRichTranscriptTitleSize: val('set-tg-rich-title-size'), telegramRichTranscriptTitleStyle: val('set-tg-rich-title-style'), telegramRichTranscriptSubtitleStyle: val('set-tg-rich-subtitle-style'), telegramRichTranscriptMessageLayout: val('set-tg-rich-layout'), telegramRichTranscriptMessageSize: val('set-tg-rich-message-size'), telegramRichTranscriptMessageHeaderStyle: val('set-tg-rich-message-header-style'), telegramRichTranscriptTimestampFormat: val('set-tg-rich-time-format'), telegramRichTranscriptDensity: val('set-tg-rich-density'), telegramRichTranscriptOrder: val('set-tg-rich-order'), telegramRichTranscriptUserLabel: val('set-tg-rich-user-label'), telegramRichTranscriptOperatorLabel: val('set-tg-rich-operator-label'), telegramRichTranscriptShowMediaLabel: checked('set-tg-rich-media-label'), telegramRichTranscriptShowOmittedNotice: checked('set-tg-rich-omitted'), telegramRichTranscriptFooter: val('set-tg-rich-footer'), telegramRichTranscriptEmptyText: val('set-tg-rich-empty'),
     telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'),
     telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
   };

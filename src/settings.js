@@ -80,6 +80,23 @@ const DEFAULTS = {
   telegramRichTranscriptShowAuthor: true,
   telegramRichTranscriptShowTime: true,
   telegramRichTranscriptSeparator: 'space',
+  telegramRichTranscriptShowHeader: true,
+  telegramRichTranscriptShowSubtitle: true,
+  telegramRichTranscriptTitleSize: 'medium',
+  telegramRichTranscriptTitleStyle: 'bold',
+  telegramRichTranscriptSubtitleStyle: 'muted',
+  telegramRichTranscriptMessageLayout: 'plain',
+  telegramRichTranscriptMessageSize: 'normal',
+  telegramRichTranscriptMessageHeaderStyle: 'bold',
+  telegramRichTranscriptTimestampFormat: 'time',
+  telegramRichTranscriptDensity: 'normal',
+  telegramRichTranscriptOrder: 'oldest_first',
+  telegramRichTranscriptUserLabel: '👤 Клиент',
+  telegramRichTranscriptOperatorLabel: '🛟 {name}',
+  telegramRichTranscriptShowMediaLabel: true,
+  telegramRichTranscriptShowOmittedNotice: true,
+  telegramRichTranscriptFooter: '',
+  telegramRichTranscriptEmptyText: 'Пока нет сообщений',
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
   telegramNewEmoji: '❗',
   telegramOpenEmoji: '🔵',
@@ -170,6 +187,23 @@ const KEY_MAP = {
   telegramRichTranscriptShowAuthor: 'telegram_rich_transcript_show_author',
   telegramRichTranscriptShowTime: 'telegram_rich_transcript_show_time',
   telegramRichTranscriptSeparator: 'telegram_rich_transcript_separator',
+  telegramRichTranscriptShowHeader: 'telegram_rich_transcript_show_header',
+  telegramRichTranscriptShowSubtitle: 'telegram_rich_transcript_show_subtitle',
+  telegramRichTranscriptTitleSize: 'telegram_rich_transcript_title_size',
+  telegramRichTranscriptTitleStyle: 'telegram_rich_transcript_title_style',
+  telegramRichTranscriptSubtitleStyle: 'telegram_rich_transcript_subtitle_style',
+  telegramRichTranscriptMessageLayout: 'telegram_rich_transcript_message_layout',
+  telegramRichTranscriptMessageSize: 'telegram_rich_transcript_message_size',
+  telegramRichTranscriptMessageHeaderStyle: 'telegram_rich_transcript_message_header_style',
+  telegramRichTranscriptTimestampFormat: 'telegram_rich_transcript_timestamp_format',
+  telegramRichTranscriptDensity: 'telegram_rich_transcript_density',
+  telegramRichTranscriptOrder: 'telegram_rich_transcript_order',
+  telegramRichTranscriptUserLabel: 'telegram_rich_transcript_user_label',
+  telegramRichTranscriptOperatorLabel: 'telegram_rich_transcript_operator_label',
+  telegramRichTranscriptShowMediaLabel: 'telegram_rich_transcript_show_media_label',
+  telegramRichTranscriptShowOmittedNotice: 'telegram_rich_transcript_show_omitted_notice',
+  telegramRichTranscriptFooter: 'telegram_rich_transcript_footer',
+  telegramRichTranscriptEmptyText: 'telegram_rich_transcript_empty_text',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -286,6 +320,24 @@ function normalize(input = {}) {
   cfg.telegramRichTranscriptSeparator = allowedTranscriptSeparators.has(cfg.telegramRichTranscriptSeparator)
     ? cfg.telegramRichTranscriptSeparator
     : DEFAULTS.telegramRichTranscriptSeparator;
+  const transcriptOptions = {
+    telegramRichTranscriptTitleSize: ['large', 'medium', 'small', 'compact'],
+    telegramRichTranscriptTitleStyle: ['bold', 'plain', 'italic'],
+    telegramRichTranscriptSubtitleStyle: ['muted', 'plain', 'code'],
+    telegramRichTranscriptMessageLayout: ['plain', 'quote', 'compact'],
+    telegramRichTranscriptMessageSize: ['compact', 'normal', 'large'],
+    telegramRichTranscriptMessageHeaderStyle: ['bold', 'plain', 'italic'],
+    telegramRichTranscriptTimestampFormat: ['time', 'date_time'],
+    telegramRichTranscriptDensity: ['compact', 'normal', 'airy'],
+    telegramRichTranscriptOrder: ['oldest_first', 'newest_first']
+  };
+  for (const [key, allowed] of Object.entries(transcriptOptions)) {
+    cfg[key] = allowed.includes(cfg[key]) ? cfg[key] : DEFAULTS[key];
+  }
+  cfg.telegramRichTranscriptUserLabel = sanitizeText(cfg.telegramRichTranscriptUserLabel, DEFAULTS.telegramRichTranscriptUserLabel, 80) || DEFAULTS.telegramRichTranscriptUserLabel;
+  cfg.telegramRichTranscriptOperatorLabel = sanitizeText(cfg.telegramRichTranscriptOperatorLabel, DEFAULTS.telegramRichTranscriptOperatorLabel, 120) || DEFAULTS.telegramRichTranscriptOperatorLabel;
+  cfg.telegramRichTranscriptFooter = sanitizeText(cfg.telegramRichTranscriptFooter, DEFAULTS.telegramRichTranscriptFooter, 240);
+  cfg.telegramRichTranscriptEmptyText = sanitizeText(cfg.telegramRichTranscriptEmptyText, DEFAULTS.telegramRichTranscriptEmptyText, 240) || DEFAULTS.telegramRichTranscriptEmptyText;
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
   cfg.telegramCloseButtonEmojiId = sanitizeText(cfg.telegramCloseButtonEmojiId, '', 128);

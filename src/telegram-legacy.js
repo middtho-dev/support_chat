@@ -19,6 +19,8 @@ let io = null;
 let connected = false;
 let pollingLease = null;
 const topicStatus = new Map();
+const topicStatusUpdates = new Map();
+const topicStatusVerificationTimers = new Map();
 const creatingTopics = new Map();
 const DISPLAY_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
 let cleanupTimer = null;
@@ -380,6 +382,7 @@ function status() {
     miniAppUrl: WEBAPP_URL || null,
     miniAppAllowedAdmins: TELEGRAM_ADMIN_IDS.size,
     pendingTopicCreates: creatingTopics.size,
+    pendingTopicStatusUpdates: topicStatusUpdates.size,
     openTicketsWithoutTopic,
     delivery: { ...deliveryStats, inFlight: forwardingMessages.size }
   };
@@ -388,6 +391,9 @@ function status() {
 async function shutdown() {
   clearTimeout(cleanupTimer);
   clearInterval(deliveryTimer);
+  for (const timer of topicStatusVerificationTimers.values()) clearTimeout(timer);
+  topicStatusVerificationTimers.clear();
+  topicStatusUpdates.clear();
   cleanupTimer = null;
   deliveryTimer = null;
   await pollingLease?.stop();
@@ -576,17 +582,69 @@ async function closeTicketFromTelegram(ticket, topicId) {
   if (s.telegramCleanupClosedTopics && s.telegramCleanupClosedHours === 0) scheduleCleanupOldTopics();
 }
 
-async function setTopicStatus(topicId, ticket, emoji) {
+async function setTopicStatus(topicId, ticket, emoji, { verify = true } = {}) {
   if (!tgEnabled()) return;
+  const t = db.getTicketById.get(typeof ticket === 'string' ? ticket : ticket.id);
+  if (!t) return;
+  const desired = { topicId, ticketId: t.id, emoji, name: topicName(t, emoji), verify };
+  const running = topicStatusUpdates.get(topicId);
+  if (running) {
+    running.desired = desired;
+    running.dirty = true;
+    return running.promise;
+  }
+  if (topicStatus.get(topicId) === desired.name) return true;
+  const state = { desired, dirty: false, promise: null };
+  state.promise = (async () => {
+    do {
+      state.dirty = false;
+      const current = state.desired;
+      let lastError = null;
+      let updated = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await bot.editForumTopic(GROUP_ID, current.topicId, { name: current.name });
+          topicStatus.set(current.topicId, current.name);
+          updated = true;
+          console.log(`[TG] Topic → ${current.name}`);
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) await wait(250 * attempt);
+        }
+      }
+      if (!updated) throw lastError || new Error('Telegram did not confirm topic status update');
+      if (current.verify) scheduleTopicStatusVerification(current);
+    } while (state.dirty);
+    return true;
+  })();
+  topicStatusUpdates.set(topicId, state);
   try {
-    const t = db.getTicketById.get(typeof ticket === 'string' ? ticket : ticket.id);
-    if (!t) return;
-    const name = topicName(t, emoji);
-    if (topicStatus.get(topicId) === name) return;
-    await bot.editForumTopic(GROUP_ID, topicId, { name });
-    topicStatus.set(topicId, name);
-    console.log(`[TG] Topic → ${name}`);
-  } catch (e) { console.error('[TG] setTopicStatus:', e.message); }
+    return await state.promise;
+  } catch (error) {
+    topicStatus.delete(topicId);
+    console.error('[TG] setTopicStatus:', tgError(error));
+    throw error;
+  } finally {
+    if (topicStatusUpdates.get(topicId) === state) topicStatusUpdates.delete(topicId);
+  }
+}
+
+function scheduleTopicStatusVerification(desired) {
+  clearTimeout(topicStatusVerificationTimers.get(desired.topicId));
+  const timer = setTimeout(async () => {
+    topicStatusVerificationTimers.delete(desired.topicId);
+    if (topicStatus.get(desired.topicId) !== desired.name) return;
+    const fresh = db.getTicketById.get(desired.ticketId);
+    if (!fresh || Number(fresh.telegram_topic_id) !== Number(desired.topicId)) return;
+    // Telegram does not expose a read endpoint for one forum topic, so reapply
+    // once after the first success to verify and repair eventual updates.
+    topicStatus.delete(desired.topicId);
+    await setTopicStatus(desired.topicId, fresh, desired.emoji, { verify: false }).catch(error => {
+      console.warn('[TG] topic status verification:', tgError(error));
+    });
+  }, 1800);
+  topicStatusVerificationTimers.set(desired.topicId, timer);
 }
 
 async function downloadFile(msg) {
