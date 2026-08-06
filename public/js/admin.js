@@ -22,6 +22,7 @@ let telegramFullscreenRequested = false;
 const TELEGRAM_FULLSCREEN_TOP_CLEARANCE = 84;
 let miniRefreshTimer = null;
 let miniRefreshPending = false;
+let miniRefreshSequence = 0;
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 function adminMediaFailed(el) {
@@ -901,7 +902,15 @@ function startMiniAppRefresh() {
 function refreshMiniAppState() {
   if (!IS_TG_MINI || miniRefreshPending || !socket.connected || document.visibilityState !== 'visible') return;
   miniRefreshPending = true;
-  socket.timeout(8000).emit('admin_refresh_state', { ticketId: S.current?.id || '' }, () => {
+  miniRefreshSequence += 1;
+  socket.timeout(8000).emit('admin_refresh_state', {
+    ticketId: S.current?.id || '',
+    knownMessageId: S.messages.at(-1)?.id || '',
+    knownTicketStatus: S.current?.status || '',
+    // Socket events keep the UI instant. The fallback only refreshes the full
+    // sidebar every fourth cycle to avoid rebuilding it unnecessarily.
+    includeTickets: miniRefreshSequence % 4 === 0
+  }, () => {
     miniRefreshPending = false;
   });
 }

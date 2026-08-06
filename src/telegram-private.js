@@ -580,6 +580,45 @@ async function editPanel(message, model) {
   );
 }
 
+async function updateOperatorDashboard(operator, model) {
+  const operatorId = String(operator.telegram_user_id);
+  const dashboard = db.getTelegramOperatorDashboard.get(operatorId);
+  if (dashboard?.dashboard_chat_id && dashboard.dashboard_message_id) {
+    const updated = await editRichOrDisable(
+      dashboard.dashboard_chat_id,
+      dashboard.dashboard_message_id,
+      model.markdown,
+      model.replyMarkup,
+      model.fallback
+    );
+    if (updated) return dashboard.dashboard_message_id;
+
+    // Telegram can reject edits for a message deleted by the operator. Remove
+    // the stale reference before creating the single replacement panel.
+    const removed = await deleteTelegramMessage(
+      dashboard.dashboard_chat_id,
+      dashboard.dashboard_message_id
+    );
+    if (!removed) return null;
+    db.clearTelegramOperatorDashboard.run(operatorId);
+  }
+
+  const sent = await sendRichOrText(
+    operatorId,
+    model.markdown,
+    { reply_markup: model.replyMarkup },
+    model.fallback
+  );
+  if (sent?.message_id) {
+    db.saveTelegramOperatorDashboard.run(
+      operatorId,
+      Number(sent.message_id),
+      operatorId
+    );
+  }
+  return sent?.message_id || null;
+}
+
 function ticketRichMarkdown(ticket, state = 'unassigned', extra = {}) {
   const current = db.getTicketById.get(ticket.id) || ticket;
   const stateLabel = state === 'closed'
@@ -855,23 +894,11 @@ function registerOperator(from) {
 }
 
 async function sendDashboard(operator) {
-  const model = dashboardModel(operator);
-  return sendRichOrText(
-    operator.telegram_user_id,
-    model.markdown,
-    { reply_markup: model.replyMarkup },
-    model.fallback
-  );
+  return updateOperatorDashboard(operator, dashboardModel(operator));
 }
 
 async function sendTicketList(operator, view, page = 0) {
-  const model = ticketListModel(operator, view, page);
-  return sendRichOrText(
-    operator.telegram_user_id,
-    model.markdown,
-    { reply_markup: model.replyMarkup },
-    model.fallback
-  );
+  return updateOperatorDashboard(operator, ticketListModel(operator, view, page));
 }
 
 async function handleStart(msg) {
@@ -881,6 +908,7 @@ async function handleStart(msg) {
   }
   const operator = registerOperator(msg.from);
   await sendDashboard(operator);
+  await deleteTelegramMessage(msg.chat.id, msg.message_id);
   await reconcileOperator(operator);
 }
 
@@ -980,6 +1008,50 @@ async function deleteTelegramMessage(chatId, messageId) {
     }
   }
   return false;
+}
+
+async function clearTicketReminders(ticketId) {
+  const reminders = db.getTelegramRemindersForTicket.all(ticketId);
+  await Promise.allSettled(reminders.map(async reminder => {
+    const removed = await deleteTelegramMessage(reminder.chat_id, reminder.message_id);
+    if (removed) db.deleteTelegramReminder.run(ticketId, reminder.operator_id);
+    return removed;
+  }));
+}
+
+async function replaceTicketReminder(ticket, operator, text, replyMarkup) {
+  const operatorId = String(operator.telegram_user_id);
+  const previous = db.getTelegramReminder.get(ticket.id, operatorId);
+  if (previous) {
+    const removed = await deleteTelegramMessage(previous.chat_id, previous.message_id);
+    if (removed) {
+      db.deleteTelegramReminder.run(ticket.id, operatorId);
+    } else {
+      // If Telegram has temporarily refused deletion, update the existing
+      // notice rather than creating another audible reminder.
+      try {
+        await bot.editMessageText(text, {
+          chat_id: previous.chat_id,
+          message_id: previous.message_id,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          reply_markup: replyMarkup
+        });
+        return previous.message_id;
+      } catch (error) {
+        console.warn('[TG private] reminder replacement:', tgError(error));
+        return null;
+      }
+    }
+  }
+  const sent = await bot.sendMessage(operatorId, text, {
+    parse_mode: 'HTML',
+    disable_notification: false,
+    reply_markup: replyMarkup
+  });
+  if (!sent?.message_id) return null;
+  db.saveTelegramReminder.run(ticket.id, operatorId, operatorId, Number(sent.message_id));
+  return sent.message_id;
 }
 
 function isDisposableTelegramServiceMessage(msg) {
@@ -1516,16 +1588,11 @@ async function processUnansweredReminders() {
         '',
         'Откройте тикет и ответьте клиенту.'
       ].join('\n');
-      const results = await Promise.allSettled(targets.map(operator => bot.sendMessage(
-        operator.telegram_user_id,
-        text,
-        {
-          parse_mode: 'HTML',
-          disable_notification: false,
-          reply_markup: ticketKeyboard(ticket, ticket.assigned_operator_id ? 'open' : 'unassigned')
-        }
-      )));
-      const delivered = results.some(result => result.status === 'fulfilled');
+      const keyboard = ticketKeyboard(ticket, ticket.assigned_operator_id ? 'open' : 'unassigned');
+      const results = await Promise.allSettled(targets.map(operator =>
+        replaceTicketReminder(ticket, operator, text, keyboard)
+      ));
+      const delivered = results.some(result => result.status === 'fulfilled' && result.value);
       if (!delivered) {
         reminderStats.failed++;
         reminderStats.lastError = results
@@ -1739,6 +1806,11 @@ async function claimAndOpenTicket(ticketId, operatorId, options = {}) {
     const error = new Error(`Тикет уже взял ${owner?.display_name || 'другой оператор'}`);
     error.alreadyAssigned = true;
     throw error;
+  }
+  if (assignedHere) {
+    clearTicketReminders(ticket.id).catch(error => {
+      console.warn('[TG private] clear assigned reminders:', tgError(error));
+    });
   }
   let thread;
   try {
@@ -2027,19 +2099,25 @@ async function handleMessage(msg) {
   const command = parseCommand(msg.text || msg.caption);
   if (command === '/start') return handleStart(msg);
   if (command === '/admin') {
-    const webAppUrl = adminWebAppUrl();
-    return bot.sendMessage(msg.chat.id, 'Админка поддержки:', {
-      reply_markup: webAppUrl
-        ? { inline_keyboard: [[{ text: 'Открыть админку', web_app: { url: webAppUrl } }]] }
-        : undefined
-    });
-  }
-  if (command === '/queue') {
+    await deleteTelegramMessage(msg.chat.id, msg.message_id);
     return sendDashboard(operator);
   }
-  if (command === '/waiting') return sendTicketList(operator, 'waiting');
-  if (command === '/open') return sendTicketList(operator, 'mine');
-  if (command === '/closed') return sendTicketList(operator, 'closed');
+  if (command === '/queue') {
+    await deleteTelegramMessage(msg.chat.id, msg.message_id);
+    return sendDashboard(operator);
+  }
+  if (command === '/waiting') {
+    await deleteTelegramMessage(msg.chat.id, msg.message_id);
+    return sendTicketList(operator, 'waiting');
+  }
+  if (command === '/open') {
+    await deleteTelegramMessage(msg.chat.id, msg.message_id);
+    return sendTicketList(operator, 'mine');
+  }
+  if (command === '/closed') {
+    await deleteTelegramMessage(msg.chat.id, msg.message_id);
+    return sendTicketList(operator, 'closed');
+  }
   const threadId = msg.message_thread_id;
   const thread = threadId
     ? db.getTelegramThreadByDestination.get(String(msg.chat.id), threadId)
@@ -2163,6 +2241,9 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
       reply_to_file_name: replyMessage?.file_name || null
     };
     db.markSupportRead.run(ticket.id);
+    clearTicketReminders(ticket.id).catch(error => {
+      console.warn('[TG private] clear answered reminders:', tgError(error));
+    });
     lifecycle.cancelOperatorWait?.(ticket.id);
     io?.to(`ticket:${ticket.id}`).emit('message', message);
     io?.to('admin').emit('admin_new_message', { ticketId: ticket.id, message });
@@ -2515,6 +2596,9 @@ async function closeTicketFromTelegram(ticket) {
   const thread = db.getTelegramThreadForTicket.get(ticket.id);
   db.closeTicket.run(ticket.id);
   lifecycle.cancelOperatorWait?.(ticket.id);
+  clearTicketReminders(ticket.id).catch(error => {
+    console.warn('[TG private] clear closed reminders:', tgError(error));
+  });
   const fresh = db.getTicketById.get(ticket.id);
   io?.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'support' });
   io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
@@ -2556,6 +2640,9 @@ async function notifyTicketClosed(ticket, {
 } = {}) {
   const thread = db.getTelegramThreadForTicket.get(ticket.id);
   const fresh = db.getTicketById.get(ticket.id) || ticket;
+  clearTicketReminders(ticket.id).catch(error => {
+    console.warn('[TG private] clear closed reminders:', tgError(error));
+  });
   if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
     await showClosedCustomerLauncher(fresh, customerReason, {
       extraMessageIds
@@ -2582,6 +2669,9 @@ async function autoCloseTicket(ticket, extra = {}) {
   const thread = db.getTelegramThreadForTicket.get(ticket.id);
   const fresh = db.getTicketById.get(ticket.id) || ticket;
   lifecycle.cancelOperatorWait?.(ticket.id);
+  clearTicketReminders(ticket.id).catch(error => {
+    console.warn('[TG private] clear auto-close reminders:', tgError(error));
+  });
   if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
     const reason = formatTemplate(
       cfg().telegramCustomerClosedBySystemText,
@@ -3002,6 +3092,7 @@ module.exports = {
   forwardMessage,
   deliverCustomerReply,
   sendCustomerControl,
+  clearTicketReminders,
   notifyTicketClosed,
   autoCloseTicket,
   sendTyping,
