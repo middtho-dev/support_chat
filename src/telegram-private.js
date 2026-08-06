@@ -34,6 +34,17 @@ const TELEGRAM_API_TIMEOUT_MS = Math.max(
   5000,
   Math.min(60000, Number(process.env.TELEGRAM_API_TIMEOUT_MS) || 15000)
 );
+const TELEGRAM_LONG_POLL_TIMEOUT_SECONDS = Math.max(
+  1,
+  Math.min(50, Number(process.env.TELEGRAM_LONG_POLL_TIMEOUT_SECONDS) || 30)
+);
+// getUpdates deliberately keeps the connection open for the long-poll timeout.
+// Its HTTP timeout must always leave Telegram enough time to answer, unlike the
+// shorter timeout used for ordinary API calls such as sending a message.
+const TELEGRAM_POLL_REQUEST_TIMEOUT_MS = Math.max(
+  (TELEGRAM_LONG_POLL_TIMEOUT_SECONDS + 5) * 1000,
+  Math.min(120000, Number(process.env.TELEGRAM_POLL_REQUEST_TIMEOUT_MS) || 45000)
+);
 const TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS = Math.max(
   15000,
   Math.min(120000, Number(process.env.TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS) || 60000)
@@ -1045,6 +1056,17 @@ function init(socketIo, hooks = {}) {
   return bot;
 }
 
+function configureLongPollRequestTimeout(instance) {
+  if (typeof instance._request !== 'function') return;
+  const request = instance._request.bind(instance);
+  instance._request = (method, options = {}) => request(
+    method,
+    method === 'getUpdates'
+      ? { ...options, timeoutMs: TELEGRAM_POLL_REQUEST_TIMEOUT_MS }
+      : options
+  );
+}
+
 async function startBot() {
   if (bot) return bot;
   console.log('[TG private] Starting...');
@@ -1060,11 +1082,12 @@ async function startBot() {
         interval: POLLING_INTERVAL_MS,
         autoStart: false,
         params: {
-          timeout: 30,
+          timeout: TELEGRAM_LONG_POLL_TIMEOUT_SECONDS,
           allowed_updates: ['message', 'callback_query', 'message_reaction', 'message_reaction_count']
         }
       }
     });
+    configureLongPollRequestTimeout(instance);
     bot = instance;
     instance.on('polling_error', error => {
       if (instance !== bot) return;
@@ -3392,6 +3415,8 @@ function status() {
     miniAppConfigured: !!adminWebAppUrl(),
     pollingIntervalMs: POLLING_INTERVAL_MS,
     apiRequestTimeoutMs: TELEGRAM_API_TIMEOUT_MS,
+    pollingLongPollTimeoutSeconds: TELEGRAM_LONG_POLL_TIMEOUT_SECONDS,
+    pollingRequestTimeoutMs: TELEGRAM_POLL_REQUEST_TIMEOUT_MS,
     fileDownloadTimeoutMs: TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS,
     pendingThreadCreates: creatingThreads.size,
     pendingTopicStatusUpdates: topicStatusUpdates.size,

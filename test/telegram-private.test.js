@@ -28,10 +28,17 @@ let topicAttempts = 0;
 let nextTopicId = 500;
 let messageId = 10;
 let stopPollingCalls = 0;
+let botOptions = null;
+const requests = [];
 
 class FakeBot {
-  constructor() {
+  constructor(_token, options) {
+    botOptions = options;
     this.handlers = {};
+  }
+  _request(method, options) {
+    requests.push({ method, options });
+    return Promise.resolve();
   }
   on(name, handler) {
     this.handlers[name] = handler;
@@ -138,6 +145,19 @@ test.after(async () => {
   await telegram.shutdown();
   if (db.db.open) db.db.close();
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('long polling has its own HTTP timeout without delaying message delivery requests', async () => {
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  assert.equal(botOptions.request.timeoutMs, 15000);
+  assert.equal(botOptions.polling.params.timeout, 30);
+
+  await fakeBot._request('getUpdates', { form: {} });
+  await fakeBot._request('sendMessage', { form: {} });
+
+  assert.equal(requests.at(-2).options.timeoutMs, 45000);
+  assert.equal(requests.at(-1).options.timeoutMs, undefined);
 });
 
 test('empty ticket creates a topic after a transient Telegram failure', async () => {
