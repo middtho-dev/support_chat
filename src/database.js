@@ -84,6 +84,8 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_next_retry_at D
 // A browser acknowledgement is intentionally separate from Telegram delivery:
 // web-origin tickets have no customer Telegram chat to confirm delivery to.
 try { db.exec(`ALTER TABLE messages ADD COLUMN web_delivered_at DATETIME`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN web_delivery_attempts INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN web_delivery_next_retry_at DATETIME`); } catch {}
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tickets_telegram_customer
@@ -96,6 +98,8 @@ db.exec(`
     WHERE telegram_source_chat_id IS NOT NULL AND telegram_source_message_id IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_messages_customer_delivery
     ON messages(telegram_customer_message_id, telegram_customer_next_retry_at, created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_web_delivery
+    ON messages(web_delivered_at, web_delivery_next_retry_at, created_at);
 `);
 
 // Only one process may consume getUpdates for a bot token. Keeping the lease in
@@ -161,6 +165,21 @@ db.exec(`
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
   );
 
+  -- Operator source messages remain visible until the destination client has
+  -- confirmed delivery. Failed deletions are retried from this durable queue.
+  CREATE TABLE IF NOT EXISTS telegram_operator_message_cleanup_queue (
+    message_id TEXT PRIMARY KEY,
+    ticket_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    telegram_message_id INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS telegram_ticket_notifications (
     ticket_id TEXT NOT NULL,
     operator_id TEXT NOT NULL,
@@ -204,6 +223,8 @@ db.exec(`
     ON tickets(assigned_operator_id, status);
   CREATE INDEX IF NOT EXISTS idx_messages_pending_telegram
     ON messages(telegram_message_id, telegram_next_retry_at, created_at);
+  CREATE INDEX IF NOT EXISTS idx_operator_message_cleanup_next
+    ON telegram_operator_message_cleanup_queue(next_retry_at, created_at);
 `);
 
 // Push subscriptions
@@ -577,8 +598,46 @@ module.exports = {
   getMessageById: db.prepare(`SELECT * FROM messages WHERE id = ?`),
   markWebMessageDelivered: db.prepare(`
     UPDATE messages
-    SET web_delivered_at = COALESCE(web_delivered_at, CURRENT_TIMESTAMP)
+    SET web_delivered_at = COALESCE(web_delivered_at, CURRENT_TIMESTAMP),
+      web_delivery_next_retry_at = NULL
     WHERE ticket_id = ? AND id = ? AND sender IN ('support', 'system')
+  `),
+  markWebDeliveryAttempt: db.prepare(`
+    UPDATE messages
+    SET web_delivery_attempts = COALESCE(web_delivery_attempts, 0) + 1,
+      web_delivery_next_retry_at = datetime('now', ?)
+    WHERE id = ? AND web_delivered_at IS NULL
+  `),
+  getPendingWebDeliveries: db.prepare(`
+    SELECT m.*
+    FROM messages m
+    JOIN tickets t ON t.id = m.ticket_id
+    WHERE m.sender = 'support'
+      AND t.source != 'telegram'
+      AND t.status = 'open'
+      AND m.web_delivered_at IS NULL
+      AND (m.web_delivery_next_retry_at IS NULL OR m.web_delivery_next_retry_at <= CURRENT_TIMESTAMP)
+    ORDER BY m.created_at ASC, m.rowid ASC
+    LIMIT ?
+  `),
+  enqueueOperatorMessageCleanup: db.prepare(`
+    INSERT OR IGNORE INTO telegram_operator_message_cleanup_queue
+      (message_id, ticket_id, chat_id, telegram_message_id)
+    VALUES (?, ?, ?, ?)
+  `),
+  getPendingOperatorMessageCleanup: db.prepare(`
+    SELECT * FROM telegram_operator_message_cleanup_queue
+    WHERE next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP
+    ORDER BY created_at ASC
+    LIMIT ?
+  `),
+  deleteOperatorMessageCleanup: db.prepare(`
+    DELETE FROM telegram_operator_message_cleanup_queue WHERE message_id = ?
+  `),
+  markOperatorMessageCleanupAttempt: db.prepare(`
+    UPDATE telegram_operator_message_cleanup_queue
+    SET attempts = attempts + 1, last_error = ?, next_retry_at = datetime('now', ?)
+    WHERE message_id = ?
   `),
 
   getPendingTelegramMessages: db.prepare(`

@@ -267,6 +267,11 @@ test('an operator reply from a Telegram topic is persisted and emitted to the we
     item.event === 'message' &&
     item.payload?.content === 'Ответ через Telegram'
   ));
+  // The operator source text stays in Telegram until the customer channel
+  // acknowledges rendering the persisted message.
+  assert.equal(deleted.some(item => item.chatId === '7001' && item.messageId === 880), false);
+  assert.equal(telegram.confirmWebCustomerDelivery(ticketId, messages.at(-1).id), true);
+  await telegram.processDeliveryQueue();
   assert.ok(deleted.some(item => item.chatId === '7001' && item.messageId === 880));
   assert.ok(edits.some(item => item.text?.rich_message?.markdown?.includes('Ответ через Telegram')));
 

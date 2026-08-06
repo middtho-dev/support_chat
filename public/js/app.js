@@ -9,7 +9,7 @@ const ECATS=[
   {i:'❤️',e:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✨','⭐','🌟','💫','🔥','💥','🎉','🎊','🎁','🎈','🌈','☀️','🌤','⛅','🌧','❄️','☃️','⛄','🌊','🌸','🌺','🌻','🌹','🍀','🌿','🍃','🎵','🎶','💤','💬','💭','🔔','💡','🔍','💎','🔑','🧲','🌙','💸','💯']}
 ];
 
-const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0,hasMore:false,oldestTs:null,_msgs:[],pendingSend:null};
+const S={token:null,tid:null,uname:null,closed:false,file:null,uploading:false,lastDate:null,epOpen:false,unread:0,lastTyping:0,hasMore:false,oldestTs:null,_msgs:[],pendingSend:null,_acknowledged:new Set()};
 const CFG={workStartHour:8,workEndHour:23,offhoursEnabled:true,offhoursBannerText:'',offhoursRejectText:'',timezone:'Europe/Moscow',online:true};
 const $=id=>document.getElementById(id);
 const ni=$('ni'),sb=$('sb'),sl=$('sl');
@@ -54,7 +54,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-08-06-v8';
+const APP_CACHE_VERSION='2026-08-06-v9';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -142,7 +142,7 @@ async function init(){
         S.token=sv.t;S.tid=ticket.id;S.uname=ticket.user_name;
         S.hasMore=data.hasMore||false;
         if(!cached)showChat();
-        renderMsgs(messages);scrollBot(false);socket.connect();
+        renderMsgs(messages);scrollBot(false);acknowledgeVisibleMessages(messages);socket.connect();
         if(S.hasMore)showLoadOlder();
         if(!cached)loadDraft();
         if(ticket.status==='closed'){
@@ -293,11 +293,20 @@ function syncTicketState(ticket){
   else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';}
 }
 function acknowledgeVisibleMessages(messages){
-  if(!socket.connected||!S.tid||!S.token)return;
+  if(!S.tid||!S.token)return;
   const ids=[...new Set(messages
     .filter(m=>m?.id&&(m.sender==='support'||m.sender==='system'))
-    .map(m=>m.id))].slice(0,100);
-  if(ids.length)socket.emit('customer_messages_seen',{ticketId:S.tid,sessionToken:S.token,messageIds:ids});
+    .map(m=>m.id))]
+    .filter(id=>!S._acknowledged.has(id))
+    .slice(0,100);
+  if(!ids.length)return;
+  ids.forEach(id=>S._acknowledged.add(id));
+  fetch('/api/session/messages-seen',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,messageIds:ids})
+  }).then(response=>{
+    if(!response.ok)throw new Error('Message acknowledgement failed');
+  }).catch(()=>ids.forEach(id=>S._acknowledged.delete(id)));
 }
 function mergeIncomingMessages(messages,{notify=false}={}){
   const valid=messages.filter(m=>m?.id);

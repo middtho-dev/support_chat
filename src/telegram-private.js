@@ -2809,12 +2809,21 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
       console.error('[TG private] customer delivery:', tgError(error));
     });
 
+    if (ticket.source !== 'telegram') {
+      // Re-emit from the durable DB record until the web client confirms it
+      // rendered the reply. This path does not depend on the Rich card.
+      db.markWebDeliveryAttempt.run('+2 seconds', id);
+      scheduleDeliveryQueue(2 * 1000);
+    }
+
     if (type === 'text') {
-      await publishTicketTranscript(ticket, thread);
-      await deleteTelegramMessage(msg.chat.id, msg.message_id);
+      publishTicketTranscript(ticket, thread).catch(error => {
+        console.warn('[TG private] operator transcript refresh:', tgError(error));
+      });
     } else {
-      await moveTicketTranscriptBelowMedia(ticket, thread);
-      await publishTicketTranscript(ticket, thread);
+      moveTicketTranscriptBelowMedia(ticket, thread)
+        .then(() => publishTicketTranscript(ticket, thread))
+        .catch(error => console.warn('[TG private] operator media transcript:', tgError(error)));
     }
     await setTopicStatus(thread, ticket, cfg().telegramOpenEmoji).catch(() => {});
     push.send(ticket.id, rawText || fileName || 'Новое сообщение').catch(() => {});
@@ -2963,6 +2972,29 @@ function customerDeliveryChatId(ticket, message) {
   );
 }
 
+function queueOperatorMessageCleanup(message) {
+  if (message?.message_type !== 'text' || !message?.ticket_id ||
+      !message?.telegram_chat_id || !message?.telegram_message_id) return false;
+  db.enqueueOperatorMessageCleanup.run(
+    message.id,
+    message.ticket_id,
+    String(message.telegram_chat_id),
+    Number(message.telegram_message_id)
+  );
+  scheduleDeliveryQueue(0);
+  return true;
+}
+
+// Socket.IO emission is not a delivery receipt: mobile Telegram webviews can
+// lose it. This is called only after the client rendered the persisted reply.
+function confirmWebCustomerDelivery(ticketId, messageId) {
+  const message = db.getMessageById.get(messageId);
+  if (!message || message.ticket_id !== ticketId || message.sender !== 'support') return false;
+  db.markWebMessageDelivered.run(ticketId, messageId);
+  queueOperatorMessageCleanup(db.getMessageById.get(messageId));
+  return true;
+}
+
 async function waitForCustomerDeliverySlot(chatId) {
   const waitMs = Math.max(0, Number(customerDeliveryNextAt.get(chatId) || 0) - Date.now());
   if (waitMs) await wait(waitMs);
@@ -3000,6 +3032,7 @@ async function deliverCustomerReplyNow(ticket, message, chatId) {
       return null;
     }
     customerDeliveryNextAt.set(chatId, Date.now() + TELEGRAM_CUSTOMER_SEND_INTERVAL_MS);
+    queueOperatorMessageCleanup(db.getMessageById.get(saved.id));
     deliveryStats.customerDelivered++;
     deliveryStats.lastSuccessAt = new Date().toISOString();
     return sent.message_id;
@@ -3158,6 +3191,48 @@ async function processDeliveryQueue() {
       await wait(250);
     }
     if (shuttingDown) return;
+
+    const webDeliveries = db.getPendingWebDeliveries.all(20);
+    for (const message of webDeliveries) {
+      if (shuttingDown) break;
+      io?.to(`ticket:${message.ticket_id}`).emit('message', {
+        id: message.id,
+        ticket_id: message.ticket_id,
+        sender: message.sender,
+        sender_name: message.sender_name,
+        content: message.content,
+        message_type: message.message_type,
+        file_url: message.file_url,
+        file_name: message.file_name,
+        file_mime: message.file_mime,
+        created_at: message.created_at,
+        reply_to_id: message.reply_to_id
+      });
+      const attempts = Number(message.web_delivery_attempts || 0) + 1;
+      const delaySeconds = deliveryRetryDelaySeconds(attempts);
+      db.markWebDeliveryAttempt.run(`+${delaySeconds} seconds`, message.id);
+    }
+
+    if (shuttingDown) return;
+    const operatorCleanupMessages = db.getPendingOperatorMessageCleanup.all(20);
+    for (const cleanup of operatorCleanupMessages) {
+      if (shuttingDown) break;
+      const removed = await deleteTelegramMessage(cleanup.chat_id, cleanup.telegram_message_id);
+      if (removed) {
+        db.deleteOperatorMessageCleanup.run(cleanup.message_id);
+      } else {
+        const attempts = Number(cleanup.attempts || 0) + 1;
+        const delaySeconds = Math.min(900, 15 * (2 ** Math.min(attempts - 1, 6)));
+        db.markOperatorMessageCleanupAttempt.run(
+          'Telegram did not confirm operator message deletion',
+          `+${delaySeconds} seconds`,
+          cleanup.message_id
+        );
+      }
+      await wait(150);
+    }
+
+    if (shuttingDown) return;
     const cleanupMessages = db.getPendingTelegramCustomerCleanup.all(20);
     for (const cleanup of cleanupMessages) {
       if (shuttingDown) break;
@@ -3176,9 +3251,12 @@ async function processDeliveryQueue() {
       }
       await wait(150);
     }
-    if (!shuttingDown && (messages.length === 20 || customerReplies.length === 20 || cleanupMessages.length === 20 ||
-        db.getPendingTelegramCustomerReplies.all(1).length)) {
-      scheduleDeliveryQueue(250);
+    if (!shuttingDown && (messages.length === 20 || customerReplies.length === 20 ||
+        webDeliveries.length === 20 || operatorCleanupMessages.length === 20 || cleanupMessages.length === 20 ||
+        db.getPendingTelegramCustomerReplies.all(1).length ||
+        db.getPendingWebDeliveries.all(1).length ||
+        db.getPendingOperatorMessageCleanup.all(1).length)) {
+      scheduleDeliveryQueue(1000);
     }
   } catch (error) {
     deliveryStats.lastError = tgError(error);
@@ -3715,6 +3793,8 @@ module.exports = {
   createTopic,
   forwardMessage,
   deliverCustomerReply,
+  confirmWebCustomerDelivery,
+  processDeliveryQueue,
   sendCustomerControl,
   sendCustomerClosePrompt,
   refreshOpenTicketTranscripts,
