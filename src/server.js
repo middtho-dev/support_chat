@@ -592,6 +592,16 @@ function scheduleWelcomeMessages(ticketId) {
 
 function broadcastAdminTickets() { io.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all()); }
 
+function ticketSnapshot(ticket) {
+  const PAGE = 100;
+  const total = db.countMessages.get(ticket.id)?.cnt || 0;
+  return {
+    ticket,
+    messages: db.getMessagesRecent.all(ticket.id, PAGE),
+    hasMore: total > PAGE
+  };
+}
+
 io.on('connection', (socket) => {
   console.log('[Socket] Connected:', socket.id);
 
@@ -601,6 +611,10 @@ io.on('connection', (socket) => {
     socket.join(`ticket:${ticketId}`);
     socket.ticketId = ticketId;
     scheduleWelcomeMessages(ticketId);
+    // Socket.IO events are best-effort. Always send the persisted transcript
+    // after joining so an operator reply cannot be lost in the gap between the
+    // HTTP resume request and room subscription (or after a mobile reconnect).
+    socket.emit('ticket_snapshot', ticketSnapshot(ticket));
 
     if (usesLegacyTelegramTopics() &&
         ticket.status === 'open' &&
@@ -615,6 +629,18 @@ io.on('connection', (socket) => {
         broadcastAdminTickets();
       }).catch(() => {});
     }
+  });
+
+  socket.on('customer_messages_seen', ({ ticketId, sessionToken, messageIds } = {}, ack) => {
+    const ticket = db.getTicketBySessionAny.get(sessionToken);
+    if (!ticket || ticket.id !== ticketId || socket.ticketId !== ticketId) {
+      return ack?.({ error: 'Unauthorized' });
+    }
+    const ids = Array.isArray(messageIds)
+      ? [...new Set(messageIds.filter(id => typeof id === 'string'))].slice(0, 100)
+      : [];
+    for (const id of ids) db.markWebMessageDelivered.run(ticketId, id);
+    ack?.({ ok: true, delivered: ids.length });
   });
 
   socket.on('typing', () => {
