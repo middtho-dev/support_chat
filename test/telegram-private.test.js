@@ -17,6 +17,7 @@ const rich = [];
 const pins = [];
 const unpins = [];
 const edits = [];
+const markupEdits = [];
 const deleted = [];
 const callbackAnswers = [];
 const welcomeTickets = [];
@@ -72,7 +73,8 @@ class FakeBot {
     edits.push({ text, options });
     return Promise.resolve({});
   }
-  editMessageReplyMarkup() {
+  editMessageReplyMarkup(replyMarkup, options) {
+    markupEdits.push({ replyMarkup, options });
     return Promise.resolve({});
   }
   pinChatMessage(chatId, pinnedMessageId, options) {
@@ -149,8 +151,8 @@ test('empty ticket creates a topic after a transient Telegram failure', async ()
   const intro = rich.find(item => item.options?.message_thread_id === 501);
   assert.ok(intro);
   assert.doesNotMatch(intro.markdown, /Клиент открыл новое обращение|^> /m);
-  assert.match(intro.markdown, /Оператор/);
-  assert.match(intro.markdown, /Создан/);
+  assert.match(intro.markdown, /Диалог/);
+  assert.match(intro.markdown, /Пустой тикет/);
 });
 
 test('an operator added from settings can use the bot without settings access', async () => {
@@ -232,6 +234,8 @@ test('an operator reply from a Telegram topic is persisted and emitted to the we
     item.event === 'message' &&
     item.payload?.content === 'Ответ через Telegram'
   ));
+  assert.ok(deleted.some(item => item.chatId === '7001' && item.messageId === 880));
+  assert.ok(edits.some(item => item.text?.rich_message?.markdown?.includes('Ответ через Telegram')));
 
   await fakeBot.handlers.message({
     message_id: 880,
@@ -357,19 +361,21 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.equal(userMessage.content, 'Нужна помощь с подключением');
   assert.equal(userMessage.telegram_source_message_id, 801);
   assert.ok(userMessage.telegram_message_id);
+  const thread = db.getTelegramThreadForTicket.get(ticket.id);
   const operatorDelivery = rich.find(item =>
-    item.markdown.includes('Нужна помощь с подключением') &&
+    item.messageId === thread.root_message_id &&
     item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
       button.web_app?.url?.includes(`ticket=${ticket.id}`) && button.text.includes('Открыть чат')
     )
   );
   assert.ok(operatorDelivery, 'each customer message has a direct Mini App chat button');
+  assert.ok(edits.some(item => item.text?.rich_message?.markdown?.includes('Нужна помощь с подключением')));
   assert.equal(
     rich.filter(item =>
       item.chatId === '7001' && item.markdown.includes('Нужна помощь с подключением')
     ).length,
     1,
-    'the first customer message is delivered to the operator only once'
+    'the customer text is kept in the single Rich transcript'
   );
   assert.ok(operatorWaits.some(item =>
     item.ticketId === ticket.id && item.afterMessageId === userMessage.id
@@ -398,13 +404,27 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.ok(supportDelivery);
   assert.equal(supportDelivery.options?.reply_markup, undefined);
   assert.ok(rich.some(item =>
-    item.markdown.includes('Telegram ID') && item.markdown.includes(customerId)
-  ));
-  assert.ok(rich.some(item =>
     item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
-      button.callback_data === `customercontrol:${ticket.id}`
+      button.callback_data === `ticketmenu:${ticket.id}`
     )
   ));
+
+  await fakeBot.handlers.callback_query({
+    id: 'ticket-menu-query',
+    from: { id: 7001, first_name: 'Оператор' },
+    message: {
+      message_id: operatorDelivery.messageId,
+      message_thread_id: operatorDelivery.options.message_thread_id,
+      chat: { id: 7001, type: 'private' }
+    },
+    data: `ticketmenu:${ticket.id}`
+  });
+  const expandedActions = markupEdits.find(item =>
+    item.options?.message_id === operatorDelivery.messageId
+  )?.replyMarkup.inline_keyboard.flat();
+  assert.ok(expandedActions?.some(button => button.callback_data === `close:${ticket.id}`));
+  assert.ok(expandedActions?.some(button => button.callback_data === `customercontrol:${ticket.id}`));
+  assert.ok(expandedActions?.some(button => button.callback_data === `ticketmain:${ticket.id}`));
 
   const countBeforeDuplicate = db.getMessages.all(ticket.id).length;
   await fakeBot.handlers.message({
@@ -437,6 +457,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.chatId === customerId &&
     item.messageId === refreshedTicket.telegram_customer_control_message_id
   );
+  assert.match(closePrompt.markdown, /Спасибо за обращение/);
   assert.match(closePrompt.markdown, /Если ваш вопрос решён/);
   assert.doesNotMatch(closePrompt.markdown, /Тикет #|Оператор уже получил|Статус:/);
 
@@ -568,7 +589,7 @@ test('close button responds immediately and closes a ticket from its operator to
   assert.equal(callbackAnswers.at(-1).id, 'close-ticket-query');
   assert.match(callbackAnswers.at(-1).options.text, /Закрываю тикет/);
   assert.equal(db.getTicketById.get(id).status, 'closed');
-  const closeNotice = sent.findLast(item =>
+  const closeNotice = rich.findLast(item =>
     item.chatId === '7001' && item.options?.message_thread_id === 909
   );
   assert.ok(closeNotice);
