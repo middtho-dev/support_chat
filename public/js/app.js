@@ -184,7 +184,10 @@ function scheduleViewportSync(){
 function syncViewport(){
   const app=$('app'),viewport=window.visualViewport;
   const height=Math.round(viewport?.height||window.innerHeight);
-  const top=Math.round(viewport?.offsetTop||0);
+  // Desktop Telegram can expose a visual-viewport offset even though no
+  // mobile system controls overlap the Mini App. Keep that clearance mobile-only.
+  const mobile=window.matchMedia?.('(max-width:600px)').matches;
+  const top=mobile?Math.round(viewport?.offsetTop||0):0;
   app.style.setProperty('--app-height',`${height}px`);
   app.style.setProperty('--app-top',`${top}px`);
   if(S.tid&&_pinToBottom)scrollBot(false);

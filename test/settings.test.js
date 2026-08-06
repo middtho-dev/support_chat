@@ -46,7 +46,24 @@ test('maintenance and alert settings persist and are normalized', () => {
     telegramRichTranscriptMessageMaxChars: 40,
     telegramRichTranscriptShowAuthor: false,
     telegramRichTranscriptShowTime: false,
-    telegramRichTranscriptSeparator: 'dots'
+    telegramRichTranscriptSeparator: 'dots',
+    telegramRichTranscriptShowHeader: false,
+    telegramRichTranscriptShowSubtitle: false,
+    telegramRichTranscriptTitleSize: 'large',
+    telegramRichTranscriptTitleStyle: 'italic',
+    telegramRichTranscriptSubtitleStyle: 'code',
+    telegramRichTranscriptMessageLayout: 'quote',
+    telegramRichTranscriptMessageSize: 'large',
+    telegramRichTranscriptMessageHeaderStyle: 'plain',
+    telegramRichTranscriptTimestampFormat: 'date_time',
+    telegramRichTranscriptDensity: 'airy',
+    telegramRichTranscriptOrder: 'newest_first',
+    telegramRichTranscriptUserLabel: 'Клиент: {name}',
+    telegramRichTranscriptOperatorLabel: 'Оператор: {name}',
+    telegramRichTranscriptShowMediaLabel: false,
+    telegramRichTranscriptShowOmittedNotice: false,
+    telegramRichTranscriptFooter: 'Показано {shown}',
+    telegramRichTranscriptEmptyText: 'Пусто'
   });
 
   assert.equal(saved.backupEnabled, false);
@@ -75,6 +92,15 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(saved.telegramRichTranscriptShowAuthor, false);
   assert.equal(saved.telegramRichTranscriptShowTime, false);
   assert.equal(saved.telegramRichTranscriptSeparator, 'dots');
+  assert.equal(saved.telegramRichTranscriptShowHeader, false);
+  assert.equal(saved.telegramRichTranscriptShowSubtitle, false);
+  assert.equal(saved.telegramRichTranscriptTitleSize, 'large');
+  assert.equal(saved.telegramRichTranscriptMessageLayout, 'quote');
+  assert.equal(saved.telegramRichTranscriptMessageSize, 'large');
+  assert.equal(saved.telegramRichTranscriptTimestampFormat, 'date_time');
+  assert.equal(saved.telegramRichTranscriptOrder, 'newest_first');
+  assert.equal(saved.telegramRichTranscriptUserLabel, 'Клиент: {name}');
+  assert.equal(saved.telegramRichTranscriptFooter, 'Показано {shown}');
 
   const loaded = loadSettings();
   assert.equal(loaded.backupEnabled, false);
@@ -95,6 +121,9 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.telegramRichTranscriptMaxMessages, 30);
   assert.equal(loaded.telegramRichTranscriptMessageMaxChars, 80);
   assert.equal(loaded.telegramRichTranscriptSeparator, 'dots');
+  assert.equal(loaded.telegramRichTranscriptMessageLayout, 'quote');
+  assert.equal(loaded.telegramRichTranscriptOrder, 'newest_first');
+  assert.equal(loaded.telegramRichTranscriptEmptyText, 'Пусто');
 });
 
 test('legacy Telegram ticket confirmation is upgraded to the pinned card template', () => {

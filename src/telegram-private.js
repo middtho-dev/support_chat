@@ -118,6 +118,8 @@ const transcriptUpdates = new Map();
 const customerMessageRates = new Map();
 const alertTimes = new Map();
 const topicStatus = new Map();
+const topicStatusUpdates = new Map();
+const topicStatusVerificationTimers = new Map();
 const focusMarkers = new Map();
 const deliveryStats = {
   delivered: 0,
@@ -722,6 +724,32 @@ function transcriptClock(value) {
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
+function transcriptDateTime(value) {
+  const date = parseDatabaseTime(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function richMarkdownStyle(text, style) {
+  if (!text) return '';
+  if (style === 'bold') return `**${text}**`;
+  if (style === 'italic' || style === 'muted') return `_${text}_`;
+  if (style === 'code') return `\`${text}\``;
+  return text;
+}
+
+function richHeading(text, size, style) {
+  const styled = richMarkdownStyle(text, style);
+  const prefix = size === 'large' ? '# ' : size === 'medium' ? '## ' : size === 'small' ? '### ' : '';
+  return `${prefix}${styled}`;
+}
+
+function quoteMarkdown(text) {
+  return text.split('\n').map(line => `> ${line}`).join('\n');
+}
+
 function transcriptAttachmentLabel(message) {
   if (message.message_type === 'image') return '🖼 Изображение';
   if (message.message_type === 'video') return '🎬 Видео';
@@ -733,34 +761,68 @@ function ticketTranscriptModel(ticket) {
   const settings = cfg();
   const sourceMessages = db.getMessagesRecent.all(ticket.id, 30)
     .filter(message => message.sender !== 'system' && !Number(message.is_auto));
-  const visibleMessages = sourceMessages.slice(-settings.telegramRichTranscriptMaxMessages);
+  let visibleMessages = sourceMessages.slice(-settings.telegramRichTranscriptMaxMessages);
+  if (settings.telegramRichTranscriptOrder === 'newest_first') visibleMessages = [...visibleMessages].reverse();
   const entries = visibleMessages.map(message => {
-    const sender = message.sender === 'user'
-      ? '👤 Клиент'
-      : `🛟 ${message.sender_name || cfg().supportName}`;
+    const senderName = message.sender === 'user'
+      ? ticket.user_name || 'Клиент'
+      : message.sender_name || settings.supportName;
+    const sender = formatTemplate(
+      message.sender === 'user'
+        ? settings.telegramRichTranscriptUserLabel
+        : settings.telegramRichTranscriptOperatorLabel,
+      { name: senderName, role: message.sender === 'user' ? 'Клиент' : 'Оператор' }
+    );
     const content = String(message.content || '').trim();
     const body = [
       content ? content.slice(0, settings.telegramRichTranscriptMessageMaxChars) : '',
-      message.file_url ? transcriptAttachmentLabel(message) : ''
+      message.file_url && settings.telegramRichTranscriptShowMediaLabel
+        ? transcriptAttachmentLabel(message)
+        : ''
     ].filter(Boolean).join('\n');
+    const timestamp = settings.telegramRichTranscriptTimestampFormat === 'date_time'
+      ? transcriptDateTime(message.created_at)
+      : transcriptClock(message.created_at);
     const markdownHeader = [
-      settings.telegramRichTranscriptShowAuthor ? `**${markdownEscape(sender)}**` : '',
-      settings.telegramRichTranscriptShowTime ? `_${transcriptClock(message.created_at)}_` : ''
+      settings.telegramRichTranscriptShowAuthor
+        ? richMarkdownStyle(markdownEscape(sender), settings.telegramRichTranscriptMessageHeaderStyle)
+        : '',
+      settings.telegramRichTranscriptShowTime ? `_${timestamp}_` : ''
     ].filter(Boolean).join(' · ');
     const fallbackHeader = [
       settings.telegramRichTranscriptShowAuthor ? sender : '',
-      settings.telegramRichTranscriptShowTime ? transcriptClock(message.created_at) : ''
+      settings.telegramRichTranscriptShowTime ? timestamp : ''
     ].filter(Boolean).join(' · ');
+    const bodyMarkdown = markdownEscape(body || 'Сообщение');
+    const normalMarkdown = [markdownHeader, bodyMarkdown].filter(Boolean).join('\n');
+    const normalFallback = [fallbackHeader, body || 'Сообщение'].filter(Boolean).join('\n');
+    const compactMarkdown = [markdownHeader, bodyMarkdown].filter(Boolean).join(markdownHeader ? ' — ' : '');
+    const compactFallback = [fallbackHeader, body || 'Сообщение'].filter(Boolean).join(fallbackHeader ? ' — ' : '');
+    const sizedMarkdown = settings.telegramRichTranscriptMessageSize === 'large'
+      ? [markdownHeader, richHeading(bodyMarkdown, 'small', 'plain')].filter(Boolean).join('\n')
+      : normalMarkdown;
+    const styledMarkdown = settings.telegramRichTranscriptMessageLayout === 'compact'
+      ? compactMarkdown
+      : settings.telegramRichTranscriptMessageLayout === 'quote'
+        ? quoteMarkdown(sizedMarkdown)
+        : sizedMarkdown;
     return {
-      markdown: [markdownHeader, markdownEscape(body || 'Сообщение')].filter(Boolean).join('\n'),
-      fallback: [fallbackHeader, body || 'Сообщение'].filter(Boolean).join('\n')
+      markdown: styledMarkdown,
+      fallback: settings.telegramRichTranscriptMessageLayout === 'compact'
+        ? compactFallback
+        : normalFallback
     };
   });
-  const separator = settings.telegramRichTranscriptSeparator === 'dots'
+  const selectedSeparator = settings.telegramRichTranscriptSeparator === 'dots'
     ? '\n\n· · ·\n\n'
     : settings.telegramRichTranscriptSeparator === 'line'
       ? '\n\n───\n\n'
       : '\n\n';
+  const separator = settings.telegramRichTranscriptDensity === 'compact'
+    ? '\n'
+    : settings.telegramRichTranscriptDensity === 'airy'
+      ? `${selectedSeparator}\n`
+      : selectedSeparator;
   const maxLength = 3400;
   while (entries.length > 1 && entries.map(entry => entry.markdown).join(separator).length > maxLength) {
     entries.shift();
@@ -770,21 +832,31 @@ function ticketTranscriptModel(ticket) {
   const templateValues = {
     name: ticket.user_name || 'Клиент',
     shortId: shortId(ticket),
-    status: state
+    status: state,
+    total: sourceMessages.length,
+    shown: entries.length,
+    hidden: omitted
   };
   const title = formatTemplate(settings.telegramRichTranscriptTitle, templateValues);
   const subtitle = formatTemplate(settings.telegramRichTranscriptSubtitle, templateValues);
+  const footer = formatTemplate(settings.telegramRichTranscriptFooter, templateValues);
   const markdown = [
-    `**${markdownEscape(title)}**`,
-    subtitle ? `_${markdownEscape(subtitle)}_` : '',
-    omitted > 0 ? `_Показаны последние ${entries.length} сообщений._` : '',
-    entries.map(entry => entry.markdown).join(separator)
+    settings.telegramRichTranscriptShowHeader
+      ? richHeading(markdownEscape(title), settings.telegramRichTranscriptTitleSize, settings.telegramRichTranscriptTitleStyle)
+      : '',
+    settings.telegramRichTranscriptShowSubtitle && subtitle
+      ? richMarkdownStyle(markdownEscape(subtitle), settings.telegramRichTranscriptSubtitleStyle)
+      : '',
+    settings.telegramRichTranscriptShowOmittedNotice && omitted > 0 ? `_Показаны последние ${entries.length} сообщений._` : '',
+    entries.length ? entries.map(entry => entry.markdown).join(separator) : `_${markdownEscape(settings.telegramRichTranscriptEmptyText)}_`,
+    footer ? richMarkdownStyle(markdownEscape(footer), 'muted') : ''
   ].filter(Boolean).join('\n\n');
   const fallback = [
-    title,
-    subtitle,
-    omitted > 0 ? `Показаны последние ${entries.length} сообщений.` : '',
-    entries.map(entry => entry.fallback).join(separator)
+    settings.telegramRichTranscriptShowHeader ? title : '',
+    settings.telegramRichTranscriptShowSubtitle ? subtitle : '',
+    settings.telegramRichTranscriptShowOmittedNotice && omitted > 0 ? `Показаны последние ${entries.length} сообщений.` : '',
+    entries.length ? entries.map(entry => entry.fallback).join(separator) : settings.telegramRichTranscriptEmptyText,
+    footer
   ].filter(Boolean).join('\n\n');
   return { markdown, fallback };
 }
@@ -2162,13 +2234,76 @@ function topicName(ticket, emoji) {
   }).slice(0, 128);
 }
 
-async function setTopicStatus(thread, ticket, emoji) {
-  if (!thread) return;
-  const name = topicName(ticket, emoji);
+async function setTopicStatus(thread, ticket, emoji, { verify = true } = {}) {
+  if (!thread || !bot) return;
   const key = topicKey(thread.chat_id, thread.thread_id);
-  if (topicStatus.get(key) === name) return;
-  await bot.editForumTopic(thread.chat_id, thread.thread_id, { name });
-  topicStatus.set(key, name);
+  const desired = { thread, ticketId: ticket.id, emoji, name: topicName(ticket, emoji), verify };
+  const running = topicStatusUpdates.get(key);
+  if (running) {
+    running.desired = desired;
+    running.dirty = true;
+    return running.promise;
+  }
+  if (topicStatus.get(key) === desired.name) return true;
+
+  const state = { desired, dirty: false, promise: null };
+  state.promise = (async () => {
+    do {
+      state.dirty = false;
+      const current = state.desired;
+      let lastError = null;
+      let updated = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await bot.editForumTopic(current.thread.chat_id, current.thread.thread_id, { name: current.name });
+          topicStatus.set(key, current.name);
+          updated = true;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) await wait(250 * attempt);
+        }
+      }
+      if (!updated) {
+        topicStatus.delete(key);
+        await operationalAlert(
+          `telegram-topic-status-${current.ticketId}`,
+          `Не удалось обновить статус темы тикета ${shortId({ id: current.ticketId })}`,
+          tgError(lastError)
+        );
+        throw lastError || new Error('Telegram did not confirm topic status update');
+      }
+      if (current.verify) scheduleTopicStatusVerification(key, current);
+    } while (state.dirty);
+    return true;
+  })();
+  topicStatusUpdates.set(key, state);
+  try {
+    return await state.promise;
+  } finally {
+    if (topicStatusUpdates.get(key) === state) topicStatusUpdates.delete(key);
+  }
+}
+
+function scheduleTopicStatusVerification(key, desired) {
+  clearTimeout(topicStatusVerificationTimers.get(key));
+  const timer = setTimeout(async () => {
+    topicStatusVerificationTimers.delete(key);
+    if (topicStatus.get(key) !== desired.name) return;
+    const fresh = db.getTicketById.get(desired.ticketId);
+    const activeThread = fresh && db.getTelegramThreadForTicketOperator.get(
+      fresh.id,
+      desired.thread.operator_id
+    );
+    if (!fresh || !activeThread || String(activeThread.thread_id) !== String(desired.thread.thread_id)) return;
+    // The Bot API has no endpoint to read an individual topic's title. A delayed
+    // idempotent reapply is the verification pass and repairs eventual updates.
+    topicStatus.delete(key);
+    await setTopicStatus(activeThread, fresh, desired.emoji, { verify: false }).catch(error => {
+      console.warn('[TG private] topic status verification:', tgError(error));
+    });
+  }, 1800);
+  topicStatusVerificationTimers.set(key, timer);
 }
 
 async function focusTicketTopic(ticket, operator) {
@@ -3259,6 +3394,7 @@ function status() {
     apiRequestTimeoutMs: TELEGRAM_API_TIMEOUT_MS,
     fileDownloadTimeoutMs: TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS,
     pendingThreadCreates: creatingThreads.size,
+    pendingTopicStatusUpdates: topicStatusUpdates.size,
     latency: latencySummary(),
     delivery: {
       ...deliveryStats,
@@ -3285,6 +3421,9 @@ async function shutdown() {
   clearInterval(deliveryTimer);
   clearInterval(reminderTimer);
   clearTimeout(deliveryWakeTimer);
+  for (const timer of topicStatusVerificationTimers.values()) clearTimeout(timer);
+  topicStatusVerificationTimers.clear();
+  topicStatusUpdates.clear();
   cleanupTimer = null;
   deliveryTimer = null;
   reminderTimer = null;
