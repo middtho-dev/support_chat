@@ -10,6 +10,7 @@ process.env.TELEGRAM_BOT_TOKEN = 'fake-token';
 process.env.TELEGRAM_ADMIN_IDS = '7001';
 process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS = '100';
 process.env.TELEGRAM_TOPIC_CREATE_ATTEMPTS = '3';
+process.env.TELEGRAM_CUSTOMER_SEND_INTERVAL_MS = '1';
 process.env.PUBLIC_URL = 'https://support.example';
 
 const sent = [];
@@ -481,7 +482,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   let topicReply = db.getMessages.all(ticket.id).find(message =>
     message.content === 'Ответ из темы оператора'
   );
-  for (let attempt = 0; attempt < 20 && !topicReply?.telegram_customer_message_id; attempt++) {
+  for (let attempt = 0; attempt < 80 && !topicReply?.telegram_customer_message_id; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 5));
     topicReply = db.getMessageById.get(topicReply.id);
   }
@@ -586,6 +587,28 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.messageId === newTicketByButton.telegram_customer_control_message_id &&
     item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
   ));
+});
+
+test('rapid operator replies to one customer are serialized and kept in order', async () => {
+  const ticketId = 'customer-delivery-order-ticket-00000000000';
+  db.createTelegramTicket.run(ticketId, 'Очередь', 'customer-delivery-order-session', '8015', '8015', null, 'Очередь', null, 'ru');
+  const ticket = db.getTicketById.get(ticketId);
+  const messages = ['Первое', 'Второе', 'Третье'].map((content, index) => {
+    const id = `customer-delivery-order-${index}`;
+    db.saveMessage.run(id, ticketId, 'support', 'Оператор', content, 'text', null, null, null, null, null);
+    return db.getMessageById.get(id);
+  });
+
+  const before = rich.length;
+  await Promise.all(messages.map(message => telegram.deliverCustomerReply(ticket, message)));
+  const delivered = rich.slice(before)
+    .filter(item => item.chatId === '8015')
+    .map(item => item.markdown.match(/Первое|Второе|Третье/)?.[0])
+    .filter(Boolean);
+  assert.deepEqual(delivered, ['Первое', 'Второе', 'Третье']);
+  for (const message of messages) {
+    assert.ok(db.getMessageById.get(message.id).telegram_customer_message_id);
+  }
 });
 
 test('/start immediately creates a ticket and replaces the command with a Rich control', async () => {

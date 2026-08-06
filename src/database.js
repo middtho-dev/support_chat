@@ -187,6 +187,8 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_messages_tg_destination
     ON messages(telegram_chat_id, telegram_message_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_customer_delivery_order
+    ON messages(ticket_id, sender, telegram_customer_message_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_ticket_threads_destination
     ON telegram_ticket_threads(chat_id, thread_id);
   CREATE INDEX IF NOT EXISTS idx_ticket_threads_status
@@ -627,6 +629,19 @@ module.exports = {
         OR m.telegram_customer_next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY m.created_at ASC
     LIMIT ?
+  `),
+  getNextTelegramCustomerReply: db.prepare(`
+    SELECT m.id
+    FROM messages m
+    JOIN tickets t ON t.id = m.ticket_id
+    WHERE m.ticket_id = ?
+      AND m.sender = 'support'
+      AND t.source = 'telegram'
+      AND t.status = 'open'
+      AND t.telegram_customer_chat_id IS NOT NULL
+      AND m.telegram_customer_message_id IS NULL
+    ORDER BY m.created_at ASC, m.rowid ASC
+    LIMIT 1
   `),
   updateTelegramCustomerDelivery: db.prepare(`
     UPDATE messages SET
