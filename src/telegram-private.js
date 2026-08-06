@@ -786,13 +786,32 @@ function transcriptAttachmentLabel(message) {
   return `📎 ${message.file_name || 'Файл'}`;
 }
 
+function transcriptMessageTime(value) {
+  const date = parseDatabaseTime(value);
+  return Number.isNaN(date.getTime()) ? NaN : date.getTime();
+}
+
+function transcriptEntriesMarkdown(entries, separator, groupSeparator, field) {
+  return entries.reduce((result, entry, index) => {
+    if (!index) return entry[field];
+    return `${result}${entry.grouped ? groupSeparator : separator}${entry[field]}`;
+  }, '');
+}
+
 function ticketTranscriptModel(ticket) {
   const settings = cfg();
   const sourceMessages = db.getMessagesRecent.all(ticket.id, 30)
     .filter(message => message.sender !== 'system' && !Number(message.is_auto));
   let visibleMessages = sourceMessages.slice(-settings.telegramRichTranscriptMaxMessages);
   if (settings.telegramRichTranscriptOrder === 'newest_first') visibleMessages = [...visibleMessages].reverse();
-  const entries = visibleMessages.map(message => {
+  const groupWindowMs = settings.telegramRichTranscriptGroupWindowMinutes * 60 * 1000;
+  const entries = visibleMessages.map((message, index) => {
+    const previous = visibleMessages[index - 1];
+    const grouped = settings.telegramRichTranscriptAuthorMode === 'grouped' &&
+      !!previous &&
+      previous.sender === message.sender &&
+      String(previous.sender_name || '') === String(message.sender_name || '') &&
+      Math.abs(transcriptMessageTime(message.created_at) - transcriptMessageTime(previous.created_at)) <= groupWindowMs;
     const senderName = message.sender === 'user'
       ? ticket.user_name || 'Клиент'
       : message.sender_name || settings.supportName;
@@ -812,34 +831,50 @@ function ticketTranscriptModel(ticket) {
     const timestamp = settings.telegramRichTranscriptTimestampFormat === 'date_time'
       ? transcriptDateTime(message.created_at)
       : transcriptClock(message.created_at);
-    const markdownHeader = [
-      settings.telegramRichTranscriptShowAuthor
-        ? richMarkdownStyle(markdownEscape(sender), settings.telegramRichTranscriptMessageHeaderStyle)
-        : '',
-      settings.telegramRichTranscriptShowTime ? `_${timestamp}_` : ''
-    ].filter(Boolean).join(' · ');
-    const fallbackHeader = [
-      settings.telegramRichTranscriptShowAuthor ? sender : '',
-      settings.telegramRichTranscriptShowTime ? timestamp : ''
-    ].filter(Boolean).join(' · ');
     const bodyMarkdown = markdownEscape(body || 'Сообщение');
-    const normalMarkdown = [markdownHeader, bodyMarkdown].filter(Boolean).join('\n');
-    const normalFallback = [fallbackHeader, body || 'Сообщение'].filter(Boolean).join('\n');
-    const compactMarkdown = [markdownHeader, bodyMarkdown].filter(Boolean).join(markdownHeader ? ' — ' : '');
-    const compactFallback = [fallbackHeader, body || 'Сообщение'].filter(Boolean).join(fallbackHeader ? ' — ' : '');
-    const sizedMarkdown = settings.telegramRichTranscriptMessageSize === 'large'
-      ? [markdownHeader, richHeading(bodyMarkdown, 'small', 'plain')].filter(Boolean).join('\n')
-      : normalMarkdown;
-    const styledMarkdown = settings.telegramRichTranscriptMessageLayout === 'compact'
-      ? compactMarkdown
-      : settings.telegramRichTranscriptMessageLayout === 'quote'
-        ? quoteMarkdown(sizedMarkdown)
-        : sizedMarkdown;
+    const authorAllowed = settings.telegramRichTranscriptShowAuthor &&
+      settings.telegramRichTranscriptAuthorMode !== 'hidden';
+    const timeAllowed = settings.telegramRichTranscriptShowTime;
+    const buildEntry = (showAuthor, showTime) => {
+      const markdownHeader = [
+        showAuthor
+          ? richMarkdownStyle(markdownEscape(sender), settings.telegramRichTranscriptMessageHeaderStyle)
+          : '',
+        showTime ? `_${timestamp}_` : ''
+      ].filter(Boolean).join(' · ');
+      const fallbackHeader = [
+        showAuthor ? sender : '',
+        showTime ? timestamp : ''
+      ].filter(Boolean).join(' · ');
+      const normalMarkdown = [markdownHeader, bodyMarkdown].filter(Boolean).join('\n');
+      const normalFallback = [fallbackHeader, body || 'Сообщение'].filter(Boolean).join('\n');
+      const compactMarkdown = [markdownHeader, bodyMarkdown].filter(Boolean).join(markdownHeader ? ' — ' : '');
+      const compactFallback = [fallbackHeader, body || 'Сообщение'].filter(Boolean).join(fallbackHeader ? ' — ' : '');
+      const sizedMarkdown = settings.telegramRichTranscriptMessageSize === 'large'
+        ? [markdownHeader, richHeading(bodyMarkdown, 'small', 'plain')].filter(Boolean).join('\n')
+        : normalMarkdown;
+      return {
+        markdown: settings.telegramRichTranscriptMessageLayout === 'compact'
+          ? compactMarkdown
+          : settings.telegramRichTranscriptMessageLayout === 'quote'
+            ? quoteMarkdown(sizedMarkdown)
+            : sizedMarkdown,
+        fallback: settings.telegramRichTranscriptMessageLayout === 'compact'
+          ? compactFallback
+          : normalFallback
+      };
+    };
+    const entry = buildEntry(
+      authorAllowed && !grouped,
+      timeAllowed && (!grouped || settings.telegramRichTranscriptGroupContinuation === 'time')
+    );
+    const standalone = buildEntry(authorAllowed, timeAllowed);
     return {
-      markdown: styledMarkdown,
-      fallback: settings.telegramRichTranscriptMessageLayout === 'compact'
-        ? compactFallback
-        : normalFallback
+      grouped,
+      markdown: entry.markdown,
+      fallback: entry.fallback,
+      standaloneMarkdown: standalone.markdown,
+      standaloneFallback: standalone.fallback
     };
   });
   const selectedSeparator = settings.telegramRichTranscriptSeparator === 'dots'
@@ -852,9 +887,17 @@ function ticketTranscriptModel(ticket) {
     : settings.telegramRichTranscriptDensity === 'airy'
       ? `${selectedSeparator}\n`
       : selectedSeparator;
+  const groupSeparator = settings.telegramRichTranscriptGroupSpacing === 'inherit'
+    ? separator
+    : '\n';
   const maxLength = 3400;
-  while (entries.length > 1 && entries.map(entry => entry.markdown).join(separator).length > maxLength) {
+  while (entries.length > 1 && transcriptEntriesMarkdown(entries, separator, groupSeparator, 'markdown').length > maxLength) {
     entries.shift();
+    if (entries[0]?.grouped) {
+      entries[0].grouped = false;
+      entries[0].markdown = entries[0].standaloneMarkdown;
+      entries[0].fallback = entries[0].standaloneFallback;
+    }
   }
   const omitted = sourceMessages.length - entries.length;
   const state = ticket.status === 'closed' ? '✅ закрыт' : '🔵 открыт';
@@ -877,14 +920,14 @@ function ticketTranscriptModel(ticket) {
       ? richMarkdownStyle(markdownEscape(subtitle), settings.telegramRichTranscriptSubtitleStyle)
       : '',
     settings.telegramRichTranscriptShowOmittedNotice && omitted > 0 ? `_Показаны последние ${entries.length} сообщений._` : '',
-    entries.length ? entries.map(entry => entry.markdown).join(separator) : `_${markdownEscape(settings.telegramRichTranscriptEmptyText)}_`,
+    entries.length ? transcriptEntriesMarkdown(entries, separator, groupSeparator, 'markdown') : `_${markdownEscape(settings.telegramRichTranscriptEmptyText)}_`,
     footer ? richMarkdownStyle(markdownEscape(footer), 'muted') : ''
   ].filter(Boolean).join('\n\n');
   const fallback = [
     settings.telegramRichTranscriptShowHeader ? title : '',
     settings.telegramRichTranscriptShowSubtitle ? subtitle : '',
     settings.telegramRichTranscriptShowOmittedNotice && omitted > 0 ? `Показаны последние ${entries.length} сообщений.` : '',
-    entries.length ? entries.map(entry => entry.fallback).join(separator) : settings.telegramRichTranscriptEmptyText,
+    entries.length ? transcriptEntriesMarkdown(entries, separator, groupSeparator, 'fallback') : settings.telegramRichTranscriptEmptyText,
     footer
   ].filter(Boolean).join('\n\n');
   return { markdown, fallback };
