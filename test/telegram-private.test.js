@@ -377,7 +377,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   const transcript = edits.findLast(item =>
     item.text?.rich_message?.markdown?.includes('Нужна помощь с подключением')
   )?.text.rich_message.markdown;
-  assert.match(transcript, /> \*\*👤 Клиент\*\* · _\d{2}:\d{2}_/);
+  assert.match(transcript, /\*\*👤 Клиент\*\* · _\d{2}:\d{2}_/);
   assert.equal(
     rich.filter(item =>
       item.chatId === '7001' && item.markdown.includes('Нужна помощь с подключением')
@@ -411,6 +411,24 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   );
   assert.ok(supportDelivery);
   assert.equal(supportDelivery.options?.reply_markup, undefined);
+  await fakeBot.handlers.message({
+    message_id: 9801,
+    message_thread_id: thread.thread_id,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    text: 'Ответ из темы оператора'
+  });
+  let topicReply = db.getMessages.all(ticket.id).find(message =>
+    message.content === 'Ответ из темы оператора'
+  );
+  for (let attempt = 0; attempt < 20 && !topicReply?.telegram_customer_message_id; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    topicReply = db.getMessageById.get(topicReply.id);
+  }
+  assert.ok(topicReply?.telegram_customer_message_id);
+  assert.ok(rich.some(item =>
+    item.chatId === customerId && item.markdown.includes('Ответ из темы оператора')
+  ));
   assert.ok(rich.some(item =>
     item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
       button.callback_data === `ticketmenu:${ticket.id}`
