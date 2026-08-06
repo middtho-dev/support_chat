@@ -274,6 +274,28 @@ function renderMsgs(msgs){
 }
 function renderEmpty(){const d=document.createElement('div');d.className='emp';d.innerHTML=`<svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M29 6C16.3 6 6 15.3 6 27c0 6.3 2.9 12 7.6 16L12 52l9.5-2.8A23.5 23.5 0 0029 52c12.7 0 23-9.3 23-21S41.7 6 29 6Z"/><circle cx="20" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="29" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="38" cy="28" r="2" fill="currentColor" stroke="none"/></svg><p>Напишите ваш первый вопрос — ответим быстро</p>`;ml.appendChild(d)}
 function renderSys(txt){ml.querySelector('.emp')?.remove();const d=document.createElement('div');d.className='sysmsg';d.innerHTML=`<span>${esc(txt)}</span>`;ml.appendChild(d)}
+function renderClosePrompt(msg){
+  ml.querySelector('.emp')?.remove();
+  const d=document.createElement('section');
+  d.className='close-prompt';
+  if(msg.id)d.dataset.msgId=msg.id;
+  d.innerHTML=`<div class="close-prompt-text">${linkify(msg.content||'')}</div><button type="button">✅ Закрыть обращение</button>`;
+  d.querySelector('button').addEventListener('click',()=>closeFromPrompt(d));
+  ml.appendChild(d);
+}
+async function closeFromPrompt(card){
+  if(S.closed||!S.tid||!S.token)return;
+  const button=card.querySelector('button');
+  if(!button||button.disabled)return;
+  button.disabled=true;button.textContent='Закрываем…';
+  try{
+    const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
+    if(!r.ok)throw 0;
+    markClosed();button.textContent='Обращение закрыто';
+  }catch{
+    button.disabled=false;button.textContent='✅ Закрыть обращение';showToast('Не удалось закрыть обращение','err');
+  }
+}
 function parseReactions(value){
   if(!value)return[];
   if(Array.isArray(value))return value.filter(Boolean);
@@ -299,6 +321,7 @@ function applyMessageReactions(messageId,reactions){
 
 function renderMsg(msg){
   ml.querySelector('.emp')?.remove();
+  if(msg.message_type==='close_prompt'){renderClosePrompt(msg);return;}
   if(msg.sender==='system'){renderSys(msg.content||'');return;}
   const dt=new Date(msg.created_at),ds=fmtDate(dt);
   if(ds!==S.lastDate){S.lastDate=ds;const s=document.createElement('div');s.className='dsp';s.innerHTML=`<span>${ds}</span>`;ml.appendChild(s)}

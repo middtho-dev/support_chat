@@ -246,7 +246,8 @@ input:focus,textarea:focus,select:focus{
 .ticket-card-stats b{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-card-stats span{display:block;margin-top:3px;color:var(--muted);font-size:9px;text-transform:uppercase}
 .ticket-customer{margin:0 0 14px;padding:13px;border:1px solid rgba(42,171,238,.18);border-radius:14px;background:rgba(42,171,238,.055)}
-.ticket-customer.compact{display:flex;align-items:center;gap:9px;padding:10px 12px;color:var(--muted);font-size:11px}
+.ticket-customer.compact{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:10px 12px;color:var(--muted);font-size:11px}
+.ticket-customer.compact .ticket-customer-actions{width:100%;margin-top:2px}
 .ticket-customer-title{display:flex;align-items:center;gap:8px;margin-bottom:11px}
 .ticket-customer-title b{font-size:12px}
 .ticket-source-badge{display:inline-flex;align-items:center;height:23px;padding:0 8px;border-radius:99px;background:rgba(42,171,238,.15);color:#8ed8fa;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}

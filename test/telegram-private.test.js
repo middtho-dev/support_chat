@@ -599,6 +599,38 @@ test('close button responds immediately and closes a ticket from its operator to
   );
 });
 
+test('operator menu sends a gratitude close prompt to a website customer', async () => {
+  const id = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  db.createTicket.run(id, 'Веб-клиент', 'session-web-close-prompt');
+  db.assignTicket.run('7001', id);
+
+  await fakeBot.handlers.callback_query({
+    id: 'web-ticket-menu-query',
+    from: { id: 7001, first_name: 'Оператор' },
+    message: { message_id: 990, chat: { id: 7001, type: 'private' } },
+    data: `ticketmenu:${id}`
+  });
+  const menu = markupEdits.findLast(item => item.options?.message_id === 990)?.replyMarkup.inline_keyboard.flat();
+  assert.ok(menu?.some(button => button.web_app?.url?.includes(`ticket=${id}`)));
+  assert.ok(menu?.some(button => button.callback_data === `customercontrol:${id}`));
+  assert.ok(menu?.some(button => button.callback_data === `ticketmain:${id}`));
+
+  await fakeBot.handlers.callback_query({
+    id: 'web-customer-control-query',
+    from: { id: 7001, first_name: 'Оператор' },
+    message: { chat: { id: 7001, type: 'private' } },
+    data: `customercontrol:${id}`
+  });
+
+  const prompt = db.getMessages.all(id).find(message => message.message_type === 'close_prompt');
+  assert.ok(prompt);
+  assert.match(prompt.content, /Спасибо за обращение/);
+  assert.match(prompt.content, /Если ваш вопрос решён/);
+  assert.ok(socketEmits.some(item =>
+    item.room === `ticket:${id}` && item.event === 'message' && item.payload?.id === prompt.id
+  ));
+});
+
 test('single-operator auto assignment can be disabled in settings', async () => {
   saveSettings({ telegramAutoAssignSingleOperator: false });
   const customerId = '8003';

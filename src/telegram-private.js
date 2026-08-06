@@ -365,6 +365,9 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
     return { inline_keyboard: rows };
   }
 
+  if (webAppUrl) {
+    rows.push([{ text: '💬 Открыть чат', web_app: { url: webAppUrl } }]);
+  }
   if (state !== 'closed') {
     rows.push([tgButton(
       settings.telegramCloseButtonText,
@@ -384,14 +387,14 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
       copy_text: { text: customer.telegramId }
     });
     rows.push(profileButtons);
-    if (state === 'open') {
-      rows.push([{
-        text: settings.telegramCustomerSendCloseButtonText,
-        callback_data: `customercontrol:${ticket.id}`
-      }]);
-    }
   }
-  rows.push([tgButton('↩️ К сообщению', `ticketmain:${ticket.id}`)]);
+  if (state === 'open') {
+    rows.push([{
+      text: settings.telegramCustomerSendCloseButtonText,
+      callback_data: `customercontrol:${ticket.id}`
+    }]);
+  }
+  rows.push([tgButton('⬅️ Назад', `ticketmain:${ticket.id}`)]);
   return { inline_keyboard: rows };
 }
 
@@ -1081,10 +1084,7 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
     };
   }
   if (showClosePrompt) {
-    const configured = formatTemplate(settings.telegramCustomerClosePromptText, values);
-    const prompt = /спасибо/i.test(configured)
-      ? configured
-      : `Спасибо за обращение!\n\n${configured}`;
+    const prompt = customerClosePromptText(ticket, reason);
     return { markdown: prompt, fallback: prompt };
   }
   const body = formatTemplate(settings.telegramCustomerNewTicketText, values);
@@ -1104,6 +1104,20 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
       'Статус: открыт'
     ].join('\n')
   };
+}
+
+function customerClosePromptText(ticket, reason = '') {
+  const settings = cfg();
+  const values = {
+    name: ticket.user_name || 'Клиент',
+    shortId: shortId(ticket),
+    id: ticket.id,
+    reason
+  };
+  const configured = formatTemplate(settings.telegramCustomerClosePromptText, values);
+  return /спасибо/i.test(configured)
+    ? configured
+    : `Спасибо за обращение!\n\n${configured}`;
 }
 
 async function pinCustomerControl(chatId, messageId, { repin = false } = {}) {
@@ -1371,6 +1385,45 @@ async function sendCustomerControl(ticket, options = {}) {
     repin: true,
     showClosePrompt: true
   });
+}
+
+async function sendCustomerClosePrompt(ticket, options = {}) {
+  const fresh = db.getTicketById.get(ticket?.id) || ticket;
+  if (!fresh || fresh.status !== 'open') throw new Error('Ticket is closed');
+  if (fresh.source === 'telegram') return sendCustomerControl(fresh, options);
+
+  const id = uuidv4();
+  const createdAt = new Date().toISOString();
+  const content = customerClosePromptText(fresh);
+  db.saveMessage.run(
+    id,
+    fresh.id,
+    'system',
+    'Система',
+    content,
+    'close_prompt',
+    null,
+    null,
+    null,
+    null,
+    null
+  );
+  const message = {
+    id,
+    ticket_id: fresh.id,
+    sender: 'system',
+    sender_name: 'Система',
+    content,
+    message_type: 'close_prompt',
+    file_url: null,
+    file_name: null,
+    file_mime: null,
+    created_at: createdAt
+  };
+  io?.to(`ticket:${fresh.id}`).emit('message', message);
+  io?.to('admin').emit('admin_new_message', { ticketId: fresh.id, message });
+  io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
+  return { messageId: id, web: true };
 }
 
 async function removePreviousCustomerLauncher(customerId) {
@@ -2179,15 +2232,12 @@ async function handleCallbackQuery(query) {
       return;
     }
     if (action === 'customercontrol') {
-      if (ticket.source !== 'telegram') {
-        await bot.answerCallbackQuery(query.id, {
-          text: 'Этот клиент пишет через сайт',
-          show_alert: true
-        });
-        return;
-      }
-      await answer({ text: 'Закрепляю кнопку у клиента…' });
-      await sendCustomerControl(ticket);
+      await answer({
+        text: ticket.source === 'telegram'
+          ? 'Отправляю предложение клиенту…'
+          : 'Отправляю предложение в веб-чат…'
+      });
+      await sendCustomerClosePrompt(ticket);
       return;
     }
     if (action === 'close') {
@@ -3218,6 +3268,7 @@ module.exports = {
   forwardMessage,
   deliverCustomerReply,
   sendCustomerControl,
+  sendCustomerClosePrompt,
   clearTicketReminders,
   notifyTicketClosed,
   autoCloseTicket,
