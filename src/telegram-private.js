@@ -347,12 +347,24 @@ function tgButton(text, callbackData, style, customEmojiId) {
   return button;
 }
 
-function ticketKeyboard(ticket, state = 'open') {
+function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
   const settings = cfg();
   const rows = [];
   if (state === 'unassigned') {
     rows.push([tgButton('🙋 Взять тикет', `take:${ticket.id}`, 'primary')]);
-  } else if (state !== 'closed') {
+  }
+  const webAppUrl = adminWebAppUrl(ticket.id);
+  if (!menu) {
+    const quickActions = [];
+    if (webAppUrl) quickActions.push({ text: '💬 Открыть чат', web_app: { url: webAppUrl } });
+    if (state !== 'unassigned' && state !== 'closed') {
+      quickActions.push(tgButton('☰ Меню', `ticketmenu:${ticket.id}`, 'primary'));
+    }
+    if (quickActions.length) rows.push(quickActions);
+    return { inline_keyboard: rows };
+  }
+
+  if (state !== 'closed') {
     rows.push([tgButton(
       settings.telegramCloseButtonText,
       `close:${ticket.id}`,
@@ -360,8 +372,6 @@ function ticketKeyboard(ticket, state = 'open') {
       settings.telegramCloseButtonEmojiId
     )]);
   }
-  const webAppUrl = adminWebAppUrl(ticket.id);
-  if (webAppUrl) rows.push([{ text: '💬 Открыть чат', web_app: { url: webAppUrl } }]);
   const customer = customerProfile(ticket);
   if (ticket.source === 'telegram' && customer.telegramId) {
     const profileButtons = [];
@@ -380,6 +390,7 @@ function ticketKeyboard(ticket, state = 'open') {
       }]);
     }
   }
+  rows.push([tgButton('↩️ К сообщению', `ticketmain:${ticket.id}`)]);
   return { inline_keyboard: rows };
 }
 
@@ -577,6 +588,16 @@ async function editPanel(message, model) {
     model.markdown,
     model.replyMarkup,
     model.fallback
+  );
+}
+
+async function editTicketActionKeyboard(message, ticket, state, menu) {
+  return bot.editMessageReplyMarkup(
+    ticketKeyboard(ticket, state, { menu }),
+    {
+      chat_id: String(message.chat.id),
+      message_id: message.message_id
+    }
   );
 }
 
@@ -955,7 +976,10 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
     };
   }
   if (showClosePrompt) {
-    const prompt = formatTemplate(settings.telegramCustomerClosePromptText, values);
+    const configured = formatTemplate(settings.telegramCustomerClosePromptText, values);
+    const prompt = /спасибо/i.test(configured)
+      ? configured
+      : `Спасибо за обращение!\n\n${configured}`;
     return { markdown: prompt, fallback: prompt };
   }
   const body = formatTemplate(settings.telegramCustomerNewTicketText, values);
@@ -2046,6 +2070,16 @@ async function handleCallbackQuery(query) {
     }
     if (!operatorCanControlTicket(ticket, userId, query)) {
       await bot.answerCallbackQuery(query.id, { text: 'Тикет назначен другому оператору', show_alert: true });
+      return;
+    }
+    if (action === 'ticketmenu' || action === 'ticketmain') {
+      await answer();
+      await editTicketActionKeyboard(
+        query.message,
+        ticket,
+        ticket.status === 'closed' ? 'closed' : 'open',
+        action === 'ticketmenu'
+      );
       return;
     }
     if (action === 'customercontrol') {

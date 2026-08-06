@@ -17,6 +17,7 @@ const rich = [];
 const pins = [];
 const unpins = [];
 const edits = [];
+const markupEdits = [];
 const deleted = [];
 const callbackAnswers = [];
 const welcomeTickets = [];
@@ -72,7 +73,8 @@ class FakeBot {
     edits.push({ text, options });
     return Promise.resolve({});
   }
-  editMessageReplyMarkup() {
+  editMessageReplyMarkup(replyMarkup, options) {
+    markupEdits.push({ replyMarkup, options });
     return Promise.resolve({});
   }
   pinChatMessage(chatId, pinnedMessageId, options) {
@@ -402,9 +404,26 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   ));
   assert.ok(rich.some(item =>
     item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
-      button.callback_data === `customercontrol:${ticket.id}`
+      button.callback_data === `ticketmenu:${ticket.id}`
     )
   ));
+
+  await fakeBot.handlers.callback_query({
+    id: 'ticket-menu-query',
+    from: { id: 7001, first_name: 'Оператор' },
+    message: {
+      message_id: operatorDelivery.messageId,
+      message_thread_id: operatorDelivery.options.message_thread_id,
+      chat: { id: 7001, type: 'private' }
+    },
+    data: `ticketmenu:${ticket.id}`
+  });
+  const expandedActions = markupEdits.find(item =>
+    item.options?.message_id === operatorDelivery.messageId
+  )?.replyMarkup.inline_keyboard.flat();
+  assert.ok(expandedActions?.some(button => button.callback_data === `close:${ticket.id}`));
+  assert.ok(expandedActions?.some(button => button.callback_data === `customercontrol:${ticket.id}`));
+  assert.ok(expandedActions?.some(button => button.callback_data === `ticketmain:${ticket.id}`));
 
   const countBeforeDuplicate = db.getMessages.all(ticket.id).length;
   await fakeBot.handlers.message({
@@ -437,6 +456,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.chatId === customerId &&
     item.messageId === refreshedTicket.telegram_customer_control_message_id
   );
+  assert.match(closePrompt.markdown, /Спасибо за обращение/);
   assert.match(closePrompt.markdown, /Если ваш вопрос решён/);
   assert.doesNotMatch(closePrompt.markdown, /Тикет #|Оператор уже получил|Статус:/);
 
