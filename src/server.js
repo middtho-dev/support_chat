@@ -1066,13 +1066,28 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Server error' });
 });
 
-app.get('/health', (req, res) => res.json({
-  ok: true,
-  version: process.env.APP_VERSION || 'unknown',
-  uptime: Math.floor(process.uptime()),
-  telegram: typeof telegram.status === 'function' ? telegram.status() : null,
-  maintenance: maintenance.healthStatus()
-}));
+function detailedHealth() {
+  return {
+    ok: true,
+    version: process.env.APP_VERSION || 'unknown',
+    uptime: Math.floor(process.uptime()),
+    telegram: typeof telegram.status === 'function' ? telegram.status() : null,
+    maintenance: maintenance.healthStatus()
+  };
+}
+
+// This endpoint is intentionally safe for public load balancers and Docker
+// healthchecks. Operational metadata belongs to the authenticated admin route.
+app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, version: process.env.APP_VERSION || 'unknown' });
+});
+
+app.get('/api/admin/health', (req, res) => {
+  if (!isAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
+  res.set('Cache-Control', 'no-store');
+  res.json(detailedHealth());
+});
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
