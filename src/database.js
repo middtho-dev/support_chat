@@ -73,6 +73,8 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_last_name TEXT`)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_language_code TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_customer_control_message_id INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE telegram_operators ADD COLUMN can_manage_settings INTEGER NOT NULL DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE telegram_operators ADD COLUMN dashboard_chat_id TEXT`); } catch {}
+try { db.exec(`ALTER TABLE telegram_operators ADD COLUMN dashboard_message_id INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_chat_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_source_message_id INTEGER`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_message_id INTEGER`); } catch {}
@@ -114,6 +116,8 @@ db.exec(`
     username TEXT,
     active INTEGER NOT NULL DEFAULT 1,
     can_manage_settings INTEGER NOT NULL DEFAULT 0,
+    dashboard_chat_id TEXT,
+    dashboard_message_id INTEGER,
     registered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -168,6 +172,19 @@ db.exec(`
     FOREIGN KEY (operator_id) REFERENCES telegram_operators(telegram_user_id)
   );
 
+  CREATE TABLE IF NOT EXISTS telegram_ticket_reminders (
+    ticket_id TEXT NOT NULL,
+    operator_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ticket_id, operator_id),
+    UNIQUE (chat_id, message_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (operator_id) REFERENCES telegram_operators(telegram_user_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_messages_tg_destination
     ON messages(telegram_chat_id, telegram_message_id);
   CREATE INDEX IF NOT EXISTS idx_ticket_threads_destination
@@ -176,6 +193,8 @@ db.exec(`
     ON telegram_ticket_threads(status, updated_at);
   CREATE INDEX IF NOT EXISTS idx_ticket_notifications_destination
     ON telegram_ticket_notifications(chat_id, message_id);
+  CREATE INDEX IF NOT EXISTS idx_ticket_reminders_destination
+    ON telegram_ticket_reminders(chat_id, message_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_assigned_operator
     ON tickets(assigned_operator_id, status);
   CREATE INDEX IF NOT EXISTS idx_messages_pending_telegram
@@ -483,6 +502,12 @@ module.exports = {
     LEFT JOIN messages r ON r.id = m.reply_to_id
     WHERE m.ticket_id = ? ORDER BY m.created_at ASC
   `),
+  getLatestMessageForTicket: db.prepare(`
+    SELECT id, created_at FROM messages
+    WHERE ticket_id = ?
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT 1
+  `),
 
   // Returns last N messages (ASC order) — for initial load with pagination
   getMessagesRecent: db.prepare(`
@@ -675,6 +700,20 @@ module.exports = {
       active = excluded.active,
       can_manage_settings = excluded.can_manage_settings
   `),
+  getTelegramOperatorDashboard: db.prepare(`
+    SELECT telegram_user_id, dashboard_chat_id, dashboard_message_id
+    FROM telegram_operators WHERE telegram_user_id = ?
+  `),
+  saveTelegramOperatorDashboard: db.prepare(`
+    UPDATE telegram_operators
+    SET dashboard_chat_id = ?, dashboard_message_id = ?, last_seen_at = CURRENT_TIMESTAMP
+    WHERE telegram_user_id = ?
+  `),
+  clearTelegramOperatorDashboard: db.prepare(`
+    UPDATE telegram_operators
+    SET dashboard_chat_id = NULL, dashboard_message_id = NULL
+    WHERE telegram_user_id = ?
+  `),
   deactivateTelegramOperator: db.prepare(`
     UPDATE telegram_operators SET active = 0 WHERE telegram_user_id = ?
   `),
@@ -756,6 +795,23 @@ module.exports = {
   `),
   deleteTelegramNotificationsForTicket: db.prepare(`
     DELETE FROM telegram_ticket_notifications WHERE ticket_id = ?
+  `),
+  saveTelegramReminder: db.prepare(`
+    INSERT INTO telegram_ticket_reminders (ticket_id, operator_id, chat_id, message_id)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(ticket_id, operator_id) DO UPDATE SET
+      chat_id = excluded.chat_id,
+      message_id = excluded.message_id,
+      updated_at = CURRENT_TIMESTAMP
+  `),
+  getTelegramReminder: db.prepare(`
+    SELECT * FROM telegram_ticket_reminders WHERE ticket_id = ? AND operator_id = ?
+  `),
+  getTelegramRemindersForTicket: db.prepare(`
+    SELECT * FROM telegram_ticket_reminders WHERE ticket_id = ?
+  `),
+  deleteTelegramReminder: db.prepare(`
+    DELETE FROM telegram_ticket_reminders WHERE ticket_id = ? AND operator_id = ?
   `),
 
   // Push subscriptions

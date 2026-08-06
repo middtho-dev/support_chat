@@ -167,6 +167,20 @@ test('an operator added from settings can use the bot without settings access', 
   assert.equal(operator.active, 1);
   assert.equal(operator.can_manage_settings, 0);
   assert.ok(rich.some(item => item.chatId === '7002'));
+  const dashboard = db.getTelegramOperatorDashboard.get('7002');
+  assert.ok(dashboard.dashboard_message_id);
+  const richBeforeQueue = rich.length;
+  await fakeBot.handlers.message({
+    message_id: 703,
+    chat: { id: 7002, type: 'private' },
+    from: { id: 7002, first_name: 'Новый', last_name: 'оператор' },
+    text: '/queue'
+  });
+  assert.equal(rich.length, richBeforeQueue, 'the operator dashboard is updated in place');
+  assert.ok(edits.some(item =>
+    item.options?.message_id === dashboard.dashboard_message_id ||
+    item.text?.message_id === dashboard.dashboard_message_id
+  ));
   db.deactivateTelegramOperator.run('7002');
 });
 
@@ -277,6 +291,13 @@ test('unanswered reminder is loud and stops after a support response', async () 
   assert.equal(reminder.options.disable_notification, false);
   assert.ok(reminder.options.reply_markup.inline_keyboard.length);
 
+  const firstReminderId = db.getTelegramReminder.get(id, '7001').message_id;
+  db.db.prepare("UPDATE tickets SET telegram_last_reminded_at=datetime('now','-10 minutes') WHERE id=?").run(id);
+  assert.equal(await telegram.processUnansweredReminders(), 1);
+  const secondReminderId = db.getTelegramReminder.get(id, '7001').message_id;
+  assert.notEqual(secondReminderId, firstReminderId);
+  assert.ok(deleted.some(item => item.chatId === '7001' && item.messageId === firstReminderId));
+
   db.saveMessage.run(
     'support-answer',
     id,
@@ -290,6 +311,8 @@ test('unanswered reminder is loud and stops after a support response', async () 
     null,
     null
   );
+  await telegram.clearTicketReminders(id);
+  assert.equal(db.getTelegramReminder.get(id, '7001'), undefined);
   db.db.prepare("UPDATE tickets SET telegram_last_reminded_at=datetime('now','-10 minutes') WHERE id=?").run(id);
   assert.equal(await telegram.processUnansweredReminders(), 0);
 });

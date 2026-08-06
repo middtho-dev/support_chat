@@ -710,18 +710,27 @@ io.on('connection', (socket) => {
     broadcastAdminTickets();
   });
 
-  socket.on('admin_refresh_state', ({ ticketId } = {}, ack) => {
+  socket.on('admin_refresh_state', ({
+    ticketId,
+    knownMessageId = '',
+    knownTicketStatus = '',
+    includeTickets = false
+  } = {}, ack) => {
     if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
-    socket.emit('admin_tickets', db.getTicketsForAdmin.all());
+    if (includeTickets) socket.emit('admin_tickets', db.getTicketsForAdmin.all());
     if (ticketId) {
       const ticket = db.getTicketById.get(ticketId);
-      if (ticket) {
+      const latestMessage = ticket ? db.getLatestMessageForTicket.get(ticketId) : null;
+      const messagesChanged = String(latestMessage?.id || '') !== String(knownMessageId || '');
+      const ticketChanged = !ticket || String(ticket.status || '') !== String(knownTicketStatus || '');
+      if (ticket && (messagesChanged || ticketChanged)) {
         socket.emit('admin_ticket_messages', {
           ticketId,
           ticket,
           messages: db.getMessages.all(ticketId)
         });
       }
+      return ack?.({ ok: true, messagesChanged, ticketChanged });
     }
     ack?.({ ok: true });
   });
@@ -876,6 +885,9 @@ io.on('connection', (socket) => {
     const safeFileMime = String(fileMime || '').slice(0, 150) || null;
     db.saveMessage.run(msgId, ticketId, 'support', cfg.supportName, text || null, msgType, fileUrl || null, safeFileName, safeFileMime, null, null);
     db.markSupportRead.run(ticketId);
+    telegram.clearTicketReminders?.(ticketId).catch(e => {
+      console.warn('[Admin] clear Telegram reminders:', e?.message);
+    });
     const message = {
       id: msgId, ticket_id: ticketId, sender: 'support', sender_name: cfg.supportName,
       content: text || null, message_type: msgType, file_url: fileUrl || null, file_name: safeFileName, file_mime: safeFileMime,
