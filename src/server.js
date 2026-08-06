@@ -710,6 +710,22 @@ io.on('connection', (socket) => {
     broadcastAdminTickets();
   });
 
+  socket.on('admin_refresh_state', ({ ticketId } = {}, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    socket.emit('admin_tickets', db.getTicketsForAdmin.all());
+    if (ticketId) {
+      const ticket = db.getTicketById.get(ticketId);
+      if (ticket) {
+        socket.emit('admin_ticket_messages', {
+          ticketId,
+          ticket,
+          messages: db.getMessages.all(ticketId)
+        });
+      }
+    }
+    ack?.({ ok: true });
+  });
+
   socket.on('admin_update_ticket_meta', ({ ticketId, tags = '', note = '' } = {}) => {
     if (!socket.isAdmin) return;
     const ticket = db.getTicketById.get(ticketId);

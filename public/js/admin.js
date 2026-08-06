@@ -20,6 +20,8 @@ const IS_TG_MINI = !!TG?.initData ||
 let pendingTargetTicketId = PAGE_PARAMS.get('ticket') || '';
 let telegramFullscreenRequested = false;
 const TELEGRAM_FULLSCREEN_TOP_CLEARANCE = 84;
+let miniRefreshTimer = null;
+let miniRefreshPending = false;
 
 const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 function adminMediaFailed(el) {
@@ -265,6 +267,7 @@ socket.on('admin_auth_ok', auth => {
     socket.emit('admin_get_settings');
     requestOperators();
   }
+  startMiniAppRefresh();
 });
 socket.on('admin_settings', s => {
   S.settings = s || {};
@@ -408,6 +411,7 @@ function setView(view) {
     $('main').classList.add('open');
   }
   if (S.view === 'health') loadMaintenance();
+  if (S.view === 'settings' && S.permissions.canManageSettings) requestOperators();
   updateTelegramBackButton();
 }
 
@@ -473,7 +477,13 @@ function appendMessage(msg, scroll = false) { const box = $('cv-msgs'); if (!box
 function messageBody(msg) { const text = msg.content ? `<div>${linkify(msg.content)}</div>` : ''; if (msg.message_type === 'image' && msg.file_url) return `<img src="${esc(msg.file_url)}" loading="lazy" decoding="async" onerror="adminMediaFailed(this)">${text}`; if (msg.message_type === 'video' && msg.file_url) return `<video src="${esc(msg.file_url)}" controls preload="metadata" playsinline onerror="adminMediaFailed(this)"></video>${text}`; if (msg.message_type === 'audio' && msg.file_url) return `<audio src="${esc(msg.file_url)}" controls></audio>${text}`; if (msg.file_url) return `<a class="file" href="${esc(msg.file_url)}" target="_blank" rel="noopener noreferrer" download="${esc(msg.file_name || 'file')}"><span class="file-ico">↧</span><span>${esc(msg.file_name || 'Файл')}</span></a>${text}`; return text || '<span></span>'; }
 function parseReactions(value) { if (!value) return []; if (Array.isArray(value)) return value.filter(Boolean); try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.filter(Boolean) : []; } catch { return []; } }
 function reactionsHtml(msg) { const reactions = parseReactions(msg.reactions); if (!reactions.length) return ''; return `<div class="rxns">${reactions.map(r => `<span>${esc(r)}</span>`).join('')}</div>`; }
-function scrollBottom(smooth) { const box = $('cv-msgs'); requestAnimationFrame(() => box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })); }
+function scrollBottom(smooth) {
+  const box = $('cv-msgs');
+  if (!box) return;
+  const scroll = () => box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  requestAnimationFrame(() => requestAnimationFrame(scroll));
+  setTimeout(scroll, 180);
+}
 function onReplyInput() { const txt = $('reply-txt'), send = $('reply-send'), cnt = $('reply-cnt'); if (!txt || !send) return; if (S.pendingReply && S.pendingReply.content !== txt.value.trim()) S.pendingReply = null; txt.style.height = 'auto'; txt.style.height = `${Math.min(txt.scrollHeight, 140)}px`; send.disabled = S.uploading || (!txt.value.trim() && !S.file); if (cnt) cnt.textContent = txt.value ? `${txt.value.length} симв.` : ''; const now = Date.now(); if (S.current?.id && now - S.lastTyping > 1800) { S.lastTyping = now; socket.emit('admin_typing', { ticketId: S.current.id }); } }
 async function sendReply() {
   const txt = $('reply-txt');
@@ -879,6 +889,23 @@ function requestOperators() {
   });
 }
 
+function startMiniAppRefresh() {
+  if (!IS_TG_MINI || miniRefreshTimer) return;
+  miniRefreshTimer = setInterval(() => refreshMiniAppState(), 4000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshMiniAppState();
+  });
+  refreshMiniAppState();
+}
+
+function refreshMiniAppState() {
+  if (!IS_TG_MINI || miniRefreshPending || !socket.connected || document.visibilityState !== 'visible') return;
+  miniRefreshPending = true;
+  socket.timeout(8000).emit('admin_refresh_state', { ticketId: S.current?.id || '' }, () => {
+    miniRefreshPending = false;
+  });
+}
+
 function saveManagedOperator(row) {
   const payload = {
     telegramUserId: row ? row.dataset.operatorId : val('operator-new-id'),
@@ -892,6 +919,14 @@ function saveManagedOperator(row) {
   socket.timeout(12000).emit('admin_save_operator', payload, (timeoutError, result) => {
     if (button) button.disabled = false;
     if (timeoutError || !result?.ok) return toast(result?.error || 'Не удалось сохранить оператора', 'err');
+    const saved = result.operator;
+    if (saved) {
+      const index = S.operators.findIndex(item => item.telegramUserId === saved.telegramUserId);
+      if (index >= 0) S.operators[index] = saved;
+      else S.operators.push(saved);
+      S.operators.sort((a, b) => Number(b.active) - Number(a.active) || String(a.displayName).localeCompare(String(b.displayName), 'ru'));
+      if (S.view === 'settings') renderSettings();
+    }
     toast('Права оператора сохранены', 'ok');
     requestOperators();
   });

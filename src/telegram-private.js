@@ -767,7 +767,16 @@ async function startBot() {
       if (instance !== bot) return;
       console.error('[TG private] Error:', tgError(error));
     });
-    instance.on('message', handleMessage);
+    instance.on('message', msg => {
+      return handleMessage(msg).catch(error => {
+        console.error('[TG private] message handling:', tgError(error));
+        operationalAlert(
+          'telegram-message-handling',
+          'Не удалось обработать сообщение Telegram',
+          tgError(error)
+        ).catch(() => {});
+      });
+    });
     instance.on('callback_query', query => { resetPollingErrors(); return handleCallbackQuery(query); });
     instance.on('message_reaction', update => { resetPollingErrors(); return handleMessageReaction(update); });
     instance.on('message_reaction_count', update => { resetPollingErrors(); return handleMessageReactionCount(update); });
@@ -1117,6 +1126,15 @@ async function clearCustomerTicketChat(ticket, { extraMessageIds = [] } = {}) {
   db.clearTelegramCustomerChatMessages.run(fresh.id);
   if (failed.length) {
     const details = `Не удалены сообщения: ${failed.join(', ')}`;
+    for (const messageId of failed) {
+      db.enqueueTelegramCustomerCleanup.run(
+        chatId,
+        messageId,
+        fresh.id,
+        details.slice(0, 1000)
+      );
+    }
+    scheduleDeliveryQueue(5 * 1000);
     deliveryStats.lastError = `Очистка чата ${shortId(fresh)}: ${details}`;
     console.warn(`[TG private] Не удалось полностью очистить чат тикета ${shortId(fresh)}. ${details}`);
     io?.to('admin').emit('operational_alert', {
@@ -2444,7 +2462,26 @@ async function processDeliveryQueue() {
       await deliverCustomerReply(ticket, message).catch(() => {});
       await wait(250);
     }
-    if (messages.length === 20 || customerReplies.length === 20) scheduleDeliveryQueue(250);
+    const cleanupMessages = db.getPendingTelegramCustomerCleanup.all(20);
+    for (const cleanup of cleanupMessages) {
+      const removed = await deleteTelegramMessage(cleanup.chat_id, cleanup.message_id);
+      if (removed) {
+        db.deleteTelegramCustomerCleanup.run(cleanup.chat_id, cleanup.message_id);
+      } else {
+        const attempts = Number(cleanup.attempts || 0) + 1;
+        const delaySeconds = Math.min(900, 15 * (2 ** Math.min(attempts - 1, 6)));
+        db.markTelegramCustomerCleanupAttempt.run(
+          'Telegram did not confirm message deletion',
+          `+${delaySeconds} seconds`,
+          cleanup.chat_id,
+          cleanup.message_id
+        );
+      }
+      await wait(150);
+    }
+    if (messages.length === 20 || customerReplies.length === 20 || cleanupMessages.length === 20) {
+      scheduleDeliveryQueue(250);
+    }
   } catch (error) {
     deliveryStats.lastError = tgError(error);
     console.error('[TG private] delivery queue:', tgError(error));

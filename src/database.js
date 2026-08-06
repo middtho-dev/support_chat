@@ -142,6 +142,18 @@ db.exec(`
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS telegram_customer_cleanup_queue (
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    ticket_id TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, message_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS telegram_ticket_notifications (
     ticket_id TEXT NOT NULL,
     operator_id TEXT NOT NULL,
@@ -259,6 +271,29 @@ module.exports = {
   `),
   clearTelegramCustomerChatMessages: db.prepare(`
     DELETE FROM telegram_customer_chat_messages WHERE ticket_id = ?
+  `),
+  enqueueTelegramCustomerCleanup: db.prepare(`
+    INSERT INTO telegram_customer_cleanup_queue
+      (chat_id, message_id, ticket_id, attempts, last_error, next_retry_at)
+    VALUES (?, ?, ?, 0, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(chat_id, message_id) DO UPDATE SET
+      ticket_id = excluded.ticket_id,
+      last_error = excluded.last_error,
+      next_retry_at = CURRENT_TIMESTAMP
+  `),
+  getPendingTelegramCustomerCleanup: db.prepare(`
+    SELECT * FROM telegram_customer_cleanup_queue
+    WHERE next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP
+    ORDER BY created_at ASC
+    LIMIT ?
+  `),
+  deleteTelegramCustomerCleanup: db.prepare(`
+    DELETE FROM telegram_customer_cleanup_queue WHERE chat_id = ? AND message_id = ?
+  `),
+  markTelegramCustomerCleanupAttempt: db.prepare(`
+    UPDATE telegram_customer_cleanup_queue
+    SET attempts = attempts + 1, last_error = ?, next_retry_at = datetime('now', ?)
+    WHERE chat_id = ? AND message_id = ?
   `),
 
   getTicketBySessionAny: db.prepare(`SELECT * FROM tickets WHERE session_token = ?`),
