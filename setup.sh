@@ -197,9 +197,10 @@ info "5/5 Сборка и запуск приложения..."
 
 cd "$SCRIPT_DIR"
 
-docker compose down --remove-orphans 2>/dev/null || true
-docker compose build --no-cache
-docker compose up -d
+APP_VERSION="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo setup)" \
+  docker compose build --pull --no-cache support-chat
+APP_VERSION="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo setup)" \
+  docker compose up -d --force-recreate --remove-orphans support-chat
 
 sleep 5
 

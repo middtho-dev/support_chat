@@ -1068,6 +1068,7 @@ app.use((err, req, res, next) => {
 
 app.get('/health', (req, res) => res.json({
   ok: true,
+  version: process.env.APP_VERSION || 'unknown',
   uptime: Math.floor(process.uptime()),
   telegram: typeof telegram.status === 'function' ? telegram.status() : null,
   maintenance: maintenance.healthStatus()
