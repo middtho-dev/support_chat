@@ -101,7 +101,11 @@
             ${currentTicket.status === 'open' ? `<button id="send-customer-control" class="customer-action" type="button">${esc(customerControlLabel())}</button>` : ''}
           </div>
         </div>`
-      : `<div class="ticket-customer compact"><span class="ticket-source-badge web">Сайт</span><span>Тикет создан в веб-чате</span></div>`;
+      : `<div class="ticket-customer compact">
+          <span class="ticket-source-badge web">Сайт</span>
+          <span>Тикет создан в веб-чате</span>
+          ${currentTicket.status === 'open' ? `<div class="ticket-customer-actions"><button id="send-customer-control" class="customer-action" type="button">${esc(customerControlLabel())}</button></div>` : ''}
+        </div>`;
     dialog.innerHTML = `
       <button class="ticket-card-backdrop" type="button" aria-label="Закрыть карточку"></button>
       <section class="ticket-card-sheet" role="dialog" aria-modal="true" aria-labelledby="ticket-card-title">
@@ -160,7 +164,7 @@
     const button = $('send-customer-control');
     if (!activeSocket || !currentTicket || !button) return;
     button.disabled = true;
-    button.textContent = 'Закрепляю…';
+    button.textContent = 'Отправляю…';
     activeSocket.timeout(12000).emit(
       'admin_send_customer_control',
       { ticketId: currentTicket.id },
@@ -173,7 +177,7 @@
           }, 2200);
           return;
         }
-        button.textContent = 'Карточка закреплена';
+        button.textContent = 'Предложение отправлено';
         setTimeout(() => {
           if (button.isConnected) button.textContent = customerControlLabel();
         }, 1800);

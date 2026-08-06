@@ -916,21 +916,19 @@ io.on('connection', (socket) => {
   socket.on('admin_send_customer_control', async ({ ticketId } = {}, ack) => {
     if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
     const ticket = db.getTicketById.get(ticketId);
-    if (!ticket || ticket.source !== 'telegram') {
-      return ack?.({ error: 'Это не Telegram-тикет' });
-    }
+    if (!ticket) return ack?.({ error: 'Тикет не найден' });
     if (ticket.status !== 'open') {
       return ack?.({ error: 'Тикет уже закрыт' });
     }
-    if (typeof telegram.sendCustomerControl !== 'function') {
-      return ack?.({ error: 'Действие недоступно в текущем режиме Telegram' });
+    if (typeof telegram.sendCustomerClosePrompt !== 'function') {
+      return ack?.({ error: 'Действие недоступно' });
     }
     try {
-      await telegram.sendCustomerControl(ticket, { repin: true });
+      await telegram.sendCustomerClosePrompt(ticket, { repin: true });
       ack?.({ ok: true });
     } catch (error) {
-      console.error('[Admin] customer control:', error?.message);
-      ack?.({ error: 'Не удалось закрепить карточку у клиента' });
+      console.error('[Admin] customer close prompt:', error?.message);
+      ack?.({ error: 'Не удалось отправить предложение клиенту' });
     }
   });
 

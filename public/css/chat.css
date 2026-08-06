@@ -359,6 +359,21 @@ input,textarea{
   text-align:center;
 }
 
+.close-prompt{
+  align-self:center;
+  width:min(100%,390px);
+  margin:10px 0;
+  padding:14px;
+  border:1px solid rgba(42,171,238,.28);
+  border-radius:14px;
+  background:rgba(42,171,238,.1);
+  box-shadow:0 3px 12px rgba(0,0,0,.14);
+  text-align:center;
+}
+.close-prompt-text{color:var(--text);font-size:13px;line-height:1.45;white-space:pre-wrap}
+.close-prompt button{width:100%;min-height:39px;margin-top:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:750;font-size:13px}
+.close-prompt button:disabled{opacity:.65}
+
 .emp{
   margin:auto;
   padding:54px 20px;
