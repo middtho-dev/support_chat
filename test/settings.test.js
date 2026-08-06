@@ -39,7 +39,14 @@ test('maintenance and alert settings persist and are normalized', () => {
     telegramCustomerClosePromptText: '  Если вопрос решён, закройте обращение  ',
     telegramCustomerCloseButtonText: 'Закрыть',
     telegramCustomerNewButtonText: 'Новый тикет',
-    telegramCustomerSendCloseButtonText: 'Отправить закрытие'
+    telegramCustomerSendCloseButtonText: 'Отправить закрытие',
+    telegramRichTranscriptTitle: '  История {name}  ',
+    telegramRichTranscriptSubtitle: '  Тикет {shortId}: {status}  ',
+    telegramRichTranscriptMaxMessages: 99,
+    telegramRichTranscriptMessageMaxChars: 40,
+    telegramRichTranscriptShowAuthor: false,
+    telegramRichTranscriptShowTime: false,
+    telegramRichTranscriptSeparator: 'dots'
   });
 
   assert.equal(saved.backupEnabled, false);
@@ -61,6 +68,13 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal('telegramCustomerReopenClosed' in saved, false);
   assert.equal('telegramCustomerReopenedText' in saved, false);
   assert.equal(saved.telegramCustomerWelcomeText, 'Напишите нам в Telegram');
+  assert.equal(saved.telegramRichTranscriptTitle, 'История {name}');
+  assert.equal(saved.telegramRichTranscriptSubtitle, 'Тикет {shortId}: {status}');
+  assert.equal(saved.telegramRichTranscriptMaxMessages, 30);
+  assert.equal(saved.telegramRichTranscriptMessageMaxChars, 80);
+  assert.equal(saved.telegramRichTranscriptShowAuthor, false);
+  assert.equal(saved.telegramRichTranscriptShowTime, false);
+  assert.equal(saved.telegramRichTranscriptSeparator, 'dots');
 
   const loaded = loadSettings();
   assert.equal(loaded.backupEnabled, false);
@@ -77,6 +91,10 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.telegramCustomerCloseButtonText, 'Закрыть');
   assert.equal(loaded.telegramCustomerNewButtonText, 'Новый тикет');
   assert.equal(loaded.telegramCustomerSendCloseButtonText, 'Отправить закрытие');
+  assert.equal(loaded.telegramRichTranscriptTitle, 'История {name}');
+  assert.equal(loaded.telegramRichTranscriptMaxMessages, 30);
+  assert.equal(loaded.telegramRichTranscriptMessageMaxChars, 80);
+  assert.equal(loaded.telegramRichTranscriptSeparator, 'dots');
 });
 
 test('legacy Telegram ticket confirmation is upgraded to the pinned card template', () => {

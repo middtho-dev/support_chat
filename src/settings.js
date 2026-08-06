@@ -73,6 +73,13 @@ const DEFAULTS = {
   telegramCustomerCloseButtonText: '✅ Закрыть тикет',
   telegramCustomerNewButtonText: '🆕 Создать новый тикет',
   telegramCustomerSendCloseButtonText: '📨 Отправить кнопку закрытия',
+  telegramRichTranscriptTitle: '💬 Диалог · {name}',
+  telegramRichTranscriptSubtitle: 'Тикет {shortId} · {status}',
+  telegramRichTranscriptMaxMessages: 8,
+  telegramRichTranscriptMessageMaxChars: 360,
+  telegramRichTranscriptShowAuthor: true,
+  telegramRichTranscriptShowTime: true,
+  telegramRichTranscriptSeparator: 'space',
   telegramTopicNameTemplate: '{emoji} {name} • {date}',
   telegramNewEmoji: '❗',
   telegramOpenEmoji: '🔵',
@@ -156,6 +163,13 @@ const KEY_MAP = {
   telegramCustomerCloseButtonText: 'telegram_customer_close_button_text',
   telegramCustomerNewButtonText: 'telegram_customer_new_button_text',
   telegramCustomerSendCloseButtonText: 'telegram_customer_send_close_button_text',
+  telegramRichTranscriptTitle: 'telegram_rich_transcript_title',
+  telegramRichTranscriptSubtitle: 'telegram_rich_transcript_subtitle',
+  telegramRichTranscriptMaxMessages: 'telegram_rich_transcript_max_messages',
+  telegramRichTranscriptMessageMaxChars: 'telegram_rich_transcript_message_max_chars',
+  telegramRichTranscriptShowAuthor: 'telegram_rich_transcript_show_author',
+  telegramRichTranscriptShowTime: 'telegram_rich_transcript_show_time',
+  telegramRichTranscriptSeparator: 'telegram_rich_transcript_separator',
   telegramTopicNameTemplate: 'telegram_topic_name_template',
   telegramNewEmoji: 'telegram_new_emoji',
   telegramOpenEmoji: 'telegram_open_emoji',
@@ -232,6 +246,8 @@ function normalize(input = {}) {
   cfg.telegramCleanupClosedHours = clamp(cfg.telegramCleanupClosedHours, 0, 720, DEFAULTS.telegramCleanupClosedHours);
   cfg.telegramUnansweredReminderMinutes = clamp(cfg.telegramUnansweredReminderMinutes, 1, 1440, DEFAULTS.telegramUnansweredReminderMinutes);
   cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);
+  cfg.telegramRichTranscriptMaxMessages = Math.round(clamp(cfg.telegramRichTranscriptMaxMessages, 1, 30, DEFAULTS.telegramRichTranscriptMaxMessages));
+  cfg.telegramRichTranscriptMessageMaxChars = Math.round(clamp(cfg.telegramRichTranscriptMessageMaxChars, 80, 700, DEFAULTS.telegramRichTranscriptMessageMaxChars));
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
@@ -264,6 +280,12 @@ function normalize(input = {}) {
   cfg.telegramCustomerCloseButtonText = sanitizeText(cfg.telegramCustomerCloseButtonText, DEFAULTS.telegramCustomerCloseButtonText, 64) || DEFAULTS.telegramCustomerCloseButtonText;
   cfg.telegramCustomerNewButtonText = sanitizeText(cfg.telegramCustomerNewButtonText, DEFAULTS.telegramCustomerNewButtonText, 64) || DEFAULTS.telegramCustomerNewButtonText;
   cfg.telegramCustomerSendCloseButtonText = sanitizeText(cfg.telegramCustomerSendCloseButtonText, DEFAULTS.telegramCustomerSendCloseButtonText, 64) || DEFAULTS.telegramCustomerSendCloseButtonText;
+  cfg.telegramRichTranscriptTitle = sanitizeText(cfg.telegramRichTranscriptTitle, DEFAULTS.telegramRichTranscriptTitle, 160) || DEFAULTS.telegramRichTranscriptTitle;
+  cfg.telegramRichTranscriptSubtitle = sanitizeText(cfg.telegramRichTranscriptSubtitle, DEFAULTS.telegramRichTranscriptSubtitle, 240);
+  const allowedTranscriptSeparators = new Set(['space', 'dots', 'line']);
+  cfg.telegramRichTranscriptSeparator = allowedTranscriptSeparators.has(cfg.telegramRichTranscriptSeparator)
+    ? cfg.telegramRichTranscriptSeparator
+    : DEFAULTS.telegramRichTranscriptSeparator;
   const allowedButtonStyles = new Set(['', 'danger', 'success', 'primary']);
   cfg.telegramCloseButtonStyle = allowedButtonStyles.has(cfg.telegramCloseButtonStyle) ? cfg.telegramCloseButtonStyle : DEFAULTS.telegramCloseButtonStyle;
   cfg.telegramCloseButtonEmojiId = sanitizeText(cfg.telegramCloseButtonEmojiId, '', 128);

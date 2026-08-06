@@ -675,6 +675,37 @@ test('single-operator auto assignment can be disabled in settings', async () => 
   saveSettings({ telegramAutoAssignSingleOperator: true });
 });
 
+test('Rich transcript settings immediately control the operator ticket card', async () => {
+  const previous = saveSettings({});
+  try {
+    saveSettings({
+      telegramRichTranscriptTitle: 'Журнал {name}',
+      telegramRichTranscriptSubtitle: 'Статус: {status}',
+      telegramRichTranscriptMaxMessages: 2,
+      telegramRichTranscriptMessageMaxChars: 80,
+      telegramRichTranscriptShowAuthor: false,
+      telegramRichTranscriptShowTime: false,
+      telegramRichTranscriptSeparator: 'dots'
+    });
+    const id = 'rich-settings-ticket-0000-0000-000000000000';
+    db.createTicket.run(id, 'Настройка', 'session-rich-settings');
+    db.assignTicket.run('7001', id);
+    db.saveTelegramThread.run(id, '7001', '7001', 919, null);
+    db.saveMessage.run('rich-settings-user', id, 'user', 'Настройка', 'Первое сообщение', 'text', null, null, null, null, null);
+    db.saveMessage.run('rich-settings-support', id, 'support', 'Оператор', 'Второе сообщение', 'text', null, null, null, null, null);
+
+    await telegram.refreshOpenTicketTranscripts();
+    const card = rich.findLast(item => item.options?.message_thread_id === 919);
+    assert.ok(card);
+    assert.match(card.markdown, /Журнал Настройка/);
+    assert.match(card.markdown, /Статус: 🔵 открыт/);
+    assert.match(card.markdown, /Первое сообщение[\s\S]*· · ·[\s\S]*Второе сообщение/);
+    assert.doesNotMatch(card.markdown, /👤 Клиент|🛟 Оператор/);
+  } finally {
+    saveSettings(previous);
+  }
+});
+
 test('a transient Telegram fetch error alerts only after repeated failures', async () => {
   const alertsBefore = sent.filter(item => item.text.includes('Контроль доставки чата')).length;
   const error = new Error('EFATAL: fetch failed');

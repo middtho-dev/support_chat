@@ -30,6 +30,14 @@ const TOPIC_CREATE_RETRY_MS = Math.max(
   100,
   Math.min(10000, Number(process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS) || 1000)
 );
+const TELEGRAM_API_TIMEOUT_MS = Math.max(
+  5000,
+  Math.min(60000, Number(process.env.TELEGRAM_API_TIMEOUT_MS) || 15000)
+);
+const TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS = Math.max(
+  15000,
+  Math.min(120000, Number(process.env.TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS) || 60000)
+);
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
 const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.opus']);
@@ -722,39 +730,61 @@ function transcriptAttachmentLabel(message) {
 }
 
 function ticketTranscriptModel(ticket) {
+  const settings = cfg();
   const sourceMessages = db.getMessagesRecent.all(ticket.id, 30)
     .filter(message => message.sender !== 'system' && !Number(message.is_auto));
-  const entries = sourceMessages.map(message => {
+  const visibleMessages = sourceMessages.slice(-settings.telegramRichTranscriptMaxMessages);
+  const entries = visibleMessages.map(message => {
     const sender = message.sender === 'user'
       ? '👤 Клиент'
       : `🛟 ${message.sender_name || cfg().supportName}`;
     const content = String(message.content || '').trim();
     const body = [
-      content ? content.slice(0, 700) : '',
+      content ? content.slice(0, settings.telegramRichTranscriptMessageMaxChars) : '',
       message.file_url ? transcriptAttachmentLabel(message) : ''
     ].filter(Boolean).join('\n');
+    const markdownHeader = [
+      settings.telegramRichTranscriptShowAuthor ? `**${markdownEscape(sender)}**` : '',
+      settings.telegramRichTranscriptShowTime ? `_${transcriptClock(message.created_at)}_` : ''
+    ].filter(Boolean).join(' · ');
+    const fallbackHeader = [
+      settings.telegramRichTranscriptShowAuthor ? sender : '',
+      settings.telegramRichTranscriptShowTime ? transcriptClock(message.created_at) : ''
+    ].filter(Boolean).join(' · ');
     return {
-      markdown: `**${markdownEscape(sender)}** · _${transcriptClock(message.created_at)}_\n${markdownEscape(body || 'Сообщение')}`,
-      fallback: [`${sender} · ${transcriptClock(message.created_at)}`, body || 'Сообщение'].join('\n')
+      markdown: [markdownHeader, markdownEscape(body || 'Сообщение')].filter(Boolean).join('\n'),
+      fallback: [fallbackHeader, body || 'Сообщение'].filter(Boolean).join('\n')
     };
   });
+  const separator = settings.telegramRichTranscriptSeparator === 'dots'
+    ? '\n\n· · ·\n\n'
+    : settings.telegramRichTranscriptSeparator === 'line'
+      ? '\n\n───\n\n'
+      : '\n\n';
   const maxLength = 3400;
-  while (entries.length > 1 && entries.map(entry => entry.markdown).join('\n\n').length > maxLength) {
+  while (entries.length > 1 && entries.map(entry => entry.markdown).join(separator).length > maxLength) {
     entries.shift();
   }
   const omitted = sourceMessages.length - entries.length;
   const state = ticket.status === 'closed' ? '✅ закрыт' : '🔵 открыт';
+  const templateValues = {
+    name: ticket.user_name || 'Клиент',
+    shortId: shortId(ticket),
+    status: state
+  };
+  const title = formatTemplate(settings.telegramRichTranscriptTitle, templateValues);
+  const subtitle = formatTemplate(settings.telegramRichTranscriptSubtitle, templateValues);
   const markdown = [
-    `**💬 Диалог · ${markdownEscape(ticket.user_name || 'Клиент')}**`,
-    `_Тикет \`${markdownEscape(shortId(ticket))}\` · ${state}_`,
+    `**${markdownEscape(title)}**`,
+    subtitle ? `_${markdownEscape(subtitle)}_` : '',
     omitted > 0 ? `_Показаны последние ${entries.length} сообщений._` : '',
-    entries.map(entry => entry.markdown).join('\n\n')
+    entries.map(entry => entry.markdown).join(separator)
   ].filter(Boolean).join('\n\n');
   const fallback = [
-    `💬 Диалог · ${ticket.user_name || 'Клиент'}`,
-    `Тикет ${shortId(ticket)} · ${state}`,
+    title,
+    subtitle,
     omitted > 0 ? `Показаны последние ${entries.length} сообщений.` : '',
-    entries.map(entry => entry.fallback).join('\n\n')
+    entries.map(entry => entry.fallback).join(separator)
   ].filter(Boolean).join('\n\n');
   return { markdown, fallback };
 }
@@ -818,6 +848,26 @@ async function publishTicketTranscript(ticket, thread) {
   } finally {
     if (transcriptUpdates.get(key) === state) transcriptUpdates.delete(key);
   }
+}
+
+async function refreshOpenTicketTranscripts(limit = 30) {
+  if (!tgEnabled() || !bot) return 0;
+  const tickets = db.getAllOpenTickets.all().slice(0, Math.max(1, Math.min(100, Number(limit) || 30)));
+  let refreshed = 0;
+  for (const ticket of tickets) {
+    if (!ticket.assigned_operator_id) continue;
+    const thread = db.getTelegramThreadForTicketOperator.get(ticket.id, ticket.assigned_operator_id);
+    if (!thread) continue;
+    try {
+      await publishTicketTranscript(ticket, thread);
+      refreshed++;
+    } catch (error) {
+      // A normal message delivery will retry the transcript update. Do not let one
+      // unavailable operator chat stop the rest of the settings refresh.
+      console.warn('[TG private] transcript settings refresh:', tgError(error));
+    }
+  }
+  return refreshed;
 }
 
 async function moveTicketTranscriptBelowMedia(ticket, thread) {
@@ -929,6 +979,11 @@ async function startBot() {
   let instance = null;
   try {
     instance = new TelegramBot(TOKEN, {
+      request: {
+        // Native HTTP timeout aborts the request itself. The failed item is then
+        // persisted back into the delivery queue, instead of holding it forever.
+        timeoutMs: TELEGRAM_API_TIMEOUT_MS
+      },
       polling: {
         interval: POLLING_INTERVAL_MS,
         autoStart: false,
@@ -3042,7 +3097,7 @@ async function downloadFile(msg) {
       if (!fileId) return null;
       const link = await bot.getFileLink(fileId);
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
+      const timeout = setTimeout(() => controller.abort(), TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS);
       let response;
       try {
         response = await fetch(link, { signal: controller.signal });
@@ -3201,11 +3256,14 @@ function status() {
     openTelegramCustomerTickets,
     miniAppConfigured: !!adminWebAppUrl(),
     pollingIntervalMs: POLLING_INTERVAL_MS,
+    apiRequestTimeoutMs: TELEGRAM_API_TIMEOUT_MS,
+    fileDownloadTimeoutMs: TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS,
     pendingThreadCreates: creatingThreads.size,
     latency: latencySummary(),
     delivery: {
       ...deliveryStats,
       inFlight: forwardingMessages.size,
+      customerInFlight: customerDeliveryMessages.size,
       pendingMessages,
       oldestPendingSeconds,
       pendingCustomerReplies,
@@ -3300,6 +3358,7 @@ module.exports = {
   deliverCustomerReply,
   sendCustomerControl,
   sendCustomerClosePrompt,
+  refreshOpenTicketTranscripts,
   clearTicketReminders,
   notifyTicketClosed,
   autoCloseTicket,
