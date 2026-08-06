@@ -45,9 +45,17 @@ const TELEGRAM_POLL_REQUEST_TIMEOUT_MS = Math.max(
   (TELEGRAM_LONG_POLL_TIMEOUT_SECONDS + 5) * 1000,
   Math.min(120000, Number(process.env.TELEGRAM_POLL_REQUEST_TIMEOUT_MS) || 45000)
 );
+const TELEGRAM_FILE_API_TIMEOUT_MS = Math.max(
+  15000,
+  Math.min(120000, Number(process.env.TELEGRAM_FILE_API_TIMEOUT_MS) || 45000)
+);
 const TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS = Math.max(
   15000,
   Math.min(120000, Number(process.env.TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS) || 60000)
+);
+const TELEGRAM_FILE_DOWNLOAD_ATTEMPTS = Math.max(
+  1,
+  Math.min(8, Number(process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS) || 5)
 );
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
@@ -127,6 +135,7 @@ const closingCustomerTickets = new Set();
 const incomingMessages = new Set();
 const transcriptUpdates = new Map();
 const customerMessageRates = new Map();
+const incomingMessageQueues = new Map();
 const alertTimes = new Map();
 const topicStatus = new Map();
 const topicStatusUpdates = new Map();
@@ -732,15 +741,24 @@ function ticketFallbackText(ticket, state = 'unassigned', extra = {}) {
 function transcriptClock(value) {
   const date = parseDatabaseTime(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return formatTranscriptDate(date, { hour: '2-digit', minute: '2-digit' });
 }
 
 function transcriptDateTime(value) {
   const date = parseDatabaseTime(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('ru-RU', {
+  return formatTranscriptDate(date, {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
   });
+}
+
+function formatTranscriptDate(date, options) {
+  const timeZone = String(cfg().timezone || 'Europe/Moscow');
+  try {
+    return new Intl.DateTimeFormat('ru-RU', { ...options, timeZone }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat('ru-RU', { ...options, timeZone: 'Europe/Moscow' }).format(date);
+  }
 }
 
 function richMarkdownStyle(text, style) {
@@ -1063,6 +1081,8 @@ function configureLongPollRequestTimeout(instance) {
     method,
     method === 'getUpdates'
       ? { ...options, timeoutMs: TELEGRAM_POLL_REQUEST_TIMEOUT_MS }
+      : method === 'getFile'
+        ? { ...options, timeoutMs: TELEGRAM_FILE_API_TIMEOUT_MS }
       : options
   );
 }
@@ -1110,7 +1130,7 @@ async function startBot() {
       console.error('[TG private] Error:', tgError(error));
     });
     instance.on('message', msg => {
-      return handleMessage(msg).catch(error => {
+      return queueIncomingMessage(msg).catch(error => {
         console.error('[TG private] message handling:', tgError(error));
         operationalAlert(
           'telegram-message-handling',
@@ -2582,6 +2602,17 @@ async function handleMessage(msg) {
   await forwardOperatorMessage(msg, ticket, thread, operator);
 }
 
+function queueIncomingMessage(msg) {
+  const key = String(msg?.chat?.id || msg?.from?.id || 'unknown');
+  const previous = incomingMessageQueues.get(key) || Promise.resolve();
+  const task = previous.catch(() => {}).then(() => handleMessage(msg));
+  incomingMessageQueues.set(key, task);
+  task.finally(() => {
+    if (incomingMessageQueues.get(key) === task) incomingMessageQueues.delete(key);
+  }).catch(() => {});
+  return task;
+}
+
 async function forwardOperatorMessage(msg, ticket, thread, operator) {
   const incomingKey = `${msg.chat.id}:${msg.message_id}`;
   if (incomingMessages.has(incomingKey) ||
@@ -3208,7 +3239,7 @@ async function cleanupOldTopics() {
 
 async function downloadFile(msg) {
   let lastError;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= TELEGRAM_FILE_DOWNLOAD_ATTEMPTS; attempt++) {
     try {
       let fileId;
       let fileName;
@@ -3286,7 +3317,7 @@ async function downloadFile(msg) {
           tgError(error) === 'File too large') {
         break;
       }
-      if (attempt < 3) await wait(attempt * 1000);
+      if (attempt < TELEGRAM_FILE_DOWNLOAD_ATTEMPTS) await wait(attempt * 1000);
     }
   }
   deliveryStats.lastError = tgError(lastError);
@@ -3417,7 +3448,9 @@ function status() {
     apiRequestTimeoutMs: TELEGRAM_API_TIMEOUT_MS,
     pollingLongPollTimeoutSeconds: TELEGRAM_LONG_POLL_TIMEOUT_SECONDS,
     pollingRequestTimeoutMs: TELEGRAM_POLL_REQUEST_TIMEOUT_MS,
+    fileApiRequestTimeoutMs: TELEGRAM_FILE_API_TIMEOUT_MS,
     fileDownloadTimeoutMs: TELEGRAM_FILE_DOWNLOAD_TIMEOUT_MS,
+    fileDownloadAttempts: TELEGRAM_FILE_DOWNLOAD_ATTEMPTS,
     pendingThreadCreates: creatingThreads.size,
     pendingTopicStatusUpdates: topicStatusUpdates.size,
     latency: latencySummary(),
@@ -3449,6 +3482,7 @@ async function shutdown() {
   for (const timer of topicStatusVerificationTimers.values()) clearTimeout(timer);
   topicStatusVerificationTimers.clear();
   topicStatusUpdates.clear();
+  incomingMessageQueues.clear();
   cleanupTimer = null;
   deliveryTimer = null;
   reminderTimer = null;

@@ -154,8 +154,10 @@ test('long polling has its own HTTP timeout without delaying message delivery re
   assert.equal(botOptions.polling.params.timeout, 30);
 
   await fakeBot._request('getUpdates', { form: {} });
+  await fakeBot._request('getFile', { form: {} });
   await fakeBot._request('sendMessage', { form: {} });
 
+  assert.equal(requests.at(-3).options.timeoutMs, 45000);
   assert.equal(requests.at(-2).options.timeoutMs, 45000);
   assert.equal(requests.at(-1).options.timeoutMs, undefined);
 });
@@ -270,6 +272,34 @@ test('an operator reply from a Telegram topic is persisted and emitted to the we
     text: 'Ответ через Telegram'
   });
   assert.equal(db.getMessages.all(ticketId).length, messagesBefore + 1);
+});
+
+test('rapid operator messages are processed in their Telegram order', async () => {
+  const id = 'ordered-telegram-messages-0000-000000000000';
+  db.createTicket.run(id, 'Порядок', 'session-ordered-telegram');
+  db.assignTicket.run('7001', id);
+  db.saveTelegramThread.run(id, '7001', '7001', 911, null);
+
+  const first = fakeBot.handlers.message({
+    message_id: 981,
+    message_thread_id: 911,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    text: 'Первое по порядку'
+  });
+  const second = fakeBot.handlers.message({
+    message_id: 982,
+    message_thread_id: 911,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    text: 'Второе по порядку'
+  });
+  await Promise.all([first, second]);
+
+  assert.deepEqual(
+    db.getMessages.all(id).map(message => message.content),
+    ['Первое по порядку', 'Второе по порядку']
+  );
 });
 
 test('Telegram service messages are removed before bot and topic routing', async () => {
@@ -744,6 +774,30 @@ test('Rich transcript settings immediately control the operator ticket card', as
     assert.match(card.markdown, /> _Оператор: Оператор_[\s\S]*Второе сообщение/);
     assert.match(card.markdown, /· · ·/);
     assert.match(card.markdown, /Показано 2 из 2/);
+  } finally {
+    saveSettings(previous);
+  }
+});
+
+test('Rich transcript displays database timestamps in the configured timezone', async () => {
+  const previous = saveSettings({});
+  try {
+    saveSettings({
+      timezone: 'Europe/Moscow',
+      telegramRichTranscriptShowTime: true,
+      telegramRichTranscriptTimestampFormat: 'time'
+    });
+    const id = 'rich-timezone-ticket-0000-000000000000';
+    db.createTicket.run(id, 'Время', 'session-rich-timezone');
+    db.assignTicket.run('7001', id);
+    db.saveTelegramThread.run(id, '7001', '7001', 920, null);
+    db.saveMessage.run('rich-timezone-message', id, 'user', 'Время', 'Проверка времени', 'text', null, null, null, null, null);
+    db.db.prepare("UPDATE messages SET created_at = '2026-08-06 12:15:00' WHERE id = ?").run('rich-timezone-message');
+
+    await telegram.refreshOpenTicketTranscripts();
+    const card = rich.findLast(item => item.options?.message_thread_id === 920);
+    assert.ok(card);
+    assert.match(card.markdown, /15:15/);
   } finally {
     saveSettings(previous);
   }
