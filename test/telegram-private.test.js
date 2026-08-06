@@ -357,7 +357,11 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.messageId === ticket.telegram_customer_control_message_id
   ));
   assert.deepEqual(welcomeTickets, [ticket.id]);
-  const userMessage = db.getMessages.all(ticket.id).find(message => message.sender === 'user');
+  let userMessage = db.getMessages.all(ticket.id).find(message => message.sender === 'user');
+  for (let attempt = 0; attempt < 20 && !userMessage?.telegram_message_id; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    userMessage = db.getMessageById.get(userMessage.id);
+  }
   assert.equal(userMessage.content, 'Нужна помощь с подключением');
   assert.equal(userMessage.telegram_source_message_id, 801);
   assert.ok(userMessage.telegram_message_id);

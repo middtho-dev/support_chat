@@ -198,6 +198,11 @@ function scheduleDeliveryQueue(delayMs = 0) {
   }, safeDelay);
 }
 
+function deliveryRetryDelaySeconds(attempt) {
+  const delays = [1, 2, 5, 10, 20, 45, 90];
+  return delays[Math.min(Math.max(0, Number(attempt || 1) - 1), delays.length - 1)];
+}
+
 function shortId(ticket) {
   return String(ticket?.id || '').slice(0, 8);
 }
@@ -761,42 +766,62 @@ function ticketTranscriptModel(ticket) {
 
 async function publishTicketTranscript(ticket, thread) {
   const key = `${ticket.id}:${thread.operator_id}`;
-  const previous = transcriptUpdates.get(key) || Promise.resolve();
-  const update = previous.catch(() => {}).then(async () => {
-    const fresh = db.getTicketById.get(ticket.id) || ticket;
-    const model = ticketTranscriptModel(fresh);
-    const rootMessageId = Number(thread.root_message_id || 0);
-    if (rootMessageId) {
-      const updated = await editRichOrDisable(
-        thread.chat_id,
-        rootMessageId,
+  const queued = transcriptUpdates.get(key);
+  if (queued) {
+    queued.ticket = ticket;
+    queued.thread = thread;
+    queued.dirty = true;
+    return queued.promise;
+  }
+
+  const state = { ticket, thread, dirty: false, promise: null };
+  state.promise = (async () => {
+    let result = null;
+    do {
+      state.dirty = false;
+      const fresh = db.getTicketById.get(state.ticket.id) || state.ticket;
+      const activeThread = db.getTelegramThreadForTicketOperator.get(
+        fresh.id,
+        state.thread.operator_id
+      ) || state.thread;
+      const model = ticketTranscriptModel(fresh);
+      const rootMessageId = Number(activeThread.root_message_id || 0);
+      if (rootMessageId) {
+        const updated = await editRichOrDisable(
+          activeThread.chat_id,
+          rootMessageId,
+          model.markdown,
+          ticketKeyboard(fresh, fresh.status === 'closed' ? 'closed' : 'open'),
+          model.fallback
+        );
+        if (updated) {
+          result = { message_id: rootMessageId };
+          continue;
+        }
+        const removed = await deleteTelegramMessage(activeThread.chat_id, rootMessageId);
+        if (!removed) throw new Error('Unable to update ticket transcript');
+      }
+      const sent = await sendRichOrText(
+        activeThread.chat_id,
         model.markdown,
-        ticketKeyboard(fresh, fresh.status === 'closed' ? 'closed' : 'open'),
+        {
+          message_thread_id: activeThread.thread_id,
+          reply_markup: ticketKeyboard(fresh, fresh.status === 'closed' ? 'closed' : 'open')
+        },
         model.fallback
       );
-      if (updated) return { message_id: rootMessageId };
-      const removed = await deleteTelegramMessage(thread.chat_id, rootMessageId);
-      if (!removed) throw new Error('Unable to update ticket transcript');
-    }
-    const sent = await sendRichOrText(
-      thread.chat_id,
-      model.markdown,
-      {
-        message_thread_id: thread.thread_id,
-        reply_markup: ticketKeyboard(fresh, fresh.status === 'closed' ? 'closed' : 'open')
-      },
-      model.fallback
-    );
-    if (!sent?.message_id) throw new Error('Telegram did not confirm transcript delivery');
-    db.setTelegramThreadRoot.run(sent.message_id, fresh.id, thread.operator_id);
-    thread.root_message_id = sent.message_id;
-    return sent;
-  });
-  transcriptUpdates.set(key, update);
+      if (!sent?.message_id) throw new Error('Telegram did not confirm transcript delivery');
+      db.setTelegramThreadRoot.run(sent.message_id, fresh.id, activeThread.operator_id);
+      activeThread.root_message_id = sent.message_id;
+      result = sent;
+    } while (state.dirty);
+    return result;
+  })();
+  transcriptUpdates.set(key, state);
   try {
-    return await update;
+    return await state.promise;
   } finally {
-    if (transcriptUpdates.get(key) === update) transcriptUpdates.delete(key);
+    if (transcriptUpdates.get(key) === state) transcriptUpdates.delete(key);
   }
 }
 
@@ -1654,7 +1679,10 @@ async function handleCustomerMessage(msg) {
   const result = await ensureCustomerTicket(msg);
   const ticket = result.ticket;
   if (result.created) {
-    await startCustomerTicketExperience(ticket, { createOperatorTopic: false });
+    lifecycle.scheduleWelcomeMessages?.(ticket.id);
+    startCustomerTicketExperience(ticket, { createOperatorTopic: false }).catch(error => {
+      console.error('[TG private] customer ticket launcher:', tgError(error));
+    });
   }
   let replyToId = null;
   if (msg.reply_to_message?.message_id) {
@@ -1696,7 +1724,7 @@ async function handleCustomerMessage(msg) {
   io?.to('admin').emit('admin_new_message', { ticketId: ticket.id, message });
   io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
   lifecycle.scheduleOperatorWaitMessage?.(ticket.id, id);
-  await forwardMessage(ticket, message).catch(error => {
+  forwardMessage(ticket, message).catch(error => {
     console.error('[TG private] customer forwarding:', tgError(error));
   });
 }
@@ -2610,7 +2638,7 @@ async function deliverCustomerReply(ticket, message) {
     return sent.message_id;
   } catch (error) {
     const attempts = Number(saved.telegram_customer_attempts || 0) + 1;
-    const delaySeconds = Math.min(300, 5 * (2 ** Math.min(attempts - 1, 6)));
+    const delaySeconds = deliveryRetryDelaySeconds(attempts);
     db.markTelegramCustomerAttempt.run(
       tgError(error).slice(0, 1000),
       `+${delaySeconds} seconds`,
@@ -2698,7 +2726,7 @@ async function forwardMessage(ticket, message, options = {}) {
       );
     }
     const attempts = Number(message.telegram_attempts || 0) + 1;
-    const delaySeconds = Math.min(300, 5 * (2 ** Math.min(attempts - 1, 6)));
+    const delaySeconds = deliveryRetryDelaySeconds(attempts);
     db.markTelegramAttempt.run(tgError(error).slice(0, 1000), `+${delaySeconds} seconds`, message.id);
     scheduleDeliveryQueue(delaySeconds * 1000 + 250);
     deliveryStats.failed++;
