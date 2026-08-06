@@ -803,6 +803,38 @@ test('Rich transcript displays database timestamps in the configured timezone', 
   }
 });
 
+test('Rich transcript groups consecutive messages and keeps only time in continuations', async () => {
+  const previous = saveSettings({});
+  try {
+    saveSettings({
+      telegramRichTranscriptShowAuthor: true,
+      telegramRichTranscriptShowTime: true,
+      telegramRichTranscriptAuthorMode: 'grouped',
+      telegramRichTranscriptGroupWindowMinutes: 10,
+      telegramRichTranscriptGroupContinuation: 'time',
+      telegramRichTranscriptGroupSpacing: 'compact',
+      telegramRichTranscriptMessageLayout: 'plain'
+    });
+    const id = 'rich-group-ticket-0000-000000000000';
+    db.createTicket.run(id, 'Группа', 'session-rich-group');
+    db.assignTicket.run('7001', id);
+    db.saveTelegramThread.run(id, '7001', '7001', 921, null);
+    db.saveMessage.run('rich-group-1', id, 'user', 'Группа', 'Первая реплика', 'text', null, null, null, null, null);
+    db.saveMessage.run('rich-group-2', id, 'user', 'Группа', 'Вторая реплика', 'text', null, null, null, null, null);
+    db.db.prepare("UPDATE messages SET created_at = '2026-08-06 12:15:00' WHERE id = ?").run('rich-group-1');
+    db.db.prepare("UPDATE messages SET created_at = '2026-08-06 12:16:00' WHERE id = ?").run('rich-group-2');
+
+    await telegram.refreshOpenTicketTranscripts();
+    const card = rich.findLast(item => item.options?.message_thread_id === 921);
+    assert.ok(card);
+    assert.match(card.markdown, /\*\*👤 Клиент\*\* · _15:15_[\s\S]*Первая реплика/);
+    assert.match(card.markdown, /_15:16_[\s\S]*Вторая реплика/);
+    assert.equal((card.markdown.match(/👤 Клиент/g) || []).length, 1);
+  } finally {
+    saveSettings(previous);
+  }
+});
+
 test('a transient Telegram fetch error alerts only after repeated failures', async () => {
   const alertsBefore = sent.filter(item => item.text.includes('Контроль доставки чата')).length;
   const error = new Error('EFATAL: fetch failed');

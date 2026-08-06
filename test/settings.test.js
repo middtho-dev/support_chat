@@ -56,6 +56,10 @@ test('maintenance and alert settings persist and are normalized', () => {
     telegramRichTranscriptMessageSize: 'large',
     telegramRichTranscriptMessageHeaderStyle: 'plain',
     telegramRichTranscriptTimestampFormat: 'date_time',
+    telegramRichTranscriptAuthorMode: 'grouped',
+    telegramRichTranscriptGroupWindowMinutes: 900,
+    telegramRichTranscriptGroupContinuation: 'none',
+    telegramRichTranscriptGroupSpacing: 'inherit',
     telegramRichTranscriptDensity: 'airy',
     telegramRichTranscriptOrder: 'newest_first',
     telegramRichTranscriptUserLabel: 'Клиент: {name}',
@@ -98,6 +102,10 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(saved.telegramRichTranscriptMessageLayout, 'quote');
   assert.equal(saved.telegramRichTranscriptMessageSize, 'large');
   assert.equal(saved.telegramRichTranscriptTimestampFormat, 'date_time');
+  assert.equal(saved.telegramRichTranscriptAuthorMode, 'grouped');
+  assert.equal(saved.telegramRichTranscriptGroupWindowMinutes, 120);
+  assert.equal(saved.telegramRichTranscriptGroupContinuation, 'none');
+  assert.equal(saved.telegramRichTranscriptGroupSpacing, 'inherit');
   assert.equal(saved.telegramRichTranscriptOrder, 'newest_first');
   assert.equal(saved.telegramRichTranscriptUserLabel, 'Клиент: {name}');
   assert.equal(saved.telegramRichTranscriptFooter, 'Показано {shown}');
@@ -123,6 +131,10 @@ test('maintenance and alert settings persist and are normalized', () => {
   assert.equal(loaded.telegramRichTranscriptSeparator, 'dots');
   assert.equal(loaded.telegramRichTranscriptMessageLayout, 'quote');
   assert.equal(loaded.telegramRichTranscriptOrder, 'newest_first');
+  assert.equal(loaded.telegramRichTranscriptAuthorMode, 'grouped');
+  assert.equal(loaded.telegramRichTranscriptGroupWindowMinutes, 120);
+  assert.equal(loaded.telegramRichTranscriptGroupContinuation, 'none');
+  assert.equal(loaded.telegramRichTranscriptGroupSpacing, 'inherit');
   assert.equal(loaded.telegramRichTranscriptEmptyText, 'Пусто');
 });
 

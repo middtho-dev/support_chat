@@ -89,6 +89,10 @@ const DEFAULTS = {
   telegramRichTranscriptMessageSize: 'normal',
   telegramRichTranscriptMessageHeaderStyle: 'bold',
   telegramRichTranscriptTimestampFormat: 'time',
+  telegramRichTranscriptAuthorMode: 'grouped',
+  telegramRichTranscriptGroupWindowMinutes: 10,
+  telegramRichTranscriptGroupContinuation: 'time',
+  telegramRichTranscriptGroupSpacing: 'compact',
   telegramRichTranscriptDensity: 'normal',
   telegramRichTranscriptOrder: 'oldest_first',
   telegramRichTranscriptUserLabel: '👤 Клиент',
@@ -196,6 +200,10 @@ const KEY_MAP = {
   telegramRichTranscriptMessageSize: 'telegram_rich_transcript_message_size',
   telegramRichTranscriptMessageHeaderStyle: 'telegram_rich_transcript_message_header_style',
   telegramRichTranscriptTimestampFormat: 'telegram_rich_transcript_timestamp_format',
+  telegramRichTranscriptAuthorMode: 'telegram_rich_transcript_author_mode',
+  telegramRichTranscriptGroupWindowMinutes: 'telegram_rich_transcript_group_window_minutes',
+  telegramRichTranscriptGroupContinuation: 'telegram_rich_transcript_group_continuation',
+  telegramRichTranscriptGroupSpacing: 'telegram_rich_transcript_group_spacing',
   telegramRichTranscriptDensity: 'telegram_rich_transcript_density',
   telegramRichTranscriptOrder: 'telegram_rich_transcript_order',
   telegramRichTranscriptUserLabel: 'telegram_rich_transcript_user_label',
@@ -282,6 +290,12 @@ function normalize(input = {}) {
   cfg.telegramUnansweredRepeatMinutes = clamp(cfg.telegramUnansweredRepeatMinutes, 1, 1440, DEFAULTS.telegramUnansweredRepeatMinutes);
   cfg.telegramRichTranscriptMaxMessages = Math.round(clamp(cfg.telegramRichTranscriptMaxMessages, 1, 30, DEFAULTS.telegramRichTranscriptMaxMessages));
   cfg.telegramRichTranscriptMessageMaxChars = Math.round(clamp(cfg.telegramRichTranscriptMessageMaxChars, 80, 700, DEFAULTS.telegramRichTranscriptMessageMaxChars));
+  cfg.telegramRichTranscriptGroupWindowMinutes = Math.round(clamp(
+    cfg.telegramRichTranscriptGroupWindowMinutes,
+    0,
+    120,
+    DEFAULTS.telegramRichTranscriptGroupWindowMinutes
+  ));
 
   cfg.supportName = sanitizeText(cfg.supportName, DEFAULTS.supportName, 80) || DEFAULTS.supportName;
   cfg.welcomeText1 = sanitizeText(cfg.welcomeText1, DEFAULTS.welcomeText1, 1000);
@@ -328,6 +342,9 @@ function normalize(input = {}) {
     telegramRichTranscriptMessageSize: ['compact', 'normal', 'large'],
     telegramRichTranscriptMessageHeaderStyle: ['bold', 'plain', 'italic'],
     telegramRichTranscriptTimestampFormat: ['time', 'date_time'],
+    telegramRichTranscriptAuthorMode: ['every', 'grouped', 'hidden'],
+    telegramRichTranscriptGroupContinuation: ['time', 'none'],
+    telegramRichTranscriptGroupSpacing: ['compact', 'inherit'],
     telegramRichTranscriptDensity: ['compact', 'normal', 'airy'],
     telegramRichTranscriptOrder: ['oldest_first', 'newest_first']
   };
