@@ -57,6 +57,13 @@ const TELEGRAM_FILE_DOWNLOAD_ATTEMPTS = Math.max(
   1,
   Math.min(8, Number(process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS) || 5)
 );
+// Telegram asks bots to avoid sending more than one message per second to one
+// chat. Serialising customer replies here prevents 429 retries from turning a
+// short operator burst into minutes of delivery delay.
+const TELEGRAM_CUSTOMER_SEND_INTERVAL_MS = Math.max(
+  250,
+  Math.min(3000, Number(process.env.TELEGRAM_CUSTOMER_SEND_INTERVAL_MS) || 1000)
+);
 const IMAGE_EXTS = new Set([...DISPLAY_IMAGE_EXTS, '.heic', '.heif', '.bmp', '.tif', '.tiff', '.avif']);
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm']);
 const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.wav', '.flac', '.opus']);
@@ -119,6 +126,7 @@ let reminderTimer = null;
 let deliveryWakeTimer = null;
 let deliveryWakeAt = 0;
 let deliveryRunning = false;
+let shuttingDown = false;
 let reminderRunning = false;
 let connected = false;
 let threadedModeEnabled = false;
@@ -131,6 +139,8 @@ const creatingThreads = new Map();
 const assigningTickets = new Map();
 const forwardingMessages = new Set();
 const customerDeliveryMessages = new Set();
+const customerDeliveryQueues = new Map();
+const customerDeliveryNextAt = new Map();
 const customerControlMessages = new Map();
 const closingCustomerTickets = new Set();
 const incomingMessages = new Set();
@@ -214,6 +224,7 @@ function latencySummary() {
 }
 
 function scheduleDeliveryQueue(delayMs = 0) {
+  if (shuttingDown) return;
   const safeDelay = Math.max(0, Number(delayMs) || 0);
   const runAt = Date.now() + safeDelay;
   if (deliveryWakeTimer && deliveryWakeAt <= runAt) return;
@@ -233,6 +244,13 @@ function scheduleDeliveryQueue(delayMs = 0) {
 function deliveryRetryDelaySeconds(attempt) {
   const delays = [1, 2, 5, 10, 20, 45, 90];
   return delays[Math.min(Math.max(0, Number(attempt || 1) - 1), delays.length - 1)];
+}
+
+function telegramRetryAfterSeconds(error) {
+  const explicit = Number(error?.response?.body?.parameters?.retry_after);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(900, Math.ceil(explicit));
+  const match = tgError(error).match(/retry after\s+(\d+)/i);
+  return match ? Math.min(900, Number(match[1])) : 0;
 }
 
 function shortId(ticket) {
@@ -1131,6 +1149,7 @@ async function operationalAlert(key, text, details = '') {
 }
 
 function init(socketIo, hooks = {}) {
+  shuttingDown = false;
   io = socketIo;
   lifecycle = hooks || {};
   if (!TOKEN) {
@@ -2934,7 +2953,22 @@ async function sendMessageToCustomer(ticket, message) {
   throw new Error('Attachment file is unavailable');
 }
 
-async function deliverCustomerReply(ticket, message) {
+function customerDeliveryChatId(ticket, message) {
+  return String(
+    ticket?.telegram_customer_chat_id ||
+    ticket?.telegram_customer_id ||
+    message?.telegram_customer_chat_id ||
+    message?.telegram_customer_id ||
+    ''
+  );
+}
+
+async function waitForCustomerDeliverySlot(chatId) {
+  const waitMs = Math.max(0, Number(customerDeliveryNextAt.get(chatId) || 0) - Date.now());
+  if (waitMs) await wait(waitMs);
+}
+
+async function deliverCustomerReplyNow(ticket, message, chatId) {
   const settings = cfg();
   const fresh = db.getTicketById.get(ticket?.id || message?.ticket_id);
   if (!tgEnabled() || !settings.telegramCustomerEnabled ||
@@ -2947,8 +2981,13 @@ async function deliverCustomerReply(ticket, message) {
   if (saved.telegram_customer_message_id || customerDeliveryMessages.has(saved.id)) {
     return saved.telegram_customer_message_id || null;
   }
+  const oldestPending = db.getNextTelegramCustomerReply.get(fresh.id);
+  if (oldestPending && oldestPending.id !== saved.id) {
+    return null;
+  }
   customerDeliveryMessages.add(saved.id);
   try {
+    await waitForCustomerDeliverySlot(chatId);
     const sent = await sendMessageToCustomer(fresh, saved);
     if (!sent?.message_id) throw new Error('Telegram did not confirm customer delivery');
     db.updateTelegramCustomerDelivery.run(sent.message_id, saved.id);
@@ -2960,12 +2999,17 @@ async function deliverCustomerReply(ticket, message) {
       );
       return null;
     }
+    customerDeliveryNextAt.set(chatId, Date.now() + TELEGRAM_CUSTOMER_SEND_INTERVAL_MS);
     deliveryStats.customerDelivered++;
     deliveryStats.lastSuccessAt = new Date().toISOString();
     return sent.message_id;
   } catch (error) {
     const attempts = Number(saved.telegram_customer_attempts || 0) + 1;
-    const delaySeconds = deliveryRetryDelaySeconds(attempts);
+    const delaySeconds = Math.max(
+      deliveryRetryDelaySeconds(attempts),
+      telegramRetryAfterSeconds(error)
+    );
+    customerDeliveryNextAt.set(chatId, Date.now() + delaySeconds * 1000);
     db.markTelegramCustomerAttempt.run(
       tgError(error).slice(0, 1000),
       `+${delaySeconds} seconds`,
@@ -2985,6 +3029,20 @@ async function deliverCustomerReply(ticket, message) {
   } finally {
     customerDeliveryMessages.delete(saved.id);
   }
+}
+
+function deliverCustomerReply(ticket, message) {
+  const chatId = customerDeliveryChatId(ticket, message);
+  if (!chatId) return deliverCustomerReplyNow(ticket, message, chatId);
+  const previous = customerDeliveryQueues.get(chatId) || Promise.resolve();
+  const queued = previous.catch(() => {}).then(() =>
+    deliverCustomerReplyNow(ticket, message, chatId)
+  );
+  customerDeliveryQueues.set(chatId, queued);
+  queued.finally(() => {
+    if (customerDeliveryQueues.get(chatId) === queued) customerDeliveryQueues.delete(chatId);
+  }).catch(() => {});
+  return queued;
 }
 
 async function forwardMessage(ticket, message, options = {}) {
@@ -3073,26 +3131,36 @@ async function forwardMessage(ticket, message, options = {}) {
 }
 
 async function processDeliveryQueue() {
-  if (deliveryRunning || !tgEnabled()) return;
+  if (shuttingDown || deliveryRunning || !tgEnabled()) return;
   deliveryRunning = true;
   try {
+    const customerReplies = db.getPendingTelegramCustomerReplies.all(20);
+    const blockedCustomerTickets = new Set();
+    for (const message of customerReplies) {
+      if (shuttingDown) break;
+      if (blockedCustomerTickets.has(message.ticket_id)) continue;
+      const ticket = db.getTicketById.get(message.ticket_id);
+      if (!ticket) continue;
+      try {
+        await deliverCustomerReply(ticket, message);
+      } catch {
+        blockedCustomerTickets.add(message.ticket_id);
+      }
+    }
+    if (shuttingDown) return;
     const messages = db.getPendingPrivateTelegramMessages.all(20);
     for (const message of messages) {
+      if (shuttingDown) break;
       const ticket = db.getTicketById.get(message.ticket_id);
       if (!ticket) continue;
       if (Number(message.telegram_attempts || 0) > 0) deliveryStats.retried++;
       await forwardMessage(ticket, message, { fromQueue: true }).catch(() => {});
       await wait(250);
     }
-    const customerReplies = db.getPendingTelegramCustomerReplies.all(20);
-    for (const message of customerReplies) {
-      const ticket = db.getTicketById.get(message.ticket_id);
-      if (!ticket) continue;
-      await deliverCustomerReply(ticket, message).catch(() => {});
-      await wait(250);
-    }
+    if (shuttingDown) return;
     const cleanupMessages = db.getPendingTelegramCustomerCleanup.all(20);
     for (const cleanup of cleanupMessages) {
+      if (shuttingDown) break;
       const removed = await deleteTelegramMessage(cleanup.chat_id, cleanup.message_id);
       if (removed) {
         db.deleteTelegramCustomerCleanup.run(cleanup.chat_id, cleanup.message_id);
@@ -3108,7 +3176,8 @@ async function processDeliveryQueue() {
       }
       await wait(150);
     }
-    if (messages.length === 20 || customerReplies.length === 20 || cleanupMessages.length === 20) {
+    if (!shuttingDown && (messages.length === 20 || customerReplies.length === 20 || cleanupMessages.length === 20 ||
+        db.getPendingTelegramCustomerReplies.all(1).length)) {
       scheduleDeliveryQueue(250);
     }
   } catch (error) {
@@ -3542,6 +3611,11 @@ function status() {
       ...deliveryStats,
       inFlight: forwardingMessages.size,
       customerInFlight: customerDeliveryMessages.size,
+      customerQueuedChats: customerDeliveryQueues.size,
+      customerNextSendInMs: [...customerDeliveryNextAt.values()].reduce((soonest, nextAt) => {
+        const delay = Math.max(0, Number(nextAt || 0) - Date.now());
+        return soonest == null ? delay : Math.min(soonest, delay);
+      }, null),
       pendingMessages,
       oldestPendingSeconds,
       pendingCustomerReplies,
@@ -3559,6 +3633,7 @@ function status() {
 }
 
 async function shutdown() {
+  shuttingDown = true;
   clearTimeout(cleanupTimer);
   clearInterval(deliveryTimer);
   clearInterval(reminderTimer);
@@ -3567,6 +3642,8 @@ async function shutdown() {
   topicStatusVerificationTimers.clear();
   topicStatusUpdates.clear();
   incomingMessageQueues.clear();
+  customerDeliveryQueues.clear();
+  customerDeliveryNextAt.clear();
   cleanupTimer = null;
   deliveryTimer = null;
   reminderTimer = null;
