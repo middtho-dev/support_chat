@@ -53,7 +53,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-07-29-v6';
+const APP_CACHE_VERSION='2026-08-06-v7';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
