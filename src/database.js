@@ -81,6 +81,9 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_message_id INTE
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_attempts INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_last_error TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_customer_next_retry_at DATETIME`); } catch {}
+// A browser acknowledgement is intentionally separate from Telegram delivery:
+// web-origin tickets have no customer Telegram chat to confirm delivery to.
+try { db.exec(`ALTER TABLE messages ADD COLUMN web_delivered_at DATETIME`); } catch {}
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tickets_telegram_customer
@@ -572,6 +575,11 @@ module.exports = {
   `),
 
   getMessageById: db.prepare(`SELECT * FROM messages WHERE id = ?`),
+  markWebMessageDelivered: db.prepare(`
+    UPDATE messages
+    SET web_delivered_at = COALESCE(web_delivered_at, CURRENT_TIMESTAMP)
+    WHERE ticket_id = ? AND id = ? AND sender IN ('support', 'system')
+  `),
 
   getPendingTelegramMessages: db.prepare(`
     SELECT m.*, t.user_name, t.status AS ticket_status, t.telegram_topic_id,

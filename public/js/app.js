@@ -25,12 +25,13 @@ const newbtn=$('newbtn');
 /* ── SOCKET ── */
 const socket=io({autoConnect:false});
 socket.on('message',msg=>{
-  if(msg?.id&&S._msgs.some(existing=>existing.id===msg.id))return;
-  S._msgs.push(msg);
-  renderMsg(msg);
-  saveMsgCache();
-  scrollBot(false);
-  if(msg.sender==='support'){hideSupportTyping();playNotifSound();showBrowserNotif(msg);}
+  mergeIncomingMessages([msg],{notify:true});
+});
+socket.on('ticket_snapshot',data=>{
+  if(!data?.ticket||data.ticket.id!==S.tid)return;
+  syncTicketState(data.ticket);
+  if(Array.isArray(data.messages))mergeIncomingMessages(data.messages);
+  acknowledgeVisibleMessages(data.messages||[]);
 });
 socket.on('ticket_closed',({by})=>{markClosed();showToast(by==='support'?'Тикет закрыт оператором':by==='inactivity'?'Тикет закрыт по неактивности':'Тикет закрыт','info')});
 socket.on('ticket_orphaned',()=>{markClosed();showToast('Тема удалена — начните новый чат','err',5000);});
@@ -53,7 +54,7 @@ socket.on('disconnect',()=>setConnStatus('off'));
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-08-06-v7';
+const APP_CACHE_VERSION='2026-08-06-v8';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -105,9 +106,13 @@ async function init(){
     if(document.visibilityState==='visible'&&S.tid)refreshMessages();
     if(document.visibilityState==='visible'&&socket.connected)setConnStatus('on');
   });
+  window.addEventListener('focus',()=>{if(S.tid)refreshMessages()},{passive:true});
+  window.addEventListener('pageshow',()=>{if(S.tid)refreshMessages()},{passive:true});
   setInterval(()=>{
-    if(document.visibilityState==='visible'&&S.tid)refreshMessages();
-  },4000);
+    // Telegram Mini Apps can report a stale hidden state while still showing
+    // the webview. Keep the persisted-history reconciliation independent of it.
+    if(S.tid)refreshMessages();
+  },2000);
 
   // Bell button → request notification permission
   $('nbtn')?.addEventListener('click',requestNotifications);
@@ -274,6 +279,48 @@ function _doRender(){
 function renderMsgs(msgs){
   S._msgs=msgs.slice();S.oldestTs=msgs[0]?.created_at||null;
   _doRender();
+}
+function compareMessages(a,b){
+  const timestamp=m=>{
+    const value=String(m.created_at||'');
+    return Date.parse(value.includes('T')?value:`${value.replace(' ','T')}Z`)||0;
+  };
+  const byTime=timestamp(a)-timestamp(b);
+  return byTime||Number(a.sequence||0)-Number(b.sequence||0);
+}
+function syncTicketState(ticket){
+  if(ticket.status==='closed'&&!S.closed)markClosed();
+  else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';}
+}
+function acknowledgeVisibleMessages(messages){
+  if(!socket.connected||!S.tid||!S.token)return;
+  const ids=[...new Set(messages
+    .filter(m=>m?.id&&(m.sender==='support'||m.sender==='system'))
+    .map(m=>m.id))].slice(0,100);
+  if(ids.length)socket.emit('customer_messages_seen',{ticketId:S.tid,sessionToken:S.token,messageIds:ids});
+}
+function mergeIncomingMessages(messages,{notify=false}={}){
+  const valid=messages.filter(m=>m?.id);
+  if(!valid.length)return false;
+  const knownIds=new Set(S._msgs.map(m=>m.id));
+  const fresh=valid.filter(m=>!knownIds.has(m.id));
+  acknowledgeVisibleMessages(valid);
+  if(!fresh.length)return false;
+  const last=S._msgs[S._msgs.length-1];
+  const canAppend=!last||fresh.every(m=>compareMessages(last,m)<=0);
+  if(canAppend){
+    S._msgs.push(...fresh);
+    fresh.forEach(renderMsg);
+  }else{
+    const all=new Map(S._msgs.map(m=>[m.id,m]));
+    fresh.forEach(m=>all.set(m.id,m));
+    S._msgs=[...all.values()].sort(compareMessages);
+    _doRender();
+  }
+  saveMsgCache();
+  scrollBot(false);
+  if(notify)fresh.filter(m=>m.sender==='support').forEach(m=>{hideSupportTyping();playNotifSound();showBrowserNotif(m);});
+  return true;
 }
 function renderEmpty(){const d=document.createElement('div');d.className='emp';d.innerHTML=`<svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M29 6C16.3 6 6 15.3 6 27c0 6.3 2.9 12 7.6 16L12 52l9.5-2.8A23.5 23.5 0 0029 52c12.7 0 23-9.3 23-21S41.7 6 29 6Z"/><circle cx="20" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="29" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="38" cy="28" r="2" fill="currentColor" stroke="none"/></svg><p>Напишите ваш первый вопрос — ответим быстро</p>`;ml.appendChild(d)}
 function renderSys(txt){ml.querySelector('.emp')?.remove();const d=document.createElement('div');d.className='sysmsg';d.innerHTML=`<span>${esc(txt)}</span>`;ml.appendChild(d)}
@@ -592,17 +639,8 @@ async function refreshMessages(){
     const data=await r.json();
     if(data.orphaned){clearS();clearMsgCache();showLogin();showToast('Сессия истекла — начните новый чат','err');return;}
     const{ticket,messages}=data;
-    // Sync ticket status
-    if(ticket.status==='closed'&&!S.closed)markClosed();
-    else if(ticket.status==='open'&&S.closed){S.closed=false;ia.style.display='';cbar.classList.remove('on');hcl.style.display='';}
-    // Append only messages not yet in S._msgs
-    const knownIds=new Set(S._msgs.map(m=>m.id));
-    const fresh=messages.filter(m=>m.id&&!knownIds.has(m.id));
-    if(!fresh.length)return;
-    S._msgs.push(...fresh);
-    fresh.forEach(renderMsg);
-    saveMsgCache();
-    scrollBot(false);
+    syncTicketState(ticket);
+    mergeIncomingMessages(messages);
   }catch{}finally{_refreshMessagesPending=false;}
 }
 
