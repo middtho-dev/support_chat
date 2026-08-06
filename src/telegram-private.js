@@ -106,6 +106,7 @@ const customerDeliveryMessages = new Set();
 const customerControlMessages = new Map();
 const closingCustomerTickets = new Set();
 const incomingMessages = new Set();
+const transcriptUpdates = new Map();
 const customerMessageRates = new Map();
 const alertTimes = new Map();
 const topicStatus = new Map();
@@ -699,6 +700,109 @@ function ticketFallbackText(ticket, state = 'unassigned', extra = {}) {
   ].join('\n');
 }
 
+function transcriptClock(value) {
+  const date = parseDatabaseTime(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function transcriptAttachmentLabel(message) {
+  if (message.message_type === 'image') return '🖼 Изображение';
+  if (message.message_type === 'video') return '🎬 Видео';
+  if (message.message_type === 'audio') return '🎤 Аудио';
+  return `📎 ${message.file_name || 'Файл'}`;
+}
+
+function ticketTranscriptModel(ticket) {
+  const sourceMessages = db.getMessagesRecent.all(ticket.id, 30)
+    .filter(message => message.sender !== 'system' && !Number(message.is_auto));
+  const entries = sourceMessages.map(message => {
+    const sender = message.sender === 'user'
+      ? '👤 Клиент'
+      : `🛟 ${message.sender_name || cfg().supportName}`;
+    const content = String(message.content || '').trim();
+    const body = [
+      content ? content.slice(0, 700) : '',
+      message.file_url ? transcriptAttachmentLabel(message) : ''
+    ].filter(Boolean).join('\n');
+    return {
+      markdown: `**${markdownEscape(sender)} · ${transcriptClock(message.created_at)}**\n${markdownEscape(body || 'Сообщение')}`,
+      fallback: `${sender} · ${transcriptClock(message.created_at)}\n${body || 'Сообщение'}`
+    };
+  });
+  const maxLength = 3400;
+  while (entries.length > 1 && entries.map(entry => entry.markdown).join('\n\n').length > maxLength) {
+    entries.shift();
+  }
+  const omitted = sourceMessages.length - entries.length;
+  const state = ticket.status === 'closed' ? '✅ закрыт' : '🔵 открыт';
+  const markdown = [
+    `## 💬 Диалог · ${markdownEscape(ticket.user_name || 'Клиент')}`,
+    `Тикет \`${markdownEscape(shortId(ticket))}\` · ${state}`,
+    omitted > 0 ? `_Показаны последние ${entries.length} сообщений._` : '',
+    entries.length ? '---' : '',
+    ...entries.map(entry => entry.markdown)
+  ].filter(Boolean).join('\n\n');
+  const fallback = [
+    `💬 Диалог · ${ticket.user_name || 'Клиент'}`,
+    `Тикет ${shortId(ticket)} · ${state}`,
+    omitted > 0 ? `Показаны последние ${entries.length} сообщений.` : '',
+    ...entries.map(entry => entry.fallback)
+  ].filter(Boolean).join('\n\n');
+  return { markdown, fallback };
+}
+
+async function publishTicketTranscript(ticket, thread) {
+  const key = `${ticket.id}:${thread.operator_id}`;
+  const previous = transcriptUpdates.get(key) || Promise.resolve();
+  const update = previous.catch(() => {}).then(async () => {
+    const fresh = db.getTicketById.get(ticket.id) || ticket;
+    const model = ticketTranscriptModel(fresh);
+    const rootMessageId = Number(thread.root_message_id || 0);
+    if (rootMessageId) {
+      const updated = await editRichOrDisable(
+        thread.chat_id,
+        rootMessageId,
+        model.markdown,
+        ticketKeyboard(fresh, fresh.status === 'closed' ? 'closed' : 'open'),
+        model.fallback
+      );
+      if (updated) return { message_id: rootMessageId };
+      const removed = await deleteTelegramMessage(thread.chat_id, rootMessageId);
+      if (!removed) throw new Error('Unable to update ticket transcript');
+    }
+    const sent = await sendRichOrText(
+      thread.chat_id,
+      model.markdown,
+      {
+        message_thread_id: thread.thread_id,
+        reply_markup: ticketKeyboard(fresh, fresh.status === 'closed' ? 'closed' : 'open')
+      },
+      model.fallback
+    );
+    if (!sent?.message_id) throw new Error('Telegram did not confirm transcript delivery');
+    db.setTelegramThreadRoot.run(sent.message_id, fresh.id, thread.operator_id);
+    thread.root_message_id = sent.message_id;
+    return sent;
+  });
+  transcriptUpdates.set(key, update);
+  try {
+    return await update;
+  } finally {
+    if (transcriptUpdates.get(key) === update) transcriptUpdates.delete(key);
+  }
+}
+
+async function moveTicketTranscriptBelowMedia(ticket, thread) {
+  const rootMessageId = Number(thread.root_message_id || 0);
+  if (!rootMessageId) return false;
+  const removed = await deleteTelegramMessage(thread.chat_id, rootMessageId);
+  if (!removed) return false;
+  db.setTelegramThreadRoot.run(null, ticket.id, thread.operator_id);
+  thread.root_message_id = null;
+  return true;
+}
+
 async function sendRichOrText(chatId, markdown, options, fallbackText) {
   if (!tgEnabled()) return null;
   if (richMessagesAvailable && typeof bot.sendRichMessage === 'function') {
@@ -731,6 +835,7 @@ async function editRichOrDisable(chatId, messageId, markdown, replyMarkup, fallb
       reply_markup: replyMarkup
     });
   } catch (error) {
+    if (tgError(error).toLowerCase().includes('message is not modified')) return true;
     try {
       await bot.editMessageReplyMarkup(replyMarkup, { chat_id: chatId, message_id: messageId });
     } catch {}
@@ -1893,27 +1998,18 @@ async function ensurePrivateThread(ticket, operator) {
       topic.message_thread_id,
       null
     );
-    const options = {
-      message_thread_id: topic.message_thread_id,
-      reply_markup: ticketKeyboard(ticket, 'open')
-    };
-    const intro = await sendRichOrText(
-      operator.telegram_user_id,
-      ticketRichMarkdown(ticket, 'assigned', { operatorName: operator.display_name }),
-      options,
-      ticketFallbackText(ticket, 'assigned', { operatorName: operator.display_name })
-    );
-    if (intro) {
-      db.setTelegramThreadRoot.run(intro.message_id, ticket.id, operator.telegram_user_id);
+    const thread = db.getTelegramThreadForTicketOperator.get(ticket.id, operator.telegram_user_id);
+    const intro = await publishTicketTranscript(ticket, thread);
+    if (intro?.message_id) {
       if (settings.telegramPinNewTicketMessage) {
         bot.pinChatMessage(operator.telegram_user_id, intro.message_id, {
           message_thread_id: topic.message_thread_id
         }).catch(() => {});
       }
     }
-    const thread = db.getTelegramThreadForTicketOperator.get(ticket.id, operator.telegram_user_id);
+    const activeThread = db.getTelegramThreadForTicketOperator.get(ticket.id, operator.telegram_user_id);
     console.log(`[TG private] Created ${operator.telegram_user_id}:${topic.message_thread_id} for ${shortId(ticket)}`);
-    return thread;
+    return activeThread;
   })().finally(() => {
     observeLatency('topicCreateMs', startedAt);
     creatingThreads.delete(key);
@@ -2282,6 +2378,13 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
     io?.to(`ticket:${ticket.id}`).emit('message', message);
     io?.to('admin').emit('admin_new_message', { ticketId: ticket.id, message });
     io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
+    if (type === 'text') {
+      await publishTicketTranscript(ticket, thread);
+      await deleteTelegramMessage(msg.chat.id, msg.message_id);
+    } else {
+      await moveTicketTranscriptBelowMedia(ticket, thread);
+      await publishTicketTranscript(ticket, thread);
+    }
     await setTopicStatus(thread, ticket, cfg().telegramOpenEmoji).catch(() => {});
     deliverCustomerReply(ticket, message).catch(error => {
       console.error('[TG private] customer delivery:', tgError(error));
@@ -2331,50 +2434,52 @@ async function sendMessageToThread(ticket, message, thread) {
   const filePath = publicUploadPath(message.file_url);
   const content = String(message.content || '').trim();
   if (message.message_type === 'text') {
-    if (message.sender === 'user') {
-      return sendRichOrText(
-        thread.chat_id,
-        `### 👤 ${markdownEscape(ticket.user_name || 'Клиент')}\n\n${markdownEscape(content)}`,
-        options,
-        `👤 ${ticket.user_name || 'Клиент'}\n\n${content}`
-      );
-    }
-    return bot.sendMessage(
-      thread.chat_id,
-      `↩️ ${message.sender_name || cfg().supportName}\n\n${content}`.slice(0, 4000),
-      options
-    );
+    return publishTicketTranscript(ticket, thread);
   }
+
+  const transcriptWasMoved = await moveTicketTranscriptBelowMedia(ticket, thread);
   const captionPrefix = message.sender === 'user'
     ? `👤 ${ticket.user_name || 'Клиент'}`
     : `↩️ ${message.sender_name || cfg().supportName}`;
   const caption = `${captionPrefix}${content ? `\n\n${content}` : ''}`.slice(0, 1000);
-  if (message.message_type === 'image' && filePath) {
-    return sendWithDocumentFallback(
-      () => bot.sendPhoto(thread.chat_id, filePath, { ...options, caption }),
-      thread.chat_id,
-      filePath,
-      { ...options, caption }
-    );
+  try {
+    let sent;
+    if (message.message_type === 'image' && filePath) {
+      sent = await sendWithDocumentFallback(
+        () => bot.sendPhoto(thread.chat_id, filePath, { ...options, caption }),
+        thread.chat_id,
+        filePath,
+        { ...options, caption }
+      );
+    } else if (message.message_type === 'video' && filePath) {
+      sent = await sendWithDocumentFallback(
+        () => bot.sendVideo(thread.chat_id, filePath, { ...options, caption }),
+        thread.chat_id,
+        filePath,
+        { ...options, caption }
+      );
+    } else if (message.message_type === 'audio' && filePath) {
+      sent = await sendWithDocumentFallback(
+        () => bot.sendAudio(thread.chat_id, filePath, { ...options, caption }),
+        thread.chat_id,
+        filePath,
+        { ...options, caption }
+      );
+    } else if (filePath) {
+      sent = await bot.sendDocument(thread.chat_id, filePath, { ...options, caption });
+    } else {
+      throw new Error('Attachment file is unavailable');
+    }
+    await publishTicketTranscript(ticket, thread);
+    return sent;
+  } catch (error) {
+    if (transcriptWasMoved) {
+      publishTicketTranscript(ticket, thread).catch(recoveryError => {
+        console.warn('[TG private] transcript recovery:', tgError(recoveryError));
+      });
+    }
+    throw error;
   }
-  if (message.message_type === 'video' && filePath) {
-    return sendWithDocumentFallback(
-      () => bot.sendVideo(thread.chat_id, filePath, { ...options, caption }),
-      thread.chat_id,
-      filePath,
-      { ...options, caption }
-    );
-  }
-  if (message.message_type === 'audio' && filePath) {
-    return sendWithDocumentFallback(
-      () => bot.sendAudio(thread.chat_id, filePath, { ...options, caption }),
-      thread.chat_id,
-      filePath,
-      { ...options, caption }
-    );
-  }
-  if (filePath) return bot.sendDocument(thread.chat_id, filePath, { ...options, caption });
-  throw new Error('Attachment file is unavailable');
 }
 
 async function sendMessageToCustomer(ticket, message) {
@@ -2640,10 +2745,7 @@ async function closeTicketFromTelegram(ticket) {
   if (thread) {
     await Promise.allSettled([
       setTopicStatus(thread, fresh, settings.telegramClosedEmoji),
-      bot.sendMessage(thread.chat_id, settings.telegramClosedBySupportText, {
-        message_thread_id: thread.thread_id,
-        reply_markup: ticketKeyboard(fresh, 'closed')
-      })
+      publishTicketTranscript(fresh, thread)
     ]);
     if (settings.telegramCloseTopicOnClose) {
       await bot.closeForumTopic(thread.chat_id, thread.thread_id).catch(() => {});
@@ -2684,10 +2786,7 @@ async function notifyTicketClosed(ticket, {
   }
   if (thread) {
     await setTopicStatus(thread, fresh, cfg().telegramClosedEmoji).catch(() => {});
-    await bot.sendMessage(thread.chat_id, cfg().telegramClosedByUserText, {
-      message_thread_id: thread.thread_id,
-      reply_markup: ticketKeyboard(fresh, 'closed')
-    }).catch(() => {});
+    await publishTicketTranscript(fresh, thread).catch(() => {});
     if (cfg().telegramCloseTopicOnClose) {
       await bot.closeForumTopic(thread.chat_id, thread.thread_id).catch(() => {});
     }
@@ -2715,14 +2814,7 @@ async function autoCloseTicket(ticket, extra = {}) {
   }
   if (thread) {
     await setTopicStatus(thread, fresh, cfg().telegramClosedEmoji).catch(() => {});
-    await bot.sendMessage(
-      thread.chat_id,
-      formatTemplate(cfg().telegramAutoCloseText, extra),
-      {
-        message_thread_id: thread.thread_id,
-        reply_markup: ticketKeyboard(fresh, 'closed')
-      }
-    ).catch(() => {});
+    await publishTicketTranscript(fresh, thread).catch(() => {});
     if (cfg().telegramCloseTopicOnClose) {
       await bot.closeForumTopic(thread.chat_id, thread.thread_id).catch(() => {});
     }
