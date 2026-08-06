@@ -733,33 +733,28 @@ function ticketTranscriptModel(ticket) {
       content ? content.slice(0, 700) : '',
       message.file_url ? transcriptAttachmentLabel(message) : ''
     ].filter(Boolean).join('\n');
-    const quotedBody = markdownEscape(body || 'Сообщение').replace(/\n/g, '\n> ');
     return {
-      markdown: [
-        `> **${markdownEscape(sender)}** · _${transcriptClock(message.created_at)}_`,
-        `> ${quotedBody}`
-      ].join('\n'),
+      markdown: `**${markdownEscape(sender)}** · _${transcriptClock(message.created_at)}_\n${markdownEscape(body || 'Сообщение')}`,
       fallback: [`${sender} · ${transcriptClock(message.created_at)}`, body || 'Сообщение'].join('\n')
     };
   });
   const maxLength = 3400;
-  while (entries.length > 1 && entries.map(entry => entry.markdown).join('\n\n---\n\n').length > maxLength) {
+  while (entries.length > 1 && entries.map(entry => entry.markdown).join('\n\n').length > maxLength) {
     entries.shift();
   }
   const omitted = sourceMessages.length - entries.length;
   const state = ticket.status === 'closed' ? '✅ закрыт' : '🔵 открыт';
   const markdown = [
-    `### 💬 Диалог · ${markdownEscape(ticket.user_name || 'Клиент')}`,
+    `**💬 Диалог · ${markdownEscape(ticket.user_name || 'Клиент')}**`,
     `_Тикет \`${markdownEscape(shortId(ticket))}\` · ${state}_`,
     omitted > 0 ? `_Показаны последние ${entries.length} сообщений._` : '',
-    entries.length ? '---' : '',
-    entries.map(entry => entry.markdown).join('\n\n---\n\n')
+    entries.map(entry => entry.markdown).join('\n\n')
   ].filter(Boolean).join('\n\n');
   const fallback = [
     `💬 Диалог · ${ticket.user_name || 'Клиент'}`,
     `Тикет ${shortId(ticket)} · ${state}`,
     omitted > 0 ? `Показаны последние ${entries.length} сообщений.` : '',
-    entries.map(entry => entry.fallback).join('\n\n──────────\n\n')
+    entries.map(entry => entry.fallback).join('\n\n')
   ].filter(Boolean).join('\n\n');
   return { markdown, fallback };
 }
@@ -2460,6 +2455,13 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
     io?.to(`ticket:${ticket.id}`).emit('message', message);
     io?.to('admin').emit('admin_new_message', { ticketId: ticket.id, message });
     io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
+
+    // Client delivery is independent from the operator transcript. A slow or
+    // failed Rich-message edit must never hold back an operator's response.
+    deliverCustomerReply(ticket, message).catch(error => {
+      console.error('[TG private] customer delivery:', tgError(error));
+    });
+
     if (type === 'text') {
       await publishTicketTranscript(ticket, thread);
       await deleteTelegramMessage(msg.chat.id, msg.message_id);
@@ -2468,9 +2470,6 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
       await publishTicketTranscript(ticket, thread);
     }
     await setTopicStatus(thread, ticket, cfg().telegramOpenEmoji).catch(() => {});
-    deliverCustomerReply(ticket, message).catch(error => {
-      console.error('[TG private] customer delivery:', tgError(error));
-    });
     push.send(ticket.id, rawText || fileName || 'Новое сообщение').catch(() => {});
   } finally {
     incomingMessages.delete(incomingKey);
