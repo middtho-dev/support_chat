@@ -774,6 +774,11 @@ io.on('connection', (socket) => {
         telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
       };
       emitToSettingsManagers('admin_settings_updated', visibleCfg, socket.id);
+      if (typeof telegram.refreshOpenTicketTranscripts === 'function') {
+        telegram.refreshOpenTicketTranscripts().catch(error => {
+          console.warn('[Settings] Telegram Rich refresh:', error?.message || error);
+        });
+      }
       maintenance.refreshStatus({ alertDisk: false }).then(status => {
         io.to('admin').emit('maintenance_updated', status);
       }).catch(() => {});

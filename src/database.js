@@ -513,14 +513,15 @@ module.exports = {
   getMessagesRecent: db.prepare(`
     SELECT * FROM (
       SELECT m.*,
+        m.rowid        AS sequence,
         r.content      AS reply_to_content,
         r.sender_name  AS reply_to_sender_name,
         r.message_type AS reply_to_type,
         r.file_name    AS reply_to_file_name
       FROM messages m
       LEFT JOIN messages r ON r.id = m.reply_to_id
-      WHERE m.ticket_id = ? ORDER BY m.created_at DESC LIMIT ?
-    ) ORDER BY created_at ASC
+      WHERE m.ticket_id = ? ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?
+    ) ORDER BY created_at ASC, sequence ASC
   `),
 
   // Returns N messages strictly before a timestamp (ASC order) — "load older"

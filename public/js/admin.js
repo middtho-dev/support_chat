@@ -766,6 +766,24 @@ function settingsCards(s, topicModeControl) {
     ),
     settingCard(
       'telegram',
+      'Rich-диалог оператора',
+      'Внешний вид единого сообщения с историей тикета. После сохранения открытые тикеты перерисуются автоматически.',
+      input('set-tg-rich-title','Заголовок',s.telegramRichTranscriptTitle || '💬 Диалог · {name}') +
+      input('set-tg-rich-subtitle','Подзаголовок',s.telegramRichTranscriptSubtitle ?? 'Тикет {shortId} · {status}') +
+      input('set-tg-rich-max-messages','Сколько последних реплик показывать',s.telegramRichTranscriptMaxMessages ?? 8,'number','min="1" max="30"') +
+      input('set-tg-rich-max-chars','Максимум символов в одной реплике',s.telegramRichTranscriptMessageMaxChars ?? 360,'number','min="80" max="700"') +
+      check('set-tg-rich-author','Показывать автора реплики',s.telegramRichTranscriptShowAuthor ?? true) +
+      check('set-tg-rich-time','Показывать время реплики',s.telegramRichTranscriptShowTime ?? true) +
+      select('set-tg-rich-separator','Разделять реплики',s.telegramRichTranscriptSeparator || 'space',[
+        {value:'space',label:'Свободным отступом'},
+        {value:'dots',label:'Строкой с точками'},
+        {value:'line',label:'Тонкой линией'}
+      ]),
+      'blue',
+      'rich диалог история реплики текст автор время оформление'
+    ),
+    settingCard(
+      'telegram',
       'Системные тексты Telegram',
       'Сообщения о закрытии и неактивности.',
       area('set-tg-new-ticket','Карточка нового тикета (legacy)',s.telegramNewTicketText || '',5) +
@@ -797,7 +815,7 @@ function renderSettings() {
     </div>
     <div id="settings-grid" class="grid settings-grid">${settingsCards(s, topicModeControl).join('')}</div>
     <div id="settings-empty" class="settings-empty">По этому запросу настроек нет.</div>
-    <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
+    <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {status}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
     <div class="settings-savebar">
       <div><b id="settings-save-state">Изменений нет</b><span id="settings-save-time">${S.settingsLastSavedAt ? `Сохранено ${esc(fmtStatusDate(S.settingsLastSavedAt))}` : 'Настройки загружены с сервера'}</span></div>
       <button id="settings-discard" class="ghost" disabled>Отменить</button>
@@ -815,6 +833,7 @@ function settingsPayload() {
     backupEnabled: checked('set-backup-enabled'), backupIntervalHours: num('set-backup-interval'), backupRetention: num('set-backup-retention'), backupUploadsEnabled: checked('set-backup-uploads'), uploadCleanupEnabled: checked('set-upload-cleanup'), uploadCleanupIntervalHours: num('set-upload-cleanup-interval'), uploadOrphanGraceHours: num('set-upload-orphan-grace'), diskMonitoringEnabled: checked('set-disk-monitoring'), diskWarnPercent: num('set-disk-warning'), diskCriticalPercent: num('set-disk-critical'), operationalAlertsEnabled: checked('set-operational-alerts'), operationalAlertCooldownMinutes: num('set-operational-alert-cooldown'),
     telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: checked('set-tg-auto-assign'), telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramUnansweredReminderEnabled: checked('set-tg-reminders'), telegramUnansweredReminderMinutes: num('set-tg-reminder-first'), telegramUnansweredRepeatMinutes: num('set-tg-reminder-repeat'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
     telegramCustomerEnabled: checked('set-tg-customer-enabled'), telegramCustomerFilesEnabled: checked('set-tg-customer-files'), telegramCustomerDeliverReplies: checked('set-tg-customer-replies'), telegramCustomerNewTicketText: val('set-tg-customer-new'), telegramCustomerClosedText: val('set-tg-customer-closed'), telegramCustomerClosedByUserText: val('set-tg-customer-closed-user'), telegramCustomerClosedBySupportText: val('set-tg-customer-closed-support'), telegramCustomerClosedBySystemText: val('set-tg-customer-closed-system'), telegramCustomerClosePromptText: val('set-tg-customer-close-prompt'), telegramCustomerCloseButtonText: val('set-tg-customer-close-btn'), telegramCustomerNewButtonText: val('set-tg-customer-new-btn'), telegramCustomerSendCloseButtonText: val('set-tg-customer-send-close-btn'),
+    telegramRichTranscriptTitle: val('set-tg-rich-title'), telegramRichTranscriptSubtitle: val('set-tg-rich-subtitle'), telegramRichTranscriptMaxMessages: num('set-tg-rich-max-messages'), telegramRichTranscriptMessageMaxChars: num('set-tg-rich-max-chars'), telegramRichTranscriptShowAuthor: checked('set-tg-rich-author'), telegramRichTranscriptShowTime: checked('set-tg-rich-time'), telegramRichTranscriptSeparator: val('set-tg-rich-separator'),
     telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'),
     telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
   };
