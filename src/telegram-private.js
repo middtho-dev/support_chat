@@ -173,12 +173,15 @@ const pollingStats = {
   lastError: null
 };
 const POLLING_ALERT_AFTER_ERRORS = 3;
+const INCOMING_MESSAGE_NETWORK_ATTEMPTS = 3;
+const REMINDER_ALERT_AFTER_FAILURES = 3;
 const reminderStats = {
   sent: 0,
   failed: 0,
   lastSentAt: null,
   lastError: null
 };
+const reminderFailureCounts = new Map();
 const latencySamples = {
   topicCreateMs: [],
   deliveryMs: [],
@@ -259,6 +262,45 @@ function shortId(ticket) {
 
 function tgError(error) {
   return String(error?.response?.body?.description || error?.message || error || 'unknown error');
+}
+
+// A transport failure means that Telegram did not return a usable response.
+// It is normally short-lived (DNS/socket reset/timeout), unlike a Telegram API
+// validation error. Retrying only these cases keeps normal errors visible while
+// protecting a received update from being lost because of one failed request.
+function isTransientTelegramNetworkError(error) {
+  const details = tgError(error).toLowerCase();
+  return details.includes('fetch failed') ||
+    details.includes('http timeout') ||
+    details.includes('network error') ||
+    details.includes('network request failed') ||
+    details.includes('socket hang up') ||
+    details.includes('econnreset') ||
+    details.includes('econnrefused') ||
+    details.includes('etimedout') ||
+    details.includes('eai_again') ||
+    details.includes('enotfound');
+}
+
+async function handleIncomingMessageWithRetry(msg) {
+  let lastError;
+  for (let attempt = 1; attempt <= INCOMING_MESSAGE_NETWORK_ATTEMPTS; attempt++) {
+    try {
+      return await handleMessage(msg);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientTelegramNetworkError(error) || attempt === INCOMING_MESSAGE_NETWORK_ATTEMPTS) {
+        throw error;
+      }
+      const delayMs = 250 * attempt;
+      console.warn(
+        `[TG private] transient message handling failure (${attempt}/${INCOMING_MESSAGE_NETWORK_ATTEMPTS}), retrying in ${delayMs}ms:`,
+        tgError(error)
+      );
+      await wait(delayMs);
+    }
+  }
+  throw lastError;
 }
 
 function isPollingConflict(error) {
@@ -1092,8 +1134,13 @@ async function sendRichOrText(chatId, markdown, options, fallbackText) {
       const description = tgError(error).toLowerCase();
       if (description.includes('method not found') || description.includes('rich')) {
         richMessagesAvailable = false;
+        console.warn('[TG private] Rich message unavailable, using text fallback:', tgError(error));
+      } else {
+        // A transport failure is not evidence that Rich messages are unsupported.
+        // Let the caller's durable retry path retry the same message instead of
+        // immediately sending a different fallback message.
+        throw error;
       }
-      console.warn('[TG private] Rich message fallback:', tgError(error));
     }
   }
   return bot.sendMessage(chatId, fallbackText, options);
@@ -2081,13 +2128,26 @@ async function processUnansweredReminders() {
           .filter(result => result.status === 'rejected')
           .map(result => tgError(result.reason))
           .join('; ') || `Reminder failed for ${shortId(ticket)}`;
-        await operationalAlert(
-          `telegram-reminder-${ticket.id}`,
-          `Не доставлено напоминание по тикету ${shortId(ticket)}`,
-          reminderStats.lastError
-        );
+        const failures = (reminderFailureCounts.get(ticket.id) || 0) + 1;
+        reminderFailureCounts.set(ticket.id, failures);
+        // A reminder is retried by this durable scheduler every 30 seconds.
+        // Do not page operators for one temporary Telegram transport failure;
+        // report only a sustained delivery problem.
+        if (failures >= REMINDER_ALERT_AFTER_FAILURES) {
+          await operationalAlert(
+            `telegram-reminder-${ticket.id}`,
+            `Не доставлено напоминание по тикету ${shortId(ticket)} после ${failures} попыток`,
+            reminderStats.lastError
+          );
+        } else {
+          console.warn(
+            `[TG private] reminder delivery (${failures}/${REMINDER_ALERT_AFTER_FAILURES}) for ${shortId(ticket)}:`,
+            reminderStats.lastError
+          );
+        }
         continue;
       }
+      reminderFailureCounts.delete(ticket.id);
       db.markTelegramTicketReminded.run(ticket.id);
       reminderStats.sent++;
       reminderStats.lastSentAt = new Date().toISOString();
@@ -2708,7 +2768,7 @@ async function handleMessage(msg) {
 function queueIncomingMessage(msg) {
   const key = String(msg?.chat?.id || msg?.from?.id || 'unknown');
   const previous = incomingMessageQueues.get(key) || Promise.resolve();
-  const task = previous.catch(() => {}).then(() => handleMessage(msg));
+  const task = previous.catch(() => {}).then(() => handleIncomingMessageWithRetry(msg));
   incomingMessageQueues.set(key, task);
   task.finally(() => {
     if (incomingMessageQueues.get(key) === task) incomingMessageQueues.delete(key);
