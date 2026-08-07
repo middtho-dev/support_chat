@@ -31,6 +31,7 @@ let nextTopicId = 500;
 let messageId = 10;
 let stopPollingCalls = 0;
 let botOptions = null;
+let richMessageFailuresRemaining = 0;
 const requests = [];
 
 class FakeBot {
@@ -70,6 +71,10 @@ class FakeBot {
     return Promise.resolve({ message_id: sentMessageId });
   }
   sendRichMessage(chatId, payload, options) {
+    if (richMessageFailuresRemaining > 0) {
+      richMessageFailuresRemaining--;
+      return Promise.reject(new Error('EFATAL: fetch failed'));
+    }
     const sentMessageId = ++messageId;
     rich.push({
       chatId: String(chatId),
@@ -935,6 +940,21 @@ test('a transient Telegram fetch error alerts only after repeated failures', asy
     sent.filter(item => item.text.includes('Контроль доставки чата')).length,
     alertsBefore + 1
   );
+});
+
+test('an incoming command retries a transient Telegram transport failure', async () => {
+  db.clearTelegramOperatorDashboard.run('7001');
+  richMessageFailuresRemaining = 1;
+
+  await fakeBot.handlers.message({
+    message_id: 9901,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    text: '/queue'
+  });
+
+  assert.equal(richMessageFailuresRemaining, 0);
+  assert.ok(db.getTelegramOperatorDashboard.get('7001'));
 });
 
 test('a getUpdates conflict keeps polling available without sending a Telegram alert', async () => {
