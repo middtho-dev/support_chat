@@ -51,7 +51,11 @@ io.engine.on('connection_error', error => {
 telegram.init(io, {
   scheduleWelcomeMessages,
   scheduleOperatorWaitMessage,
-  cancelOperatorWait
+  cancelOperatorWait,
+  getControlCenterStatus: () => ({
+    health: detailedHealth(),
+    maintenance: maintenance.status()
+  })
 });
 push.init();
 
