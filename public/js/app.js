@@ -23,7 +23,13 @@ const tst=$('tst'),sdwn=$('sdwn');
 const newbtn=$('newbtn');
 
 /* ── SOCKET ── */
-const socket=io({autoConnect:false});
+const socket=io({
+  autoConnect:false,
+  transports:['websocket','polling'],
+  rememberUpgrade:true,
+  timeout:12000,
+  reconnectionDelayMax:10000
+});
 socket.on('message',msg=>{
   mergeIncomingMessages([msg],{notify:true});
 });
@@ -50,11 +56,16 @@ socket.on('connect',()=>{
   }
   _socketEverConnected=true;
 });
-socket.on('disconnect',()=>setConnStatus('off'));
+socket.on('disconnect',()=>{setConnStatus('connecting');if(S.tid)refreshMessages()});
+socket.on('connect_error',()=>{
+  // If a CDN blocks WebSocket, the next attempt starts with HTTP polling.
+  socket.io.opts.transports=['polling','websocket'];
+  if(S.tid)refreshMessages();
+});
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-08-06-v9';
+const APP_CACHE_VERSION='2026-09-02-cdn1';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
@@ -409,13 +420,30 @@ function renderMsg(msg){
 }
 
 /* ── SEND ── */
+async function submitCustomerMessage(payload){
+  if(socket.connected){
+    try{
+      return await new Promise((resolve,reject)=>{
+        socket.timeout(8000).emit('send_message',payload,(error,result)=>error?reject(error):resolve(result));
+      });
+    }catch{}
+  }
+  const response=await fetch('/api/session/message',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Cache-Control':'no-cache'},
+    cache:'no-store',
+    body:JSON.stringify(payload)
+  });
+  const result=await response.json().catch(()=>({error:`HTTP ${response.status}`}));
+  if(!response.ok&&!result.error)result.error=`HTTP ${response.status}`;
+  return result;
+}
 async function send(){
   if(S.closed||S.uploading)return;
   const txt=ti.value.trim(),file=S.file;
   if(!txt&&!file)return;
   const maxLength=file?1000:4000;
   if(txt.length>maxLength){showToast(`Слишком длинное сообщение — максимум ${maxLength} символов`,'err');return;}
-  if(!socket.connected){showToast('Нет соединения — попробуйте позже','err');updSend();return;}
   sndbtn.disabled=true;
   let fu=S.pendingSend?.fileUrl||null,fn=S.pendingSend?.fileName||null,fm=S.pendingSend?.fileMime||null,mt=S.pendingSend?.messageType||'text';
   if(file&&!S.pendingSend){
@@ -426,16 +454,23 @@ async function send(){
   }
   const payload=S.pendingSend||{ticketId:S.tid,sessionToken:S.token,content:txt||null,fileUrl:fu,fileName:fn,fileMime:fm,messageType:mt,clientMessageId:crypto.randomUUID()};
   S.pendingSend=payload;
-  socket.timeout(15000).emit('send_message',payload,(timeoutError,ack)=>{
-    if(timeoutError){showToast('Нет подтверждения доставки. Нажмите отправить ещё раз — дубля не будет.','err',6000);sndbtn.disabled=false;updSend();return;}
+  try{
+    const ack=await submitCustomerMessage(payload);
     if(ack?.error){
       if(ack.error==='Rate limit')showToast(`Слишком много сообщений — подождите ${ack.retryAfter||60}с`,'err');
       else if(ack.error==='Ticket is closed')showToast('Тикет закрыт','info');
       else if(ack.error==='Message too long')showToast(`Слишком длинное сообщение — максимум ${ack.maxLength||4000} символов`,'err');
       else showToast('Ошибка отправки','err');
-    }else{S.pendingSend=null;ti.value='';resize();clearFile();closeEp();clearDraft();}
+    }else{
+      if(ack?.message)mergeIncomingMessages([ack.message]);
+      S.pendingSend=null;ti.value='';resize();clearFile();closeEp();clearDraft();
+      if(!socket.connected)setConnStatus('fallback');
+    }
+  }catch{
+    showToast('Нет связи с сервером. Нажмите отправить ещё раз — дубля не будет.','err',6000);
+  }finally{
     sndbtn.disabled=false;updSend();
-  });
+  }
 }
 sndbtn.addEventListener('click',send);
 ti.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
@@ -628,7 +663,8 @@ function setConnStatus(s){
   if(s==='on'){
     if(!CFG.offhoursEnabled||CFG.online){newTxt='онлайн';dotBg='var(--green)';dotAnim='blink 2.5s ease infinite';}
     else{newTxt=`ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 МСК`;dotBg='#6b7280';}
-  }else if(s==='connecting'){newTxt='подключение...';dotBg='#f59e0b';}
+  }else if(s==='fallback'){newTxt='онлайн · резерв';dotBg='#f59e0b';}
+  else if(s==='connecting'){newTxt='подключение...';dotBg='#f59e0b';}
   else{newTxt='нет соединения';dotBg='var(--red)';}
   dot.style.background=dotBg;dot.style.animation=dotAnim;
   if(txt.textContent!==newTxt){
@@ -650,7 +686,8 @@ async function refreshMessages(){
     const{ticket,messages}=data;
     syncTicketState(ticket);
     mergeIncomingMessages(messages);
-  }catch{}finally{_refreshMessagesPending=false;}
+    if(!socket.connected)setConnStatus('fallback');
+  }catch{if(!socket.connected)setConnStatus('off')}finally{_refreshMessagesPending=false;}
 }
 
 /* ── SUPPORT TYPING ── */
