@@ -25,6 +25,7 @@ const newbtn=$('newbtn');
 /* ── SOCKET ── */
 const socket=io({
   autoConnect:false,
+  path:'/api/realtime/',
   transports:['websocket','polling'],
   rememberUpgrade:true,
   timeout:12000,
@@ -65,7 +66,7 @@ socket.on('connect_error',()=>{
 socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 
 /* ── SESSION ── */
-const APP_CACHE_VERSION='2026-09-02-cdn1';
+const APP_CACHE_VERSION='2026-09-02-cdn2';
 const SK='sc_v4';
 const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
 const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};

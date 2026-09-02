@@ -35,7 +35,7 @@ ${domain} {
 
     # Engine.IO polling and WebSocket upgrades must never be cached or
     # buffered by Caddy or an upstream CDN.
-    @realtime path /socket.io/*
+    @realtime path /api/realtime/*
     header @realtime {
         Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate"
         Pragma "no-cache"
