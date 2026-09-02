@@ -1243,6 +1243,7 @@ function renderMaintenance() {
   const backupLabel = !m.config?.backupEnabled ? 'Выключен' : m.lastBackupError ? 'Ошибка' : m.backupOverdue ? 'Просрочен' : m.lastBackupAt ? 'Готов' : 'Ожидается';
   const tg = S.systemHealth?.telegram;
   const tgDelivery = tg?.delivery || {};
+  const tgReminders = tg?.reminders || {};
   const telegramHealthy = !!(tg?.configured && tg?.enabled && tg?.connected &&
     (tg?.mode !== 'private' || tg?.polling?.owner));
   const telegramBacklog = Number(tgDelivery.pendingIncomingMessages || 0) +
@@ -1276,6 +1277,7 @@ function renderMaintenance() {
         <div class="health-stat ${telegramBacklog ? 'warning' : 'ok'}"><span>Очередь</span><b>${telegramBacklog}</b><small>входящие ${Number(tgDelivery.pendingIncomingMessages || 0)} · оператору ${Number(tgDelivery.pendingMessages || 0)} · клиенту ${Number(tgDelivery.pendingCustomerReplies || 0)}</small></div>
         <div class="health-stat ${Number(tg?.polling?.conflicts || 0) ? 'warning' : 'ok'}"><span>Polling</span><b>${tg?.mode !== 'private' || tg?.polling?.owner ? 'активен' : 'ожидает'}</b><small>конфликтов ${Number(tg?.polling?.conflicts || 0)}</small></div>
         <div class="health-stat ${Number(tgDelivery.mediaFailures || 0) ? 'warning' : 'ok'}"><span>Медиа</span><b>${Number(tgDelivery.mediaFailures || 0)}</b><small>ошибок загрузки</small></div>
+        <div class="health-stat ${tgReminders.pausedOutsideWorkHours ? '' : 'ok'}"><span>Напоминания</span><b>${!tgReminders.enabled ? 'выключены' : tgReminders.pausedOutsideWorkHours ? 'пауза' : 'активны'}</b><small>${Number(tgReminders.workStartHour ?? 0)}:00–${Number(tgReminders.workEndHour ?? 0)}:00 · ${esc(tgReminders.timezone || '—')}</small></div>
       </div>
       <dl class="health-details">
         <div><dt>Последняя успешная доставка</dt><dd>${esc(fmtStatusDate(tgDelivery.lastSuccessAt))}</dd></div>

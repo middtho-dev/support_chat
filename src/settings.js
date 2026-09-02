@@ -411,4 +411,39 @@ function formatTemplate(template, values = {}) {
   return String(template || '').replace(/\{(\w+)\}/g, (match, key) => values[key] ?? match);
 }
 
-module.exports = { DEFAULTS, loadSettings, saveSettings, formatTemplate, ensureDefaults };
+function workHourAt(date = new Date(), timeZone = DEFAULTS.timezone) {
+  const safeDate = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(safeDate.getTime())) return NaN;
+  const zone = String(timeZone || DEFAULTS.timezone);
+  try {
+    const part = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      hour12: false,
+      timeZone: zone
+    }).formatToParts(safeDate).find(item => item.type === 'hour');
+    return Number(part?.value);
+  } catch {
+    return workHourAt(safeDate, DEFAULTS.timezone);
+  }
+}
+
+function isWithinWorkHours(cfg = loadSettings(), date = new Date()) {
+  const hour = workHourAt(date, cfg.timezone);
+  const start = Number(cfg.workStartHour);
+  const end = Number(cfg.workEndHour);
+  if (!Number.isFinite(hour) || !Number.isFinite(start) || !Number.isFinite(end)) return false;
+  if (start === end) return true;
+  // A range such as 22:00-06:00 crosses midnight.
+  return start < end
+    ? hour >= start && hour < end
+    : hour >= start || hour < end;
+}
+
+module.exports = {
+  DEFAULTS,
+  loadSettings,
+  saveSettings,
+  formatTemplate,
+  ensureDefaults,
+  isWithinWorkHours
+};

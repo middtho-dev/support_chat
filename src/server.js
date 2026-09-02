@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const db = require('./database');
 const telegram = require('./telegram');
 const push = require('./push');
-const { loadSettings, saveSettings } = require('./settings');
+const { loadSettings, saveSettings, isWithinWorkHours } = require('./settings');
 const { createMaintenance } = require('./maintenance');
 const uuidv4 = () => crypto.randomUUID();
 
@@ -408,16 +408,6 @@ app.post('/api/admin/maintenance/cleanup', async (req, res) => {
     res.status(500).json({ error: error?.message || 'Cleanup failed', status: maintenance.status() });
   }
 });
-
-function isWithinWorkHours(cfg = loadSettings()) {
-  let hour;
-  try {
-    hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: cfg.timezone }).format(new Date()));
-  } catch {
-    hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Europe/Moscow' }).format(new Date()));
-  }
-  return hour >= cfg.workStartHour && hour < cfg.workEndHour;
-}
 
 function publicConfig() {
   const cfg = loadSettings();

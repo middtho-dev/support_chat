@@ -514,16 +514,16 @@ module.exports = {
           SELECT m.created_at
           FROM messages m
           WHERE m.ticket_id = t.id
-            AND m.sender != 'system'
+            AND (m.sender != 'system' OR m.message_type = 'close_prompt')
             AND COALESCE(m.is_auto, 0) = 0
           ORDER BY m.created_at DESC, m.rowid DESC
           LIMIT 1
         ), t.created_at) AS waiting_since,
         COALESCE((
-          SELECT m.sender
+          SELECT CASE WHEN m.message_type = 'close_prompt' THEN 'support' ELSE m.sender END
           FROM messages m
           WHERE m.ticket_id = t.id
-            AND m.sender != 'system'
+            AND (m.sender != 'system' OR m.message_type = 'close_prompt')
             AND COALESCE(m.is_auto, 0) = 0
           ORDER BY m.created_at DESC, m.rowid DESC
           LIMIT 1
