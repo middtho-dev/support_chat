@@ -180,6 +180,21 @@ db.exec(`
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
   );
 
+  -- Telegram advances the getUpdates offset before application-side media
+  -- processing has necessarily completed. Keep the raw message until all DB
+  -- writes and file downloads succeed so a restart cannot lose the update.
+  CREATE TABLE IF NOT EXISTS telegram_incoming_message_queue (
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, message_id)
+  );
+
   CREATE TABLE IF NOT EXISTS telegram_ticket_notifications (
     ticket_id TEXT NOT NULL,
     operator_id TEXT NOT NULL,
@@ -225,6 +240,8 @@ db.exec(`
     ON messages(telegram_message_id, telegram_next_retry_at, created_at);
   CREATE INDEX IF NOT EXISTS idx_operator_message_cleanup_next
     ON telegram_operator_message_cleanup_queue(next_retry_at, created_at);
+  CREATE INDEX IF NOT EXISTS idx_telegram_incoming_message_next
+    ON telegram_incoming_message_queue(next_retry_at, created_at);
 `);
 
 // Push subscriptions
@@ -338,6 +355,33 @@ module.exports = {
   markTelegramCustomerCleanupAttempt: db.prepare(`
     UPDATE telegram_customer_cleanup_queue
     SET attempts = attempts + 1, last_error = ?, next_retry_at = datetime('now', ?)
+    WHERE chat_id = ? AND message_id = ?
+  `),
+  enqueueTelegramIncomingMessage: db.prepare(`
+    INSERT OR IGNORE INTO telegram_incoming_message_queue
+      (chat_id, message_id, payload, next_retry_at)
+    VALUES (?, ?, ?, datetime('now', '+30 seconds'))
+  `),
+  getTelegramIncomingMessage: db.prepare(`
+    SELECT * FROM telegram_incoming_message_queue
+    WHERE chat_id = ? AND message_id = ?
+  `),
+  getPendingTelegramIncomingMessages: db.prepare(`
+    SELECT * FROM telegram_incoming_message_queue
+    WHERE next_retry_at <= CURRENT_TIMESTAMP
+    ORDER BY created_at ASC
+    LIMIT ?
+  `),
+  completeTelegramIncomingMessage: db.prepare(`
+    DELETE FROM telegram_incoming_message_queue
+    WHERE chat_id = ? AND message_id = ?
+  `),
+  markTelegramIncomingMessageAttempt: db.prepare(`
+    UPDATE telegram_incoming_message_queue
+    SET attempts = attempts + 1,
+      last_error = ?,
+      next_retry_at = datetime('now', ?),
+      updated_at = CURRENT_TIMESTAMP
     WHERE chat_id = ? AND message_id = ?
   `),
 
