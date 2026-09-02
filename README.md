@@ -193,11 +193,12 @@ HTTPS endpoint, а новые сообщения синхронизируютс�
 Для минимальной задержки настройте CDN следующим образом:
 
 - включите WebSocket proxying;
-- создайте правило **Bypass cache** для `/socket.io/*` и `/api/*`;
+- создайте правило **Bypass cache** для `/api/*` (realtime работает на
+  `/api/realtime/*`);
 - отключите buffering, HTML/JS rewriting и challenge-страницы для
-  `/socket.io/*`;
+  `/api/realtime/*`;
 - не изменяйте query string параметров `EIO`, `transport`, `sid` и `t`;
-- разрешите методы `GET` и `POST` на `/socket.io/*` и `/api/*`.
+- разрешите методы `GET` и `POST` на `/api/*`.
 
 Даже без этих исключений клиентские сообщения продолжат ходить через HTTPS,
 но индикатор набора текста и мгновенные события будут заменены резервным

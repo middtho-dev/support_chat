@@ -12,6 +12,7 @@ const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#08
 const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, systemHealth: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
 const socket = io({
   autoConnect: false,
+  path: '/api/realtime/',
   transports: ['websocket', 'polling'],
   rememberUpgrade: true,
   timeout: 12000,
@@ -1248,6 +1249,8 @@ function renderMaintenance() {
     Number(tgDelivery.pendingMessages || 0) + Number(tgDelivery.pendingCustomerReplies || 0);
   const telegramClass = !tg?.configured || !tg?.enabled ? 'warning' : telegramHealthy && !telegramBacklog ? 'ok' : 'critical';
   const telegramLabel = !tg?.configured ? 'Не настроен' : !tg?.enabled ? 'Выключен' : telegramHealthy ? 'На связи' : 'Нет связи';
+  const realtime = S.systemHealth?.realtime || {};
+  const realtimeTransports = realtime.transports || {};
   root.innerHTML = `<div class="section maintenance-section">
     <div class="maintenance-title"><div><h2>Состояние системы</h2><p>Резервные копии, загрузки и состояние диска обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
@@ -1255,6 +1258,16 @@ function renderMaintenance() {
       <div class="health-stat ${diskClass}"><span>Диск</span><b>${m.disk ? `${m.disk.usedPercent}%` : '—'}</b><small>${m.disk ? `${fmtBytes(m.disk.freeBytes)} свободно` : 'нет данных'}</small></div>
       <div class="health-stat"><span>Загрузки</span><b>${Number(m.uploads?.files || 0)}</b><small>${fmtBytes(m.uploads?.bytes)}</small></div>
       <div class="health-stat"><span>Очистка</span><b>${Number(m.lastCleanupRemoved || 0)}</b><small>${esc(fmtStatusDate(m.lastCleanupAt))}</small></div>
+    </div>
+    <div class="card">
+      <h3>CDN и realtime</h3>
+      <div class="maintenance-summary">
+        <div class="health-stat ok"><span>Endpoint</span><b>${esc(realtime.path || '/api/realtime/')}</b><small>CDN-safe API path</small></div>
+        <div class="health-stat"><span>Подключено</span><b>${Number(realtime.connectedClients || 0)}</b><small>активных клиентов</small></div>
+        <div class="health-stat"><span>Транспорт</span><b>WS ${Number(realtimeTransports.websocket || 0)}</b><small>polling ${Number(realtimeTransports.polling || 0)}</small></div>
+        <div class="health-stat ${Number(realtime.connectionErrors || 0) ? 'warning' : 'ok'}"><span>Ошибки</span><b>${Number(realtime.connectionErrors || 0)}</b><small>со старта сервера</small></div>
+      </div>
+      ${realtime.lastError ? `<div class="health-error">${esc(realtime.lastError)}</div>` : ''}
     </div>
     <div class="card">
       <h3>Telegram и доставка</h3>
