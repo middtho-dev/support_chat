@@ -8,11 +8,34 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'support-settings-test-'));
 process.env.DB_PATH = path.join(root, 'support.db');
 
 const db = require('../src/database');
-const { loadSettings, saveSettings } = require('../src/settings');
+const { loadSettings, saveSettings, isWithinWorkHours } = require('../src/settings');
 
 test.after(() => {
   if (db.db.open) db.db.close();
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('working hours support regular, overnight, and invalid-timezone schedules', () => {
+  assert.equal(isWithinWorkHours(
+    { timezone: 'UTC', workStartHour: 8, workEndHour: 23 },
+    new Date('2026-09-02T10:00:00Z')
+  ), true);
+  assert.equal(isWithinWorkHours(
+    { timezone: 'UTC', workStartHour: 8, workEndHour: 23 },
+    new Date('2026-09-02T02:00:00Z')
+  ), false);
+  assert.equal(isWithinWorkHours(
+    { timezone: 'UTC', workStartHour: 22, workEndHour: 6 },
+    new Date('2026-09-02T23:00:00Z')
+  ), true);
+  assert.equal(isWithinWorkHours(
+    { timezone: 'UTC', workStartHour: 22, workEndHour: 6 },
+    new Date('2026-09-02T12:00:00Z')
+  ), false);
+  assert.doesNotThrow(() => isWithinWorkHours(
+    { timezone: 'Invalid/Timezone', workStartHour: 0, workEndHour: 24 },
+    new Date('2026-09-02T12:00:00Z')
+  ));
 });
 
 test('maintenance and alert settings persist and are normalized', () => {

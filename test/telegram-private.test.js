@@ -174,6 +174,7 @@ const fakeBot = telegram.init(
     }
   }
 );
+saveSettings({ workStartHour: 0, workEndHour: 24 });
 
 test.after(async () => {
   await telegram.shutdown();
@@ -456,6 +457,63 @@ test('unanswered reminder is loud and stops after a support response', async () 
   assert.equal(await telegram.processUnansweredReminders(), 0);
 });
 
+test('unanswered reminders pause outside configured working hours', async () => {
+  const previous = saveSettings({});
+  const id = 'offhours-reminder-ticket-000000000000';
+  try {
+    saveSettings({ timezone: 'UTC', workStartHour: 8, workEndHour: 23 });
+    db.createTicket.run(id, 'Ночной клиент', 'session-offhours-reminder');
+    db.assignTicket.run('7001', id);
+    db.db.prepare("UPDATE tickets SET created_at=datetime('now','-10 minutes') WHERE id=?").run(id);
+
+    assert.equal(
+      await telegram.processUnansweredReminders(new Date('2026-09-02T02:00:00Z')),
+      0
+    );
+    assert.equal(db.getTelegramReminder.get(id, '7001'), undefined);
+    const reminderHealth = telegram.status(new Date('2026-09-02T02:00:00Z')).reminders;
+    assert.equal(reminderHealth.workHoursOnly, true);
+    assert.equal(reminderHealth.pausedOutsideWorkHours, true);
+    assert.equal(reminderHealth.timezone, 'UTC');
+  } finally {
+    saveSettings(previous);
+    db.closeTicket.run(id);
+  }
+});
+
+test('a close-ticket proposal counts as the latest support action', async () => {
+  const id = 'close-prompt-reminder-ticket-00000000';
+  db.createTicket.run(id, 'Клиент с предложением', 'session-close-prompt-reminder');
+  db.assignTicket.run('7001', id);
+  db.saveMessage.run(
+    'close-prompt-reminder-user-message',
+    id,
+    'user',
+    'Клиент',
+    'Спасибо, проверяю',
+    'text',
+    null,
+    null,
+    null,
+    null,
+    null
+  );
+  db.db.prepare("UPDATE messages SET created_at=datetime('now','-10 minutes') WHERE id=?")
+    .run('close-prompt-reminder-user-message');
+  assert.ok(db.getTicketsAwaitingTelegramReminder.all('-3 minutes', '-5 minutes', 100)
+    .some(ticket => ticket.id === id));
+
+  await telegram.sendCustomerClosePrompt(db.getTicketById.get(id));
+
+  const prompt = db.getMessages.all(id).find(message => message.message_type === 'close_prompt');
+  assert.ok(prompt);
+  assert.equal(prompt.sender, 'system');
+  assert.equal(db.getTicketsAwaitingTelegramReminder.all('-3 minutes', '-5 minutes', 100)
+    .some(ticket => ticket.id === id), false);
+  const adminTicket = db.getTicketsForAdmin.all().find(ticket => ticket.id === id);
+  assert.equal(adminTicket.unread_count, 0);
+});
+
 test('Telegram customer creates a ticket and receives the support reply', async () => {
   const customerId = '8002';
   await fakeBot.handlers.message({
@@ -618,6 +676,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.chatId === customerId &&
     item.messageId === refreshedTicket.telegram_customer_control_message_id
   );
+  assert.ok(db.getMessages.all(ticket.id).some(message => message.message_type === 'close_prompt'));
   assert.match(closePrompt.markdown, /Спасибо за обращение/);
   assert.match(closePrompt.markdown, /Если ваш вопрос решён/);
   assert.doesNotMatch(closePrompt.markdown, /Тикет #|Оператор уже получил|Статус:/);

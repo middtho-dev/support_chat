@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('./database');
 const push = require('./push');
-const { loadSettings, formatTemplate } = require('./settings');
+const { loadSettings, formatTemplate, isWithinWorkHours } = require('./settings');
 const { createTelegramPollingLease } = require('./telegram-lease');
 const uuidv4 = () => crypto.randomUUID();
 
@@ -181,7 +181,8 @@ const reminderStats = {
   sent: 0,
   failed: 0,
   lastSentAt: null,
-  lastError: null
+  lastError: null,
+  pausedSince: null
 };
 const reminderFailureCounts = new Map();
 const latencySamples = {
@@ -1739,19 +1740,14 @@ async function sendCustomerControl(ticket, options = {}) {
   });
 }
 
-async function sendCustomerClosePrompt(ticket, options = {}) {
-  const fresh = db.getTicketById.get(ticket?.id) || ticket;
-  if (!fresh || fresh.status !== 'open') throw new Error('Ticket is closed');
-  if (fresh.source === 'telegram') return sendCustomerControl(fresh, options);
-
+async function recordCustomerClosePrompt(ticket, content) {
   const id = uuidv4();
   const createdAt = new Date().toISOString();
-  const content = customerClosePromptText(fresh);
   db.saveMessage.run(
     id,
-    fresh.id,
+    ticket.id,
     'system',
-    'Система',
+    cfg().supportName,
     content,
     'close_prompt',
     null,
@@ -1760,11 +1756,17 @@ async function sendCustomerClosePrompt(ticket, options = {}) {
     null,
     null
   );
+  db.markSupportRead.run(ticket.id);
+  reminderFailureCounts.delete(ticket.id);
+  lifecycle.cancelOperatorWait?.(ticket.id);
+  await clearTicketReminders(ticket.id).catch(error => {
+    console.warn('[TG private] clear close-prompt reminders:', tgError(error));
+  });
   const message = {
     id,
-    ticket_id: fresh.id,
+    ticket_id: ticket.id,
     sender: 'system',
-    sender_name: 'Система',
+    sender_name: cfg().supportName,
     content,
     message_type: 'close_prompt',
     file_url: null,
@@ -1772,10 +1774,24 @@ async function sendCustomerClosePrompt(ticket, options = {}) {
     file_mime: null,
     created_at: createdAt
   };
-  io?.to(`ticket:${fresh.id}`).emit('message', message);
-  io?.to('admin').emit('admin_new_message', { ticketId: fresh.id, message });
+  io?.to(`ticket:${ticket.id}`).emit('message', message);
+  io?.to('admin').emit('admin_new_message', { ticketId: ticket.id, message });
   io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
-  return { messageId: id, web: true };
+  return message;
+}
+
+async function sendCustomerClosePrompt(ticket, options = {}) {
+  const fresh = db.getTicketById.get(ticket?.id) || ticket;
+  if (!fresh || fresh.status !== 'open') throw new Error('Ticket is closed');
+  const content = customerClosePromptText(fresh);
+  if (fresh.source === 'telegram') {
+    const messageId = await sendCustomerControl(fresh, options);
+    await recordCustomerClosePrompt(fresh, content);
+    return { messageId, telegram: true };
+  }
+
+  const message = await recordCustomerClosePrompt(fresh, content);
+  return { messageId: message.id, web: true };
 }
 
 async function removePreviousCustomerLauncher(customerId) {
@@ -2083,9 +2099,15 @@ function parseDatabaseTime(value) {
     : raw);
 }
 
-async function processUnansweredReminders() {
+async function processUnansweredReminders(now = new Date()) {
   const settings = cfg();
-  if (!tgEnabled() || !settings.telegramUnansweredReminderEnabled || reminderRunning) return 0;
+  if (!tgEnabled() || !settings.telegramUnansweredReminderEnabled) return 0;
+  if (!isWithinWorkHours(settings, now)) {
+    reminderStats.pausedSince ||= new Date(now).toISOString();
+    return 0;
+  }
+  reminderStats.pausedSince = null;
+  if (reminderRunning) return 0;
   reminderRunning = true;
   try {
     const tickets = db.getTicketsAwaitingTelegramReminder.all(
@@ -2111,7 +2133,7 @@ async function processUnansweredReminders() {
       const waitingSince = parseDatabaseTime(ticket.waiting_since);
       const waitingMinutes = Math.max(
         1,
-        Math.floor((Date.now() - waitingSince.getTime()) / 60000)
+        Math.floor((new Date(now).getTime() - waitingSince.getTime()) / 60000)
       );
       const assignment = assigned
         ? `Назначен: ${assigned.display_name}`
@@ -3736,7 +3758,9 @@ async function handleMessageReactionCount(update) {
   });
 }
 
-function status() {
+function status(now = new Date()) {
+  const settings = cfg();
+  const withinWorkHours = isWithinWorkHours(settings, now);
   let registeredOperators = 0;
   let unassignedTickets = 0;
   let assignedOpenTickets = 0;
@@ -3852,9 +3876,15 @@ function status() {
     },
     reminders: {
       ...reminderStats,
-      enabled: !!cfg().telegramUnansweredReminderEnabled,
-      firstAfterMinutes: cfg().telegramUnansweredReminderMinutes,
-      repeatEveryMinutes: cfg().telegramUnansweredRepeatMinutes,
+      enabled: !!settings.telegramUnansweredReminderEnabled,
+      firstAfterMinutes: settings.telegramUnansweredReminderMinutes,
+      repeatEveryMinutes: settings.telegramUnansweredRepeatMinutes,
+      workHoursOnly: true,
+      withinWorkHours,
+      pausedOutsideWorkHours: !withinWorkHours,
+      timezone: settings.timezone,
+      workStartHour: settings.workStartHour,
+      workEndHour: settings.workEndHour,
       inFlight: reminderRunning
     }
   };
