@@ -17,7 +17,20 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: process.env.CORS_ORIGIN || '*' },
-  maxHttpBufferSize: 50 * 1024 * 1024
+  maxHttpBufferSize: 50 * 1024 * 1024,
+  // Keep both transports available. Some CDNs allow WebSocket but interfere
+  // with long-polling, while others do the opposite.
+  transports: ['polling', 'websocket'],
+  pingInterval: 25000,
+  pingTimeout: 30000
+});
+
+// Prevent intermediary caches and response buffering from corrupting the
+// Engine.IO polling handshake. WebSocket upgrades use the same endpoint.
+io.engine.on('headers', headers => {
+  headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate';
+  headers.Pragma = 'no-cache';
+  headers['X-Accel-Buffering'] = 'no';
 });
 
 telegram.init(io, {
@@ -433,6 +446,15 @@ app.post('/api/session/messages-seen', (req, res) => {
   if (!ticket || ticket.id !== ticketId) return res.status(403).json({ error: 'Forbidden' });
   res.json({ ok: true, delivered: confirmCustomerMessagesSeen(ticket, messageIds) });
 });
+app.post('/api/session/message', (req, res) => {
+  try {
+    const result = acceptCustomerMessage(req.body);
+    res.status(result.status || 200).json(result);
+  } catch (error) {
+    console.error('[HTTP] customer message:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 app.get('/api/chat-config', (req, res) => res.json(publicConfig()));
 
 app.get('/api/tickets/:ticketId/messages', (req, res) => {
@@ -622,6 +644,58 @@ function confirmCustomerMessagesSeen(ticket, messageIds) {
     }
   }
   return ids.length;
+}
+
+function acceptCustomerMessage(data = {}) {
+  const { ticketId, sessionToken, content, fileUrl, fileName, fileMime, messageType, clientMessageId } = data;
+  const ticket = db.getTicketBySessionAny.get(sessionToken);
+  if (!ticket || ticket.id !== ticketId) return { error: 'Unauthorized', status: 401 };
+  const msgId = typeof clientMessageId === 'string' && /^[a-f0-9-]{16,64}$/i.test(clientMessageId)
+    ? clientMessageId
+    : uuidv4();
+  const existingMessage = db.getMessageById.get(msgId);
+  if (existingMessage) {
+    return existingMessage.ticket_id === ticketId && existingMessage.sender === 'user'
+      ? { ok: true, id: msgId, duplicate: true, message: existingMessage }
+      : { error: 'Invalid message id', status: 409 };
+  }
+  if (ticket.status === 'closed') return { error: 'Ticket is closed', status: 409 };
+  if (fileUrl && !isSafeUploadUrl(fileUrl)) return { error: 'Invalid file', status: 400 };
+  const text = String(content || '').trim();
+  const maxLength = fileUrl ? 1000 : 4000;
+  if (text.length > maxLength) return { error: 'Message too long', maxLength, status: 400 };
+  if (!text && !fileUrl) return { error: 'Empty message', status: 400 };
+  if (isRateLimited(sessionToken)) {
+    return {
+      error: 'Rate limit',
+      retryAfter: messageRates.get(sessionToken)?.retryAfter || 60,
+      status: 429
+    };
+  }
+
+  warnedTickets.delete(ticket.id);
+  const msgType = fileUrl && ['image', 'video', 'audio', 'file'].includes(messageType)
+    ? messageType
+    : (fileUrl ? 'file' : 'text');
+  const safeFileName = String(fileName || '').slice(0, 255) || null;
+  const safeFileMime = String(fileMime || '').slice(0, 150) || null;
+  db.saveMessage.run(
+    msgId, ticketId, 'user', ticket.user_name, text || null, msgType,
+    fileUrl || null, safeFileName, safeFileMime, null, null
+  );
+  const message = {
+    id: msgId, ticket_id: ticketId, sender: 'user', sender_name: ticket.user_name,
+    content: text || null, message_type: msgType, file_url: fileUrl || null,
+    file_name: safeFileName, file_mime: safeFileMime, created_at: new Date().toISOString()
+  };
+  io.to(`ticket:${ticketId}`).emit('message', message);
+  io.to('admin').emit('admin_new_message', { ticketId, message });
+  broadcastAdminTickets();
+  scheduleOperatorWaitMessage(ticketId, msgId);
+  telegram.forwardMessage(ticket, message).catch(error => {
+    console.error('[TG] forwardMessage:', error?.message);
+  });
+  return { ok: true, id: msgId, message };
 }
 
 io.on('connection', (socket) => {

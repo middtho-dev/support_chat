@@ -33,6 +33,15 @@ ${domain} {
     @uploads path /uploads/*
     header @uploads Cache-Control "public, max-age=604800"
 
+    # Engine.IO polling and WebSocket upgrades must never be cached or
+    # buffered by Caddy or an upstream CDN.
+    @realtime path /socket.io/*
+    header @realtime {
+        Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate"
+        Pragma "no-cache"
+        X-Accel-Buffering "no"
+    }
+
     header {
         -Server
         X-Content-Type-Options nosniff

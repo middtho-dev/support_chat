@@ -10,7 +10,13 @@ const DEFAULT_TEMPLATES = [
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
 const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, systemHealth: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
-const socket = io({ autoConnect: false });
+const socket = io({
+  autoConnect: false,
+  transports: ['websocket', 'polling'],
+  rememberUpgrade: true,
+  timeout: 12000,
+  reconnectionDelayMax: 10000
+});
 const $ = id => document.getElementById(id);
 const TG = window.Telegram?.WebApp || null;
 const PAGE_PARAMS = new URLSearchParams(location.search);
@@ -254,6 +260,10 @@ function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(
 
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
+socket.on('connect_error', () => {
+  socket.io.opts.transports = ['polling', 'websocket'];
+  setConn('connecting');
+});
 socket.io.on('reconnect_attempt', () => setConn('connecting'));
 
 socket.on('admin_auth_ok', auth => {
