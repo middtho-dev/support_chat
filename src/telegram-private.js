@@ -122,10 +122,12 @@ let io = null;
 let lifecycle = {};
 let cleanupTimer = null;
 let deliveryTimer = null;
+let incomingRetryTimer = null;
 let reminderTimer = null;
 let deliveryWakeTimer = null;
 let deliveryWakeAt = 0;
 let deliveryRunning = false;
+let incomingRetryRunning = false;
 let shuttingDown = false;
 let reminderRunning = false;
 let connected = false;
@@ -271,6 +273,10 @@ function tgError(error) {
 function isTransientTelegramNetworkError(error) {
   const details = tgError(error).toLowerCase();
   return details.includes('fetch failed') ||
+    details.includes('operation was aborted') ||
+    details.includes('aborterror') ||
+    details.includes('terminated') ||
+    /telegram file download failed: (429|5\d\d)/.test(details) ||
     details.includes('http timeout') ||
     details.includes('network error') ||
     details.includes('network request failed') ||
@@ -1214,7 +1220,9 @@ function init(socketIo, hooks = {}) {
   });
   pollingLease.start();
   deliveryTimer = backgroundTimer(setInterval(processDeliveryQueue, 15 * 1000));
+  incomingRetryTimer = backgroundTimer(setInterval(processIncomingRetryQueue, 15 * 1000));
   scheduleDeliveryQueue(1000);
+  backgroundTimer(setTimeout(processIncomingRetryQueue, 1000));
   backgroundTimer(setInterval(reconcileUnassignedTickets, 60 * 1000));
   backgroundTimer(setTimeout(reconcileUnassignedTickets, 10000));
   reminderTimer = backgroundTimer(setInterval(processUnansweredReminders, 30 * 1000));
@@ -2765,15 +2773,76 @@ async function handleMessage(msg) {
   await forwardOperatorMessage(msg, ticket, thread, operator);
 }
 
-function queueIncomingMessage(msg) {
+function queueIncomingMessage(msg, { persist = true } = {}) {
   const key = String(msg?.chat?.id || msg?.from?.id || 'unknown');
+  const chatId = String(msg?.chat?.id || '');
+  const messageId = Number(msg?.message_id || 0);
+  if (persist && chatId && messageId) {
+    db.enqueueTelegramIncomingMessage.run(chatId, messageId, JSON.stringify(msg));
+  }
   const previous = incomingMessageQueues.get(key) || Promise.resolve();
-  const task = previous.catch(() => {}).then(() => handleIncomingMessageWithRetry(msg));
+  const task = previous.catch(() => {}).then(async () => {
+    // A scheduled retry can become stale while it waits behind the live update
+    // for the same chat. Do not execute it after that live update succeeded.
+    if (!persist && chatId && messageId &&
+        !db.getTelegramIncomingMessage.get(chatId, messageId)) return;
+    try {
+      const result = await handleIncomingMessageWithRetry(msg);
+      if (chatId && messageId) {
+        db.completeTelegramIncomingMessage.run(chatId, messageId);
+      }
+      return result;
+    } catch (error) {
+      if (chatId && messageId && db.getTelegramIncomingMessage.get(chatId, messageId)) {
+        const queued = db.getTelegramIncomingMessage.get(chatId, messageId);
+        const attempts = Number(queued?.attempts || 0) + 1;
+        const delaySeconds = deliveryRetryDelaySeconds(attempts);
+        db.markTelegramIncomingMessageAttempt.run(
+          tgError(error).slice(0, 1000),
+          `+${delaySeconds} seconds`,
+          chatId,
+          messageId
+        );
+        if (attempts >= 3) {
+          operationalAlert(
+            `tg-incoming-${chatId}-${messageId}`,
+            `Входящее сообщение Telegram не обработано после ${attempts} попыток`,
+            tgError(error)
+          ).catch(() => {});
+        }
+      }
+      throw error;
+    }
+  });
   incomingMessageQueues.set(key, task);
   task.finally(() => {
     if (incomingMessageQueues.get(key) === task) incomingMessageQueues.delete(key);
   }).catch(() => {});
   return task;
+}
+
+async function processIncomingRetryQueue() {
+  if (shuttingDown || incomingRetryRunning || !tgEnabled()) return;
+  incomingRetryRunning = true;
+  try {
+    const queuedMessages = db.getPendingTelegramIncomingMessages.all(20);
+    for (const queued of queuedMessages) {
+      if (shuttingDown) break;
+      let message;
+      try {
+        message = JSON.parse(queued.payload);
+      } catch {
+        db.completeTelegramIncomingMessage.run(queued.chat_id, queued.message_id);
+        continue;
+      }
+      await queueIncomingMessage(message, { persist: false }).catch(() => {});
+    }
+  } catch (error) {
+    deliveryStats.lastError = tgError(error);
+    console.error('[TG private] incoming retry queue:', tgError(error));
+  } finally {
+    incomingRetryRunning = false;
+  }
 }
 
 async function forwardOperatorMessage(msg, ticket, thread, operator) {
@@ -2986,11 +3055,14 @@ async function sendMessageToCustomer(ticket, message) {
   const content = String(message.content || '').trim();
   const options = {};
   if (message.message_type === 'text') {
-    return sendRichOrText(
+    // Rich messages are excellent for the operator's single transcript card,
+    // but this is the actual customer delivery path. Use Telegram's stable
+    // sendMessage endpoint here: a Rich API transport hiccup must never make
+    // an operator reply appear to be sent when the customer did not receive it.
+    return bot.sendMessage(
       chatId,
-      `### 👨‍💻 ${markdownEscape(message.sender_name || cfg().supportName)}\n\n${markdownEscape(content.slice(0, 3500))}`,
-      options,
-      `👨‍💻 ${message.sender_name || cfg().supportName}\n\n${content.slice(0, 3900)}`
+      `👨‍💻 ${message.sender_name || cfg().supportName}\n\n${content.slice(0, 3900)}`,
+      options
     );
   }
   const caption = content.slice(0, 1000);
@@ -3530,6 +3602,7 @@ async function cleanupOldTopics() {
 
 async function downloadFile(msg) {
   let lastError;
+  let permanentFailure = false;
   for (let attempt = 1; attempt <= TELEGRAM_FILE_DOWNLOAD_ATTEMPTS; attempt++) {
     try {
       let fileId;
@@ -3606,12 +3679,14 @@ async function downloadFile(msg) {
       console.error(`[TG private] download attempt ${attempt}:`, tgError(error));
       if (tgError(error).startsWith('Unsupported Telegram file type') ||
           tgError(error) === 'File too large') {
+        permanentFailure = true;
         break;
       }
       if (attempt < TELEGRAM_FILE_DOWNLOAD_ATTEMPTS) await wait(attempt * 1000);
     }
   }
   deliveryStats.lastError = tgError(lastError);
+  if (!permanentFailure && lastError) throw lastError;
   return null;
 }
 
@@ -3669,6 +3744,8 @@ function status() {
   let oldestPendingSeconds = null;
   let pendingCustomerReplies = 0;
   let oldestCustomerReplySeconds = null;
+  let pendingIncomingMessages = 0;
+  let oldestIncomingMessageSeconds = null;
   let openTelegramCustomerTickets = 0;
   try {
     registeredOperators = db.getActiveTelegramOperators.all().length;
@@ -3711,6 +3788,17 @@ function status() {
       oldestCustomerReplySeconds = Math.max(
         0,
         Math.round((Date.now() - new Date(`${pendingCustomers.oldest}Z`).getTime()) / 1000)
+      );
+    }
+    const pendingIncoming = db.db.prepare(`
+      SELECT COUNT(*) AS count, MIN(created_at) AS oldest
+      FROM telegram_incoming_message_queue
+    `).get();
+    pendingIncomingMessages = Number(pendingIncoming?.count || 0);
+    if (pendingIncoming?.oldest) {
+      oldestIncomingMessageSeconds = Math.max(
+        0,
+        Math.round((Date.now() - new Date(`${pendingIncoming.oldest}Z`).getTime()) / 1000)
       );
     }
   } catch {}
@@ -3758,6 +3846,8 @@ function status() {
       oldestPendingSeconds,
       pendingCustomerReplies,
       oldestCustomerReplySeconds,
+      pendingIncomingMessages,
+      oldestIncomingMessageSeconds,
       scheduledInMs: deliveryWakeAt ? Math.max(0, deliveryWakeAt - Date.now()) : null
     },
     reminders: {
@@ -3774,6 +3864,7 @@ async function shutdown() {
   shuttingDown = true;
   clearTimeout(cleanupTimer);
   clearInterval(deliveryTimer);
+  clearInterval(incomingRetryTimer);
   clearInterval(reminderTimer);
   clearTimeout(deliveryWakeTimer);
   for (const timer of topicStatusVerificationTimers.values()) clearTimeout(timer);
@@ -3784,6 +3875,7 @@ async function shutdown() {
   customerDeliveryNextAt.clear();
   cleanupTimer = null;
   deliveryTimer = null;
+  incomingRetryTimer = null;
   reminderTimer = null;
   deliveryWakeTimer = null;
   await pollingLease?.stop();
@@ -3855,6 +3947,7 @@ module.exports = {
   deliverCustomerReply,
   confirmWebCustomerDelivery,
   processDeliveryQueue,
+  processIncomingRetryQueue,
   sendCustomerControl,
   sendCustomerClosePrompt,
   refreshOpenTicketTranscripts,

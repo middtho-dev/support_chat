@@ -87,7 +87,15 @@ docker exec support-chat sh -lc 'wget -qO- http://localhost:${PORT:-3001}/health
 docker logs support-chat --tail=60
 ```
 
-Expected values in the `/health` response:
+The public `/health` response intentionally contains only readiness and the
+deployed version. Open **Состояние системы** in the authenticated admin panel,
+or request the detailed endpoint with the admin token:
+
+```bash
+curl -fsS -H "X-Admin-Token: $ADMIN_TOKEN" https://support.example.com/api/admin/health
+```
+
+Expected Telegram values in that authenticated response:
 
 ```json
 {
@@ -107,9 +115,11 @@ Expected values in the `/health` response:
 Also verify that `registeredOperators` matches the operators who sent `/start`,
 that `unassignedTickets` does not keep growing, and that
 `customerChannelEnabled` is `true`. Delivery failures and separate customer
-reply retry counters are available under `telegram.delivery`. Backup, cleanup,
-Telegram customer behavior, and disk thresholds are configured in the admin
-UI; only `BACKUP_DIR` remains a server-controlled path.
+reply retry counters are available under `telegram.delivery`. The
+`pendingIncomingMessages` counter covers Telegram updates that are waiting for
+durable retry after a file or network failure. Backup, cleanup, Telegram
+customer behavior, and disk thresholds are configured in the admin UI; only
+`BACKUP_DIR` remains a server-controlled path.
 
 ## Notes
 

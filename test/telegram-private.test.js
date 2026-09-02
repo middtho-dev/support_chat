@@ -11,7 +11,9 @@ process.env.TELEGRAM_ADMIN_IDS = '7001';
 process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS = '100';
 process.env.TELEGRAM_TOPIC_CREATE_ATTEMPTS = '3';
 process.env.TELEGRAM_CUSTOMER_SEND_INTERVAL_MS = '1';
+process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS = '1';
 process.env.PUBLIC_URL = 'https://support.example';
+process.env.UPLOADS_DIR = path.join(root, 'uploads');
 
 const sent = [];
 const rich = [];
@@ -32,7 +34,21 @@ let messageId = 10;
 let stopPollingCalls = 0;
 let botOptions = null;
 let richMessageFailuresRemaining = 0;
+let sendMessageFailuresRemaining = 0;
+let fileDownloadFailuresRemaining = 0;
 const requests = [];
+const originalFetch = global.fetch;
+global.fetch = async url => {
+  if (!String(url).startsWith('https://files.example/')) return originalFetch(url);
+  if (fileDownloadFailuresRemaining > 0) {
+    fileDownloadFailuresRemaining--;
+    throw new Error('fetch failed');
+  }
+  return new Response(Buffer.from('fake-image-content'), {
+    status: 200,
+    headers: { 'content-type': 'image/jpeg', 'content-length': '18' }
+  });
+};
 
 class FakeBot {
   constructor(_token, options) {
@@ -65,7 +81,14 @@ class FakeBot {
   getChat(id) {
     return Promise.resolve({ id, type: 'private', first_name: 'Оператор' });
   }
+  getFileLink(fileId) {
+    return Promise.resolve(`https://files.example/${fileId}`);
+  }
   sendMessage(chatId, text, options) {
+    if (sendMessageFailuresRemaining > 0) {
+      sendMessageFailuresRemaining--;
+      return Promise.reject(new Error('EFATAL: fetch failed'));
+    }
     const sentMessageId = ++messageId;
     sent.push({ chatId: String(chatId), text, options, messageId: sentMessageId });
     return Promise.resolve({ message_id: sentMessageId });
@@ -154,6 +177,7 @@ const fakeBot = telegram.init(
 
 test.after(async () => {
   await telegram.shutdown();
+  global.fetch = originalFetch;
   if (db.db.open) db.db.close();
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -318,6 +342,46 @@ test('rapid operator messages are processed in their Telegram order', async () =
   );
 });
 
+test('an operator photo survives exhausted live retries and is recovered from the durable queue', async () => {
+  const id = 'durable-telegram-media-0000-000000000000';
+  db.createTicket.run(id, 'Медиа', 'session-durable-telegram-media');
+  db.assignTicket.run('7001', id);
+  db.saveTelegramThread.run(id, '7001', '7001', 912, null);
+  const update = {
+    message_id: 983,
+    message_thread_id: 912,
+    chat: { id: 7001, type: 'private' },
+    from: { id: 7001, first_name: 'Оператор' },
+    caption: 'Скриншот решения',
+    photo: [{ file_id: 'photo-file-983', width: 800, height: 600 }]
+  };
+
+  fileDownloadFailuresRemaining = 3;
+  await fakeBot.handlers.message(update);
+  assert.equal(db.getMessages.all(id).length, 0);
+  const queued = db.getTelegramIncomingMessage.get('7001', 983);
+  assert.ok(queued);
+  assert.equal(queued.attempts, 1);
+
+  db.db.prepare(`
+    UPDATE telegram_incoming_message_queue
+    SET next_retry_at = datetime('now', '-1 second')
+    WHERE chat_id = ? AND message_id = ?
+  `).run('7001', 983);
+  await telegram.processIncomingRetryQueue();
+
+  const recovered = db.getMessages.all(id).at(-1);
+  assert.equal(recovered?.content, 'Скриншот решения');
+  assert.equal(recovered?.message_type, 'image');
+  assert.match(recovered?.file_url || '', /^\/uploads\/tg_/);
+  assert.equal(db.getTelegramIncomingMessage.get('7001', 983), undefined);
+  assert.ok(socketEmits.some(item =>
+    item.room === `ticket:${id}` &&
+    item.event === 'message' &&
+    item.payload?.message_type === 'image'
+  ));
+});
+
 test('Telegram service messages are removed before bot and topic routing', async () => {
   const serviceUpdates = [
     { pinned_message: { message_id: 1 } },
@@ -477,8 +541,8 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   await telegram.deliverCustomerReply(ticket, db.getMessageById.get(supportId));
   const delivery = db.getMessageById.get(supportId);
   assert.ok(delivery.telegram_customer_message_id);
-  const supportDelivery = rich.find(item =>
-    item.chatId === customerId && item.markdown.includes('Проверяем подключение')
+  const supportDelivery = sent.find(item =>
+    item.chatId === customerId && item.text.includes('Проверяем подключение')
   );
   assert.ok(supportDelivery);
   assert.equal(supportDelivery.options?.reply_markup, undefined);
@@ -497,8 +561,8 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     topicReply = db.getMessageById.get(topicReply.id);
   }
   assert.ok(topicReply?.telegram_customer_message_id);
-  assert.ok(rich.some(item =>
-    item.chatId === customerId && item.markdown.includes('Ответ из темы оператора')
+  assert.ok(sent.some(item =>
+    item.chatId === customerId && item.text.includes('Ответ из темы оператора')
   ));
   assert.ok(rich.some(item =>
     item.options?.reply_markup?.inline_keyboard?.flat().some(button =>
@@ -609,11 +673,11 @@ test('rapid operator replies to one customer are serialized and kept in order', 
     return db.getMessageById.get(id);
   });
 
-  const before = rich.length;
+  const before = sent.length;
   await Promise.all(messages.map(message => telegram.deliverCustomerReply(ticket, message)));
-  const delivered = rich.slice(before)
+  const delivered = sent.slice(before)
     .filter(item => item.chatId === '8015')
-    .map(item => item.markdown.match(/Первое|Второе|Третье/)?.[0])
+    .map(item => item.text.match(/Первое|Второе|Третье/)?.[0])
     .filter(Boolean);
   assert.deepEqual(delivered, ['Первое', 'Второе', 'Третье']);
   for (const message of messages) {
@@ -940,6 +1004,52 @@ test('a transient Telegram fetch error alerts only after repeated failures', asy
     sent.filter(item => item.text.includes('Контроль доставки чата')).length,
     alertsBefore + 1
   );
+});
+
+test('customer replies use stable sendMessage and remain queued after a transport failure', async () => {
+  const ticketId = 'customer-delivery-retry-0000-0000';
+  const messageId = 'customer-delivery-retry-message';
+  db.createTicket.run(ticketId, 'Клиент доставки', 'session-customer-delivery-retry');
+  db.db.prepare(`
+    UPDATE tickets
+    SET source = 'telegram', telegram_customer_id = '8099', telegram_customer_chat_id = '8099'
+    WHERE id = ?
+  `).run(ticketId);
+  db.saveMessage.run(
+    messageId,
+    ticketId,
+    'support',
+    'Оператор',
+    'Надёжный ответ клиенту',
+    'text',
+    null,
+    null,
+    null,
+    null,
+    null
+  );
+  const ticket = db.getTicketById.get(ticketId);
+
+  sendMessageFailuresRemaining = 1;
+  await assert.rejects(
+    telegram.deliverCustomerReply(ticket, db.getMessageById.get(messageId)),
+    /fetch failed/
+  );
+  assert.equal(db.getMessageById.get(messageId).telegram_customer_message_id, null);
+  db.db.prepare(`
+    UPDATE messages SET telegram_customer_next_retry_at = datetime('now', '-1 second') WHERE id = ?
+  `).run(messageId);
+
+  let delivered = db.getMessageById.get(messageId);
+  for (let attempt = 0; attempt < 120 && !delivered.telegram_customer_message_id; attempt++) {
+    await telegram.processDeliveryQueue();
+    await new Promise(resolve => setTimeout(resolve, 25));
+    delivered = db.getMessageById.get(messageId);
+  }
+  assert.ok(delivered.telegram_customer_message_id);
+  assert.ok(sent.some(item =>
+    item.chatId === '8099' && item.text.includes('Надёжный ответ клиенту')
+  ));
 });
 
 test('an incoming command retries a transient Telegram transport failure', async () => {

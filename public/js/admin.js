@@ -9,7 +9,7 @@ const DEFAULT_TEMPLATES = [
   { label: 'Завершение', text: 'Спасибо, что написали в поддержку KV9RU! Будем рады помочь снова.' }
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
-const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
+const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, systemHealth: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
 const socket = io({ autoConnect: false });
 const $ = id => document.getElementById(id);
 const TG = window.Telegram?.WebApp || null;
@@ -1193,7 +1193,12 @@ async function adminMaintenanceApi(path, options = {}) {
 async function loadMaintenance() {
   if (!S.token) return;
   try {
-    S.maintenance = await adminMaintenanceApi('/api/admin/maintenance');
+    const [maintenance, health] = await Promise.all([
+      adminMaintenanceApi('/api/admin/maintenance'),
+      adminMaintenanceApi('/api/admin/health')
+    ]);
+    S.maintenance = maintenance;
+    S.systemHealth = health;
     renderMaintenance();
   } catch (error) {
     if (S.view === 'health') toast(error.message || 'Не удалось получить состояние системы', 'err');
@@ -1225,6 +1230,14 @@ function renderMaintenance() {
   const diskClass = !m.config?.diskMonitoringEnabled ? '' : m.diskLevel === 'critical' ? 'critical' : m.diskLevel === 'warning' ? 'warning' : 'ok';
   const backupClass = !m.config?.backupEnabled ? '' : m.lastBackupError || m.backupOverdue ? 'critical' : m.lastBackupAt ? 'ok' : 'warning';
   const backupLabel = !m.config?.backupEnabled ? 'Выключен' : m.lastBackupError ? 'Ошибка' : m.backupOverdue ? 'Просрочен' : m.lastBackupAt ? 'Готов' : 'Ожидается';
+  const tg = S.systemHealth?.telegram;
+  const tgDelivery = tg?.delivery || {};
+  const telegramHealthy = !!(tg?.configured && tg?.enabled && tg?.connected &&
+    (tg?.mode !== 'private' || tg?.polling?.owner));
+  const telegramBacklog = Number(tgDelivery.pendingIncomingMessages || 0) +
+    Number(tgDelivery.pendingMessages || 0) + Number(tgDelivery.pendingCustomerReplies || 0);
+  const telegramClass = !tg?.configured || !tg?.enabled ? 'warning' : telegramHealthy && !telegramBacklog ? 'ok' : 'critical';
+  const telegramLabel = !tg?.configured ? 'Не настроен' : !tg?.enabled ? 'Выключен' : telegramHealthy ? 'На связи' : 'Нет связи';
   root.innerHTML = `<div class="section maintenance-section">
     <div class="maintenance-title"><div><h2>Состояние системы</h2><p>Резервные копии, загрузки и состояние диска обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
@@ -1232,6 +1245,22 @@ function renderMaintenance() {
       <div class="health-stat ${diskClass}"><span>Диск</span><b>${m.disk ? `${m.disk.usedPercent}%` : '—'}</b><small>${m.disk ? `${fmtBytes(m.disk.freeBytes)} свободно` : 'нет данных'}</small></div>
       <div class="health-stat"><span>Загрузки</span><b>${Number(m.uploads?.files || 0)}</b><small>${fmtBytes(m.uploads?.bytes)}</small></div>
       <div class="health-stat"><span>Очистка</span><b>${Number(m.lastCleanupRemoved || 0)}</b><small>${esc(fmtStatusDate(m.lastCleanupAt))}</small></div>
+    </div>
+    <div class="card">
+      <h3>Telegram и доставка</h3>
+      <div class="maintenance-summary">
+        <div class="health-stat ${telegramClass}"><span>Бот</span><b>${telegramLabel}</b><small>${esc(tg?.botUsername ? `@${tg.botUsername}` : tg?.mode || '—')}</small></div>
+        <div class="health-stat ${telegramBacklog ? 'warning' : 'ok'}"><span>Очередь</span><b>${telegramBacklog}</b><small>входящие ${Number(tgDelivery.pendingIncomingMessages || 0)} · оператору ${Number(tgDelivery.pendingMessages || 0)} · клиенту ${Number(tgDelivery.pendingCustomerReplies || 0)}</small></div>
+        <div class="health-stat ${Number(tg?.polling?.conflicts || 0) ? 'warning' : 'ok'}"><span>Polling</span><b>${tg?.mode !== 'private' || tg?.polling?.owner ? 'активен' : 'ожидает'}</b><small>конфликтов ${Number(tg?.polling?.conflicts || 0)}</small></div>
+        <div class="health-stat ${Number(tgDelivery.mediaFailures || 0) ? 'warning' : 'ok'}"><span>Медиа</span><b>${Number(tgDelivery.mediaFailures || 0)}</b><small>ошибок загрузки</small></div>
+      </div>
+      <dl class="health-details">
+        <div><dt>Последняя успешная доставка</dt><dd>${esc(fmtStatusDate(tgDelivery.lastSuccessAt))}</dd></div>
+        <div><dt>Самое старое входящее</dt><dd>${tgDelivery.oldestIncomingMessageSeconds == null ? '—' : `${Number(tgDelivery.oldestIncomingMessageSeconds)} сек.`}</dd></div>
+        <div><dt>Самый старый ответ клиенту</dt><dd>${tgDelivery.oldestCustomerReplySeconds == null ? '—' : `${Number(tgDelivery.oldestCustomerReplySeconds)} сек.`}</dd></div>
+        <div><dt>Threaded Mode</dt><dd>${tg?.threadedModeEnabled ? 'включён' : 'не подтверждён'}</dd></div>
+      </dl>
+      ${tgDelivery.lastError ? `<div class="health-error">${esc(tgDelivery.lastError)}</div>` : ''}
     </div>
     <div class="grid maintenance-grid">
       <div class="card">
