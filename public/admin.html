@@ -55,14 +55,11 @@
         <button class="navbtn on" data-view="chat" title="Диалоги" aria-label="Диалоги">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
         </button>
-        <button class="navbtn" data-view="settings" title="Настройки" aria-label="Настройки">
+        <button class="navbtn" data-view="settings" title="Управление и состояние" aria-label="Управление и состояние">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.43.17.78.5 1 .9.18.34.36.7.7.7H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.5.4Z"/></svg>
         </button>
         <button class="navbtn" data-view="templates" title="Шаблоны" aria-label="Шаблоны">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
-        </button>
-        <button class="navbtn" data-view="health" title="Состояние системы" aria-label="Состояние системы">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l2-7 4 14 2-7h6"/><path d="M4 4h16v16H4z"/></svg>
         </button>
       </nav>
 
@@ -100,7 +97,6 @@
         </section>
         <section id="settings" class="panel"></section>
         <section id="templates" class="panel"></section>
-        <section id="health" class="panel"></section>
       </main>
     </div>
   </div>
@@ -108,6 +104,6 @@
   <div id="toast" class="toast" role="status"></div>
   <script src="/api/realtime/socket.io.js"></script>
   <script src="/js/admin-enhance.js?v=20260806-3"></script>
-  <script src="/js/admin.js?v=20260806-3"></script>
+  <script src="/js/admin.js?v=20260902-control-center"></script>
 </body>
 </html>

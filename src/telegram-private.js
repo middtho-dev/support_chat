@@ -524,6 +524,8 @@ function dashboardKeyboard(counts = {}) {
   ], [
     { text: `✅ Закрытые · ${Number(counts.closed || 0)}`, callback_data: 'list:closed:0' },
     { text: '🔄 Обновить', callback_data: 'dashboard:refresh' }
+  ], [
+    { text: '⚙️ Система и настройки', callback_data: 'system:show' }
   ]];
   const webAppUrl = adminWebAppUrl();
   if (webAppUrl) rows.push([{ text: '🖥 Админка', web_app: { url: webAppUrl } }]);
@@ -567,6 +569,91 @@ function dashboardModel(operator) {
       : '⚠️ Включите Threaded Mode через @BotFather.'
   ].join('\n');
   return { markdown, fallback, replyMarkup: dashboardKeyboard(counts) };
+}
+
+function compactDuration(seconds) {
+  const numeric = Number(seconds);
+  if (!Number.isFinite(numeric)) return '—';
+  const value = Math.max(0, numeric);
+  if (value < 60) return `${Math.round(value)} сек`;
+  if (value < 3600) return `${Math.round(value / 60)} мин`;
+  if (value < 86400) return `${Math.round(value / 3600)} ч`;
+  return `${Math.round(value / 86400)} д`;
+}
+
+function compactBytes(bytes) {
+  const value = Math.max(0, Number(bytes || 0));
+  if (value < 1024) return `${Math.round(value)} Б`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} КБ`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} МБ`;
+  return `${(value / 1024 ** 3).toFixed(1)} ГБ`;
+}
+
+function controlCenterModel() {
+  const settings = cfg();
+  let snapshot = {};
+  try {
+    snapshot = lifecycle.getControlCenterStatus?.() || {};
+  } catch (error) {
+    console.warn('[TG private] control center status:', tgError(error));
+  }
+  const health = snapshot.health || {};
+  const maintenance = snapshot.maintenance || {};
+  const telegram = health.telegram || status();
+  const delivery = telegram.delivery || {};
+  const reminders = telegram.reminders || {};
+  const realtime = health.realtime || {};
+  const transports = realtime.transports || {};
+  const queue = Number(delivery.pendingIncomingMessages || 0) +
+    Number(delivery.pendingMessages || 0) + Number(delivery.pendingCustomerReplies || 0);
+  const botOk = !!(telegram.configured && telegram.enabled && telegram.connected &&
+    (telegram.mode !== 'private' || telegram.polling?.owner));
+  const reminderLabel = !reminders.enabled
+    ? 'выключены'
+    : reminders.pausedOutsideWorkHours
+      ? 'пауза вне графика'
+      : 'активны';
+  const backupLabel = !maintenance.config?.backupEnabled
+    ? 'выключен'
+    : maintenance.lastBackupError
+      ? 'ошибка'
+      : maintenance.lastBackupAt
+        ? `готов · ${compactDuration((Date.now() - new Date(maintenance.lastBackupAt).getTime()) / 1000)} назад`
+        : 'ожидается';
+  const diskLabel = maintenance.disk
+    ? `${Number(maintenance.disk.usedPercent || 0)}% · свободно ${compactBytes(maintenance.disk.freeBytes)}`
+    : 'нет данных';
+  const lines = [
+    '## ⚙️ Система и настройки',
+    '',
+    `**${botOk ? '🟢' : '🔴'} Telegram:** ${botOk ? 'на связи' : 'требует внимания'}${botUsername ? ` · @${markdownEscape(botUsername)}` : ''}`,
+    `**${queue ? '🟠' : '🟢'} Очередь:** ${queue} · вход ${Number(delivery.pendingIncomingMessages || 0)} / оператор ${Number(delivery.pendingMessages || 0)} / клиент ${Number(delivery.pendingCustomerReplies || 0)}`,
+    `**${Number(delivery.mediaFailures || 0) ? '🟠' : '🟢'} Медиа:** ошибок ${Number(delivery.mediaFailures || 0)}`,
+    `**${reminders.pausedOutsideWorkHours ? '🌙' : '🔔'} Напоминания:** ${reminderLabel}`,
+    `> ${Number(reminders.workStartHour ?? settings.workStartHour)}:00–${Number(reminders.workEndHour ?? settings.workEndHour)}:00 · ${markdownEscape(reminders.timezone || settings.timezone)}`,
+    '',
+    `**🌐 Realtime:** ${Number(realtime.connectedClients || 0)} подключено · WS ${Number(transports.websocket || 0)} / polling ${Number(transports.polling || 0)}`,
+    `**💾 Backup:** ${markdownEscape(backupLabel)}`,
+    `**💿 Диск:** ${markdownEscape(diskLabel)}`,
+    '',
+    '**Основные настройки**',
+    `- Файлы до **${Number(settings.uploadMaxMb || 0)} МБ** · лимит **${Number(settings.messageRateLimitPerMinute || 0)}/мин**`,
+    `- Неактивность: предупреждение **${Number(settings.inactivityWarnMinutes || 0)} мин**, закрытие **${Number(settings.inactivityCloseMinutes || 0)} мин**`,
+    `- Напоминание: через **${Number(settings.telegramUnansweredReminderMinutes || 0)} мин**, повтор **${Number(settings.telegramUnansweredRepeatMinutes || 0)} мин**`,
+    `- Клиентский Telegram: ${settings.telegramCustomerEnabled ? 'включён' : 'выключен'} · файлы ${settings.telegramCustomerFilesEnabled ? 'да' : 'нет'}`,
+    '',
+    `_Версия: ${markdownEscape(health.version || 'unknown')} · uptime ${compactDuration(health.uptime)}_`
+  ];
+  const fallback = lines
+    .map(line => line.replace(/^##\s*/, '').replace(/^>\s*/, '').replace(/[*_`]/g, ''))
+    .join('\n');
+  const rows = [[
+    { text: '🔄 Обновить', callback_data: 'system:refresh' },
+    { text: '↩️ Панель', callback_data: 'dashboard:show' }
+  ]];
+  const webAppUrl = adminWebAppUrl();
+  if (webAppUrl) rows.push([{ text: '🖥 Центр управления', web_app: { url: webAppUrl } }]);
+  return { markdown: lines.join('\n'), fallback, replyMarkup: { inline_keyboard: rows } };
 }
 
 function ticketListQuery(operator, view, page) {
@@ -1341,6 +1428,7 @@ async function configureBot(instance = bot) {
     { command: 'waiting', description: 'Новые тикеты' },
     { command: 'open', description: 'Мои открытые тикеты' },
     { command: 'closed', description: 'Мои закрытые тикеты' },
+    { command: 'system', description: 'Система и настройки' },
     { command: 'admin', description: 'Открыть админку' },
     { command: 'close', description: 'Закрыть текущий тикет' }
   ];
@@ -2625,6 +2713,11 @@ async function handleCallbackQuery(query) {
       await editPanel(query.message, dashboardModel(operator));
       return;
     }
+    if (data === 'system:show' || data === 'system:refresh') {
+      await answer();
+      await editPanel(query.message, controlCenterModel());
+      return;
+    }
     if (data === 'queue:list') {
       await answer();
       await editPanel(query.message, ticketListModel(operator, 'waiting', 0));
@@ -2750,6 +2843,10 @@ async function handleMessage(msg) {
   if (command === '/closed') {
     await deleteTelegramMessage(msg.chat.id, msg.message_id);
     return sendTicketList(operator, 'closed');
+  }
+  if (command === '/system') {
+    await deleteTelegramMessage(msg.chat.id, msg.message_id);
+    return updateOperatorDashboard(operator, controlCenterModel());
   }
   const threadId = msg.message_thread_id;
   const thread = threadId

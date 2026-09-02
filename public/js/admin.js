@@ -93,7 +93,7 @@ async function init() {
   renderTemplates();
   renderMaintenance();
   setInterval(renderRelativeTimes, 30000);
-  setInterval(() => { if (S.view === 'health' && S.token) loadMaintenance(); }, 20000);
+  setInterval(() => { if (S.view === 'settings' && S.token) loadMaintenance(); }, 20000);
   if (IS_TG_MINI) {
     sessionStorage.removeItem('admin_token');
     clearMiniAppCache();
@@ -257,7 +257,7 @@ function bindStaticUi() {
 }
 
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
-function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; S.permissions = { canManageSettings: false }; document.querySelector('.navbtn[data-view="settings"]')?.setAttribute('hidden', ''); document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
+function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; S.permissions = { canManageSettings: false }; document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
 
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
@@ -269,8 +269,6 @@ socket.io.on('reconnect_attempt', () => setConn('connecting'));
 
 socket.on('admin_auth_ok', auth => {
   S.permissions = auth?.permissions || S.permissions;
-  const settingsNav = document.querySelector('.navbtn[data-view="settings"]');
-  if (settingsNav) settingsNav.hidden = !S.permissions.canManageSettings;
   sessionStorage.setItem('admin_token', S.token);
   $('login').style.display = 'none';
   $('app').style.display = 'grid';
@@ -279,6 +277,7 @@ socket.on('admin_auth_ok', auth => {
     socket.emit('admin_get_settings');
     requestOperators();
   }
+  renderSettings();
   startMiniAppRefresh();
 });
 socket.on('admin_settings', s => {
@@ -297,7 +296,7 @@ socket.on('admin_settings_updated', s => {
 });
 socket.on('admin_settings_forbidden', () => {
   S.permissions = { ...S.permissions, canManageSettings: false };
-  document.querySelector('.navbtn[data-view="settings"]')?.setAttribute('hidden', '');
+  renderSettings();
 });
 socket.on('admin_operators_updated', () => {
   if (S.permissions.canManageSettings) requestOperators();
@@ -376,7 +375,7 @@ socket.on('operational_alert', ({ message, details }) => toast(`${message}${deta
 socket.on('ticket_reminder', ({ waitingMinutes }) => toast(`Оператору отправлено напоминание: клиент ждёт ${waitingMinutes} мин`));
 socket.on('maintenance_updated', status => {
   S.maintenance = status;
-  if (S.view === 'health') renderMaintenance();
+  if (S.view === 'settings') renderMaintenance();
 });
 
 socket.on('admin_user_typing', ({ ticketId }) => {
@@ -402,15 +401,11 @@ function setFilter(filter) {
 }
 
 function setView(view) {
-  if (view === 'settings' && !S.permissions.canManageSettings) {
-    return toast('У вас нет доступа к настройкам', 'err');
-  }
-  S.view = view || 'chat';
+  S.view = view === 'health' ? 'settings' : (view || 'chat');
   tgImpact('light');
   document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
   $('settings').classList.toggle('on', S.view === 'settings');
   $('templates').classList.toggle('on', S.view === 'templates');
-  $('health').classList.toggle('on', S.view === 'health');
 
   if (S.view === 'chat') {
     $('welcome').style.display = S.current ? 'none' : 'grid';
@@ -422,7 +417,10 @@ function setView(view) {
     $('chat').style.display = 'none';
     $('main').classList.add('open');
   }
-  if (S.view === 'health') loadMaintenance();
+  if (S.view === 'settings') {
+    if (!S.settingsDirty) renderSettings();
+    loadMaintenance();
+  }
   if (S.view === 'settings' && S.permissions.canManageSettings) requestOperators();
   updateTelegramBackButton();
 }
@@ -908,29 +906,38 @@ function settingsCards(s, topicModeControl) {
 
 function renderSettings() {
   const s = S.settings || {};
+  const canManage = !!S.permissions.canManageSettings;
   const topicModeControl = s.telegramMode === 'private'
     ? '<div class="settings-note">Приватная тема создаётся автоматически после назначения. У бота должен быть включён Threaded Mode.</div>'
     : check('set-tg-create-topics','Создавать темы тикетов в группе',s.telegramCreateTopics);
   const filters = [['all','Все'],['operators','Операторы'],['general','Основные'],['automation','Автоматизация'],['telegram','Telegram'],['system','Система']];
+  const settingsContent = !canManage
+    ? '<div class="card control-access-note"><b>Настройки доступны руководителю</b><p>Состояние системы и очередей можно смотреть всем операторам. Изменение параметров требует отдельного права.</p></div>'
+    : !S.settings
+      ? '<div class="card maintenance-loading">Загружаю настройки…</div>'
+      : `<div class="control-settings-head"><div><span class="settings-eyebrow">Конфигурация</span><h2>Настройки</h2><p>Изменения применяются только после подтверждения сервером.</p></div><div class="settings-hero-actions"><button id="settings-export" class="ghost">Экспорт</button><button id="settings-test-alert" class="ghost">Тест уведомления</button></div></div>
+        <div class="settings-toolbar">
+          <input id="settings-search" type="search" value="${esc(S.settingsQuery)}" placeholder="Найти настройку…" aria-label="Поиск по настройкам">
+          <div class="settings-filters">${filters.map(([value,label]) => `<button type="button" data-settings-filter="${value}" class="${S.settingsFilter === value ? 'on' : ''}">${label}</button>`).join('')}</div>
+        </div>
+        <div id="settings-grid" class="grid settings-grid">${settingsCards(s, topicModeControl).join('')}</div>
+        <div id="settings-empty" class="settings-empty">По этому запросу настроек нет.</div>
+        <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {status}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
+        <div class="settings-savebar">
+          <div><b id="settings-save-state">Изменений нет</b><span id="settings-save-time">${S.settingsLastSavedAt ? `Сохранено ${esc(fmtStatusDate(S.settingsLastSavedAt))}` : 'Настройки загружены с сервера'}</span></div>
+          <button id="settings-discard" class="ghost" disabled>Отменить</button>
+          <button id="set-save" class="save" disabled>Сохранить настройки</button>
+        </div>`;
   $('settings').innerHTML = `<div class="section settings-section">
     <div class="settings-hero">
-      <div><span class="settings-eyebrow">Центр управления</span><h2>Настройки проекта</h2><p>Все безопасные параметры собраны здесь и применяются только после подтверждения сервером.</p></div>
-      <div class="settings-hero-actions"><button id="settings-export" class="ghost">Экспорт</button><button id="settings-test-alert" class="ghost">Тест уведомления</button></div>
+      <div><span class="settings-eyebrow">Единый центр</span><h2>Управление и состояние</h2><p>Живые показатели, Telegram, доставка, хранение и настройки собраны на одной странице.</p></div>
     </div>
-    <div class="settings-toolbar">
-      <input id="settings-search" type="search" value="${esc(S.settingsQuery)}" placeholder="Найти настройку…" aria-label="Поиск по настройкам">
-      <div class="settings-filters">${filters.map(([value,label]) => `<button type="button" data-settings-filter="${value}" class="${S.settingsFilter === value ? 'on' : ''}">${label}</button>`).join('')}</div>
-    </div>
-    <div id="settings-grid" class="grid settings-grid">${settingsCards(s, topicModeControl).join('')}</div>
-    <div id="settings-empty" class="settings-empty">По этому запросу настроек нет.</div>
-    <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {status}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
-    <div class="settings-savebar">
-      <div><b id="settings-save-state">Изменений нет</b><span id="settings-save-time">${S.settingsLastSavedAt ? `Сохранено ${esc(fmtStatusDate(S.settingsLastSavedAt))}` : 'Настройки загружены с сервера'}</span></div>
-      <button id="settings-discard" class="ghost" disabled>Отменить</button>
-      <button id="set-save" class="save" disabled>Сохранить настройки</button>
-    </div>
+    <div id="control-health"></div>
+    <div class="control-divider"></div>
+    ${settingsContent}
   </div>`;
-  bindSettingsUi();
+  renderMaintenance();
+  if (canManage && S.settings) bindSettingsUi();
 }
 
 function settingsPayload() {
@@ -1001,19 +1008,21 @@ function updateSettingsDirtyState() {
   const state = $('settings-save-state');
   const save = $('set-save');
   const discard = $('settings-discard');
+  const savebar = document.querySelector('.settings-savebar');
   if (state) state.textContent = S.settingsSaving ? 'Сохраняю…' : S.settingsDirty ? 'Есть несохранённые изменения' : 'Изменений нет';
   if (save) {
     save.disabled = !S.settingsDirty || S.settingsSaving;
     save.textContent = S.settingsSaving ? 'Сохраняю…' : 'Сохранить настройки';
   }
   if (discard) discard.disabled = !S.settingsDirty || S.settingsSaving;
+  savebar?.classList.toggle('on', S.settingsDirty || S.settingsSaving);
 }
 
 function requestOperators() {
   socket.timeout(12000).emit('admin_get_operators', {}, (timeoutError, result) => {
     if (timeoutError || !result?.ok) return;
     S.operators = result.operators || [];
-    if (S.view === 'settings') renderSettings();
+    if (S.view === 'settings' && !S.settingsDirty) renderSettings();
   });
 }
 
@@ -1061,7 +1070,7 @@ function saveManagedOperator(row) {
       if (index >= 0) S.operators[index] = saved;
       else S.operators.push(saved);
       S.operators.sort((a, b) => Number(b.active) - Number(a.active) || String(a.displayName).localeCompare(String(b.displayName), 'ru'));
-      if (S.view === 'settings') renderSettings();
+      if (S.view === 'settings' && !S.settingsDirty) renderSettings();
     }
     toast('Права оператора сохранены', 'ok');
     requestOperators();
@@ -1212,7 +1221,7 @@ async function loadMaintenance() {
     S.systemHealth = health;
     renderMaintenance();
   } catch (error) {
-    if (S.view === 'health') toast(error.message || 'Не удалось получить состояние системы', 'err');
+    if (S.view === 'settings') toast(error.message || 'Не удалось получить состояние системы', 'err');
   }
 }
 
@@ -1231,11 +1240,11 @@ async function runMaintenanceAction(action) {
 }
 
 function renderMaintenance() {
-  const root = $('health');
+  const root = $('control-health');
   if (!root) return;
   const m = S.maintenance;
   if (!m) {
-    root.innerHTML = '<div class="section"><h2>Состояние системы</h2><p>Проверяю резервные копии, файлы и свободное место…</p><div class="card maintenance-loading">Загрузка…</div></div>';
+    root.innerHTML = '<div class="maintenance-title"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Проверяю Telegram, realtime, резервные копии и свободное место…</p></div><button id="maintenance-refresh" class="ghost" disabled>Обновляю…</button></div><div class="card maintenance-loading">Загрузка…</div>';
     return;
   }
   const diskClass = !m.config?.diskMonitoringEnabled ? '' : m.diskLevel === 'critical' ? 'critical' : m.diskLevel === 'warning' ? 'warning' : 'ok';
@@ -1250,10 +1259,22 @@ function renderMaintenance() {
     Number(tgDelivery.pendingMessages || 0) + Number(tgDelivery.pendingCustomerReplies || 0);
   const telegramClass = !tg?.configured || !tg?.enabled ? 'warning' : telegramHealthy && !telegramBacklog ? 'ok' : 'critical';
   const telegramLabel = !tg?.configured ? 'Не настроен' : !tg?.enabled ? 'Выключен' : telegramHealthy ? 'На связи' : 'Нет связи';
+  const pollingLabel = !tg?.configured || !tg?.enabled
+    ? 'неактивен'
+    : tg?.mode !== 'private' || tg?.polling?.owner ? 'активен' : 'ожидает';
+  const remindersEnabled = tgReminders.enabled ?? S.settings?.telegramUnansweredReminderEnabled ?? false;
+  const remindersLabel = !remindersEnabled
+    ? 'выключены'
+    : !tg?.configured || !tg?.enabled
+      ? 'ожидают бота'
+      : tgReminders.pausedOutsideWorkHours ? 'пауза' : 'активны';
+  const reminderStart = Number(tgReminders.workStartHour ?? S.settings?.workStartHour ?? 0);
+  const reminderEnd = Number(tgReminders.workEndHour ?? S.settings?.workEndHour ?? 0);
+  const reminderTimezone = tgReminders.timezone || S.settings?.timezone || '—';
   const realtime = S.systemHealth?.realtime || {};
   const realtimeTransports = realtime.transports || {};
-  root.innerHTML = `<div class="section maintenance-section">
-    <div class="maintenance-title"><div><h2>Состояние системы</h2><p>Резервные копии, загрузки и состояние диска обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
+  root.innerHTML = `<div class="control-health-block">
+    <div class="maintenance-title"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Telegram, realtime, очереди, резервные копии и диск обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
       <div class="health-stat ${backupClass}"><span>Backup</span><b>${backupLabel}</b><small>${esc(fmtStatusDate(m.lastBackupAt))}</small></div>
       <div class="health-stat ${diskClass}"><span>Диск</span><b>${m.disk ? `${m.disk.usedPercent}%` : '—'}</b><small>${m.disk ? `${fmtBytes(m.disk.freeBytes)} свободно` : 'нет данных'}</small></div>
@@ -1275,9 +1296,9 @@ function renderMaintenance() {
       <div class="maintenance-summary">
         <div class="health-stat ${telegramClass}"><span>Бот</span><b>${telegramLabel}</b><small>${esc(tg?.botUsername ? `@${tg.botUsername}` : tg?.mode || '—')}</small></div>
         <div class="health-stat ${telegramBacklog ? 'warning' : 'ok'}"><span>Очередь</span><b>${telegramBacklog}</b><small>входящие ${Number(tgDelivery.pendingIncomingMessages || 0)} · оператору ${Number(tgDelivery.pendingMessages || 0)} · клиенту ${Number(tgDelivery.pendingCustomerReplies || 0)}</small></div>
-        <div class="health-stat ${Number(tg?.polling?.conflicts || 0) ? 'warning' : 'ok'}"><span>Polling</span><b>${tg?.mode !== 'private' || tg?.polling?.owner ? 'активен' : 'ожидает'}</b><small>конфликтов ${Number(tg?.polling?.conflicts || 0)}</small></div>
+        <div class="health-stat ${Number(tg?.polling?.conflicts || 0) ? 'warning' : telegramHealthy ? 'ok' : ''}"><span>Polling</span><b>${pollingLabel}</b><small>конфликтов ${Number(tg?.polling?.conflicts || 0)}</small></div>
         <div class="health-stat ${Number(tgDelivery.mediaFailures || 0) ? 'warning' : 'ok'}"><span>Медиа</span><b>${Number(tgDelivery.mediaFailures || 0)}</b><small>ошибок загрузки</small></div>
-        <div class="health-stat ${tgReminders.pausedOutsideWorkHours ? '' : 'ok'}"><span>Напоминания</span><b>${!tgReminders.enabled ? 'выключены' : tgReminders.pausedOutsideWorkHours ? 'пауза' : 'активны'}</b><small>${Number(tgReminders.workStartHour ?? 0)}:00–${Number(tgReminders.workEndHour ?? 0)}:00 · ${esc(tgReminders.timezone || '—')}</small></div>
+        <div class="health-stat ${telegramHealthy && remindersEnabled && !tgReminders.pausedOutsideWorkHours ? 'ok' : ''}"><span>Напоминания</span><b>${remindersLabel}</b><small>${reminderStart}:00–${reminderEnd}:00 · ${esc(reminderTimezone)}</small></div>
       </div>
       <dl class="health-details">
         <div><dt>Последняя успешная доставка</dt><dd>${esc(fmtStatusDate(tgDelivery.lastSuccessAt))}</dd></div>

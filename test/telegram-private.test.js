@@ -171,7 +171,19 @@ const fakeBot = telegram.init(
     scheduleWelcomeMessages: ticketId => welcomeTickets.push(ticketId),
     scheduleOperatorWaitMessage: (ticketId, afterMessageId) => {
       operatorWaits.push({ ticketId, afterMessageId });
-    }
+    },
+    getControlCenterStatus: () => ({
+      health: {
+        version: 'test-version',
+        uptime: 120,
+        realtime: { connectedClients: 3, transports: { websocket: 2, polling: 1 } }
+      },
+      maintenance: {
+        config: { backupEnabled: true },
+        lastBackupAt: new Date().toISOString(),
+        disk: { usedPercent: 42, freeBytes: 2 * 1024 ** 3 }
+      }
+    })
   }
 );
 saveSettings({ workStartHour: 0, workEndHour: 24 });
@@ -234,6 +246,25 @@ test('an operator added from settings can use the bot without settings access', 
   assert.ok(rich.some(item => item.chatId === '7002'));
   const dashboard = db.getTelegramOperatorDashboard.get('7002');
   assert.ok(dashboard.dashboard_message_id);
+  const dashboardCard = rich.findLast(item => item.chatId === '7002');
+  assert.ok(dashboardCard.options?.reply_markup?.inline_keyboard?.flat().some(button =>
+    button.callback_data === 'system:show'
+  ));
+  await fakeBot.handlers.callback_query({
+    id: 'operator-system-query',
+    from: { id: 7002, first_name: 'Новый', last_name: 'оператор' },
+    message: { message_id: dashboard.dashboard_message_id, chat: { id: 7002, type: 'private' } },
+    data: 'system:show'
+  });
+  const systemPanel = edits.findLast(item =>
+    item.options?.message_id === dashboard.dashboard_message_id ||
+    item.text?.message_id === dashboard.dashboard_message_id
+  );
+  const systemText = systemPanel.text?.rich_message?.markdown || systemPanel.text;
+  assert.match(systemText, /Система и настройки/);
+  assert.match(systemText, /Напоминания/);
+  assert.match(systemText, /Realtime:\*\* 3 подключено · WS 2 \/ polling 1/);
+  assert.ok(systemText.includes('test\\-version'));
   const richBeforeQueue = rich.length;
   await fakeBot.handlers.message({
     message_id: 703,
