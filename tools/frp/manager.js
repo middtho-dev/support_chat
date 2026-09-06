@@ -1,0 +1,193 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { spawn, execFile } = require('child_process');
+const { promisify } = require('util');
+const exec = promisify(execFile);
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function validateConfig(input) {
+  const host = String(input.host || '').trim();
+  const port = Number(input.port);
+  if (!/^[a-zA-Z0-9.-]{1,253}$/.test(host)) throw new Error('Укажите домен или IPv4 сервера');
+  if (!Number.isInteger(port) || port < 2000 || port > 65535) throw new Error('Порт должен быть от 2000 до 65535');
+  return { host, port };
+}
+
+function allowedRanges(excluded) {
+  const ports = [...new Set(excluded.filter(p => p >= 2000 && p <= 65535))].sort((a, b) => a - b);
+  const ranges = [];
+  let start = 2000;
+  for (const port of ports) { if (start < port) ranges.push({ start, end: port - 1 }); start = port + 1; }
+  if (start <= 65535) ranges.push({ start, end: 65535 });
+  return ranges;
+}
+
+function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'data') } = {}) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const statePath = path.join(directory, 'state.json');
+  const binary = path.join(directory, process.platform === 'win32' ? 'frps.exe' : 'frps');
+  let state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {
+    host: 'routers.kv9.ru', port: 7000, enabled: false, token: crypto.randomBytes(32).toString('hex'),
+    dashboardPassword: crypto.randomBytes(32).toString('hex'), devices: []
+  };
+  let child = null, busy = false, error = null, monitoringError = null, closing = false;
+  let dashboardPort = 0;
+  let refreshing = null;
+  state.clients ||= [];
+  const save = () => {
+    fs.writeFileSync(statePath + '.tmp', JSON.stringify(state, null, 2), { mode: 0o600 });
+    fs.renameSync(statePath + '.tmp', statePath);
+  };
+  save();
+  async function dashboard(route) {
+    const res = await fetch(`http://127.0.0.1:${dashboardPort}/api/${route}`, {
+      headers: { Authorization: `Basic ${Buffer.from(`admin:${state.dashboardPassword}`).toString('base64')}` },
+      signal: AbortSignal.timeout(3000)
+    });
+    if (!res.ok) throw new Error(`FRP API: HTTP ${res.status}`);
+    return res.json();
+  }
+  async function refresh() {
+    if (!child) return;
+    if (refreshing) return refreshing;
+    refreshing = (async () => {
+      try {
+        const [clients, ...lists] = await Promise.all([dashboard('clients'), ...['tcp', 'udp'].map(async type => {
+          const data = await dashboard(`proxy/${type}`);
+          if (!Array.isArray(data.proxies)) throw new Error('Неизвестный формат FRP API');
+          return data.proxies.map(p => ({ name: String(p.name), type, port: p.conf?.remotePort ?? null,
+            user: p.user || '', clientID: p.clientID || '', online: p.status === 'online', connections: p.curConns || 0 }));
+        })]);
+        if (!Array.isArray(clients)) throw new Error('Неизвестный формат списка клиентов FRP');
+        if (!child) return;
+        const known = new Map(state.devices.map(d => [`${d.type}:${d.name}`, { ...d, online: false }]));
+        for (const d of lists.flat()) {
+          const key = `${d.type}:${d.name}`;
+          known.set(key, { ...known.get(key), ...d, port: d.port ?? known.get(key)?.port ?? null, lastSeen: d.online ? new Date().toISOString() : known.get(key)?.lastSeen || null });
+        }
+        state.devices = [...known.values()].slice(-10000);
+        const knownClients = new Map(state.clients.map(c => [c.key, { ...c, online: false }]));
+        for (const c of clients) knownClients.set(c.key, {
+          key: c.key, clientID: c.clientID, user: c.user, hostname: c.hostname, ip: c.clientIP,
+          online: c.online, lastSeen: c.online ? new Date().toISOString() : knownClients.get(c.key)?.lastSeen || null
+        });
+        state.clients = [...knownClients.values()].slice(-10000);
+        monitoringError = null;
+        save();
+      } catch (e) { monitoringError = e.message; }
+    })().finally(() => { refreshing = null; });
+    return refreshing;
+  }
+  async function stop() {
+    const proc = child;
+    if (!proc) return;
+    proc.kill('SIGTERM');
+    for (let i = 0; i < 40 && child === proc; i++) await delay(100);
+    if (child === proc) {
+      proc.kill('SIGKILL');
+      for (let i = 0; i < 20 && child === proc; i++) await delay(100);
+    }
+    if (child === proc) throw new Error('Не удалось остановить FRP');
+  }
+  async function start() {
+    if (closing) throw new Error('Панель завершает работу');
+    if (child) return;
+    if (!fs.existsSync(binary)) throw new Error('Сначала установите FRP');
+    // The dashboard uses a free loopback port and is never exposed publicly.
+    const net = require('net');
+    const listener = net.createServer();
+    await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
+    dashboardPort = listener.address().port;
+    await new Promise(resolve => listener.close(resolve));
+    const ranges = allowedRanges([state.port, dashboardPort, Number(process.env.FRP_PANEL_PORT || 7400), ...String(process.env.FRP_RESERVED_PORTS || '3000,3001').split(',').map(Number)]);
+    const config = `bindAddr = "0.0.0.0"\nbindPort = ${state.port}\nauth.method = "token"\nauth.token = ${JSON.stringify(state.token)}\ntransport.tls.force = true\nwebServer.addr = "127.0.0.1"\nwebServer.port = ${dashboardPort}\nwebServer.user = "admin"\nwebServer.password = ${JSON.stringify(state.dashboardPassword)}\nallowPorts = [${ranges.map(r => `{ start = ${r.start}, end = ${r.end} }`).join(', ')}]\n`;
+    const configPath = path.join(directory, 'frps.toml');
+    fs.writeFileSync(configPath, config, { mode: 0o600 });
+    if (closing) throw new Error('Панель завершает работу');
+    const proc = spawn(binary, ['-c', configPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    child = proc;
+    let output = '';
+    const capture = chunk => { output = (output + chunk.toString()).slice(-2000); };
+    proc.stdout.on('data', capture); proc.stderr.on('data', capture);
+    proc.once('error', e => { error = e.message; if (child === proc) child = null; });
+    proc.once('exit', code => {
+      if (child === proc) child = null;
+      if (code && !closing) error = `FRP завершился (${code}): ${output.replaceAll(state.token, '[secret]').replaceAll(state.dashboardPassword, '[secret]')}`;
+    });
+    for (let i = 0; i < 30; i++) {
+      if (!child) throw new Error(error || 'FRP не запустился');
+      try { await dashboard('serverinfo'); error = null; await refresh(); return; } catch { await delay(200); }
+    }
+    await stop();
+    throw new Error('FRP не ответил после запуска. Проверьте доступность порта.');
+  }
+  async function install() {
+    if (child) throw new Error('Остановите FRP перед установкой');
+    const platform = { linux: 'linux', win32: 'windows', darwin: 'darwin' }[process.platform];
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch];
+    if (!platform || !arch) throw new Error('Поддерживаются Linux, Windows и macOS: x64/arm64');
+    const response = await fetch('https://api.github.com/repos/fatedier/frp/releases/latest', { signal: AbortSignal.timeout(20000) });
+    if (!response.ok) throw new Error(`GitHub: HTTP ${response.status}`);
+    const release = await response.json();
+    const version = String(release.tag_name).replace(/^v/, '');
+    if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Некорректная версия FRP');
+    const stem = `frp_${version}_${platform}_${arch}`;
+    const asset = release.assets.find(a => a.name === `${stem}.${platform === 'windows' ? 'zip' : 'tar.gz'}`);
+    if (!asset || !/^sha256:[a-f0-9]{64}$/.test(asset.digest || '')) throw new Error('Для архива FRP отсутствует SHA-256');
+    const url = new URL(asset.browser_download_url);
+    if (url.origin !== 'https://github.com' || !url.pathname.startsWith('/fatedier/frp/releases/download/')) throw new Error('Некорректный адрес загрузки FRP');
+    const download = await fetch(url, { signal: AbortSignal.timeout(120000) });
+    if (!download.ok) throw new Error(`Загрузка FRP: HTTP ${download.status}`);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    if (`sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}` !== asset.digest) throw new Error('Контрольная сумма FRP не совпала');
+    const temporary = fs.mkdtempSync(path.join(directory, 'install-'));
+    try {
+      const archive = path.join(temporary, asset.name);
+      fs.writeFileSync(archive, bytes);
+      const member = `${stem}/${path.basename(binary)}`;
+      await exec('tar', ['-xf', archive, '-C', temporary, member], { timeout: 30000, windowsHide: true });
+      const extracted = path.join(temporary, path.basename(binary));
+      fs.renameSync(path.join(temporary, member), extracted);
+      fs.chmodSync(extracted, 0o700);
+      await exec(extracted, ['--version'], { timeout: 10000, windowsHide: true });
+      fs.copyFileSync(extracted, binary + '.new');
+      fs.chmodSync(binary + '.new', 0o700);
+      fs.renameSync(binary + '.new', binary);
+      state.version = version; save();
+    } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+  }
+  const timer = setInterval(() => { if (!busy && !closing) refresh(); }, 5000);
+  timer.unref();
+  return {
+    async init() { if (state.enabled) { busy = true; try { await start(); } catch (e) { error = e.message; } finally { busy = false; } } },
+    async status() {
+      return { installed: fs.existsSync(binary), version: state.version || null, running: !!child, busy,
+        enabled: state.enabled, host: state.host, port: state.port, error, monitoringError,
+        devices: state.devices.map(d => ({ ...d, online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
+        clients: state.clients.map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
+        token: state.token };
+    },
+    async action(action, config = {}) {
+      if (busy || closing) throw new Error('Дождитесь завершения текущей операции');
+      busy = true; error = null;
+      try {
+        if (action === 'install') await install();
+        else if (action === 'start') { await start(); state.enabled = true; save(); }
+        else if (action === 'stop') { state.enabled = false; save(); await stop(); }
+        else if (action === 'configure') {
+          if (child) throw new Error('Остановите FRP перед изменением настроек');
+          const validated = validateConfig(config);
+          if ([Number(process.env.FRP_PANEL_PORT || 7400), ...String(process.env.FRP_RESERVED_PORTS || '3000,3001').split(',').map(Number)].includes(validated.port)) throw new Error('Этот порт зарезервирован другим приложением');
+          Object.assign(state, validated); save();
+        } else throw new Error('Неизвестная операция');
+      } catch (e) { error = e.message; throw e; } finally { busy = false; }
+      return this.status();
+    },
+    async shutdown() { closing = true; clearInterval(timer); await stop(); if (refreshing) await refreshing; }
+  };
+}
+
+module.exports = { createFrp, validateConfig, allowedRanges };

@@ -27,3 +27,9 @@ jobs:
 
       - name: Integration tests
         run: npm test
+
+      - name: FRP standalone checks
+        working-directory: tools/frp
+        run: |
+          npm run check
+          npm test

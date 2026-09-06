@@ -1,0 +1,11 @@
+{
+  "name": "multitool-frp",
+  "private": true,
+  "version": "1.0.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check manager.js && node --check public/app.js",
+    "test": "node --test test"
+  }
+}
