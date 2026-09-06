@@ -25,6 +25,9 @@ jobs:
       - name: Syntax check
         run: npm run check
 
+      - name: Deployment shell syntax
+        run: bash -n tools/frp/setup-https.sh scripts/write-caddyfile.sh
+
       - name: Integration tests
         run: npm test
 

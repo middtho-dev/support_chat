@@ -52,5 +52,6 @@ ${domain} {
         output stdout
     }
 }
+import /etc/caddy/frp-sites/*.caddy
 CADDY
 }
