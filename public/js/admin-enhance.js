@@ -6,6 +6,7 @@
   let currentMessages = [];
   let activeSocket = null;
   let cardOpen = false;
+  let cardReturnFocus = null;
 
   const $ = id => document.getElementById(id);
   const esc = value => value == null ? '' : String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
@@ -67,7 +68,7 @@
         <span class="meta-separator"></span>
         <span class="meta-fact">Ответ: ${esc(firstResponse ? fmtTime(firstResponse.created_at) : 'нет')}</span>
       </div>
-      <button id="meta-card-open" class="meta-card-open" type="button">Карточка тикета</button>`;
+      <button id="meta-card-open" class="meta-card-open" type="button">Карточка обращения</button>`;
     $('meta-card-open')?.addEventListener('click', openTicketCard);
     renderTicketCardDialog(firstResponse, pending);
   }
@@ -103,14 +104,14 @@
         </div>`
       : `<div class="ticket-customer compact">
           <span class="ticket-source-badge web">Сайт</span>
-          <span>Тикет создан в веб-чате</span>
+          <span>Обращение создано в веб-чате</span>
           ${currentTicket.status === 'open' ? `<div class="ticket-customer-actions"><button id="send-customer-control" class="customer-action" type="button">${esc(customerControlLabel())}</button></div>` : ''}
         </div>`;
     dialog.innerHTML = `
       <button class="ticket-card-backdrop" type="button" aria-label="Закрыть карточку"></button>
       <section class="ticket-card-sheet" role="dialog" aria-modal="true" aria-labelledby="ticket-card-title">
         <div class="ticket-card-head">
-          <div><h3 id="ticket-card-title">Карточка тикета</h3><p>${esc(currentTicket.user_name || 'Клиент')} · #${esc(String(currentTicket.id || '').slice(0, 8))}</p></div>
+          <div><h3 id="ticket-card-title">Карточка обращения</h3><p>${esc(currentTicket.user_name || 'Клиент')} · #${esc(String(currentTicket.id || '').slice(0, 8))}</p></div>
           <button id="ticket-card-close" class="ticket-card-close" type="button" aria-label="Закрыть">×</button>
         </div>
         <div class="ticket-card-stats">
@@ -186,6 +187,7 @@
   }
 
   function openTicketCard() {
+    cardReturnFocus = document.activeElement;
     cardOpen = true;
     if (!currentTicket) return;
     renderTicketMeta();
@@ -196,6 +198,7 @@
     cardOpen = false;
     $('ticket-card-dialog')?.classList.remove('open');
     $('ticket-card-dialog')?.setAttribute('aria-hidden', 'true');
+    if (cardReturnFocus?.isConnected) cardReturnFocus.focus();
   }
 
   function addPresetTag(tag) {
@@ -302,7 +305,14 @@
   wrapSocketFactory();
   observeDom();
   window.adminOpenTicketCard = openTicketCard;
+  window.adminResetTicketCard = () => { cardOpen = false; currentTicket = null; currentMessages = []; ticketMap.clear(); $('ticket-card-dialog')?.remove(); $('ticket-meta')?.remove(); };
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && cardOpen) closeTicketCard();
+    if (event.key === 'Tab' && cardOpen) {
+      const nodes = [...document.querySelectorAll('.ticket-card-sheet button:not(:disabled),.ticket-card-sheet input,.ticket-card-sheet textarea,.ticket-card-sheet a')];
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
   });
 })();

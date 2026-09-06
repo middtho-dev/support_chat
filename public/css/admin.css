@@ -605,22 +605,3 @@ body.tg-mini input,body.tg-mini textarea,body.tg-mini select{font-size:16px!impo
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
-/* Shared devices section inside desktop admin and Telegram Mini App. */
-.navbtn[hidden] { display:none!important; }
-body.frp-active .workspace { grid-template-columns:72px minmax(0,1fr); }
-body.frp-active #side { display:none!important; }
-#frp .frp-wrap { max-width:1200px; width:100%; margin:0 auto; padding:8px; }
-#frp h2 { margin:0 0 12px; }
-#frp p { color:var(--muted); line-height:1.6; }
-#frp .frp-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin:18px 0; }
-#frp label { display:grid; gap:6px; max-width:100%; }
-#frp input,#frp select { max-width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); color:var(--text); }
-#frp .frp-table { overflow-x:auto; margin:16px 0 24px; border:1px solid var(--line); border-radius:10px; }
-#frp table { width:100%; border-collapse:collapse; text-align:left; }
-#frp td,#frp th { padding:12px; border-bottom:1px solid var(--line); white-space:nowrap; }
-#frp a { color:#55b7ff; text-decoration:underline; text-underline-offset:3px; }
-#frp details { padding:14px; border:1px solid var(--line); border-radius:10px; margin:16px 0; }
-#frp summary { cursor:pointer; font-weight:600; }
-#frp pre { overflow:auto; background:var(--panel2); padding:14px; }
-#frp-error { color:#fb7185!important; white-space:pre-wrap; overflow-wrap:anywhere; }
-@media(max-width:720px) { #frp .frp-actions label { width:100%; } body.frp-active .workspace { grid-template-columns:1fr; } }
