@@ -11,15 +11,33 @@ const { DEFAULTS, initialConfig } = require('../config');
 test('port ranges exclude service ports and retain both boundaries', () => {
   const ranges = allowedRanges([7000, 7400, 3001, 7400]);
   const includes = p => ranges.some(r => p >= r.start && p <= r.end);
-  for (const p of [2000, 65535, 6999, 7001]) assert.ok(includes(p));
-  for (const p of [1999, 7000, 7400, 3001]) assert.ok(!includes(p));
-  assert.deepEqual(allowedRanges([2000, 65535]), [{ start: 2001, end: 65534 }]);
+  for (const p of [1000, 1999, 2000, 65535, 6999, 7001]) assert.ok(includes(p));
+  for (const p of [999, 7000, 7400, 3001]) assert.ok(!includes(p));
+  assert.deepEqual(allowedRanges([1000, 65535]), [{ start: 1001, end: 65534 }]);
 });
 
 test('configuration rejects invalid ports and TOML injection', () => {
-  for (const port of [0, 1999, 65536, 2000.5, 'abc']) assert.throws(() => validateConfig({ host: 'router.kv9.ru', port }));
+  for (const port of [0, 999, 65536, 1000.5, 'abc']) assert.throws(() => validateConfig({ host: 'router.kv9.ru', port }));
   assert.throws(() => validateConfig({ host: 'evil"\nauth.token="x', port: 7000 }));
   assert.deepEqual(validateConfig({ host: 'router.kv9.ru', port: 7000 }), DEFAULTS);
+});
+
+test('range beginning at 1000 persists and service exclusions cannot be removed', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'frp-range-'));
+  let manager = createFrp({ directory });
+  try {
+    await manager.action('configure', { portStart: 1000, portEnd: 65535, reservedPorts: '1500' });
+    await manager.shutdown(); manager = createFrp({ directory });
+    const s = await manager.status();
+    const includes = p => s.allowedRanges.some(r => p >= r.start && p <= r.end);
+    assert.equal(s.portStart, 1000);
+    for (const p of [1000, 1999, 65535]) assert.ok(includes(p));
+    for (const p of [999, 1500, 2019, 3000, 3001, 7000, 7400]) assert.ok(!includes(p));
+    await assert.rejects(manager.action('configure', { portStart: 999 }));
+    await assert.rejects(manager.action('configure', { port: 2019 }), /зарезервирован/);
+    await manager.action('configure', { portStart: 1100, portEnd: 1800 });
+    assert.deepEqual((await manager.status()).allowedRanges, [{ start: 1100, end: 1499 }, { start: 1501, end: 1800 }]);
+  } finally { await manager.shutdown(); fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('custom ranges, addresses and initial environment settings are validated', () => {
