@@ -29,6 +29,9 @@ test('custom ranges, addresses and initial environment settings are validated', 
   assert.deepEqual(allowedRanges(config.reservedPorts, config.portStart, config.portEnd), [{ start: 8000, end: 8000 }, { start: 8002, end: 8100 }]);
   assert.deepEqual(initialConfig({ FRP_RESERVED_PORTS: '' }).reservedPorts, []);
   assert.equal(validateConfig({ host: '::1', bindAddr: '::' }).host, '::1');
+  assert.equal(validateConfig({ compatibilityMode: 'true' }).compatibilityMode, true);
+  assert.equal(validateConfig({ compatibilityMode: 'false' }).compatibilityMode, false);
+  assert.throws(() => validateConfig({ compatibilityMode: 'no' }));
   for (const input of [{ host: 'https://example.org' }, { host: '-invalid.org' }, { portStart: 9000, portEnd: 8000 }, { reservedPorts: 'oops' }, { refreshSeconds: 0 }, { historyLimit: -1 }, { bindAddr: 'x"\n' }]) assert.throws(() => validateConfig(input));
 });
 
@@ -39,6 +42,7 @@ test('legacy typo migrates once, custom settings and token survive restart', asy
   let manager = createFrp({ directory });
   try {
     assert.equal((await manager.status()).host, 'router.kv9.ru');
+    await manager.action('configure', { compatibilityMode: true });
     await manager.action('configure', { host: 'my-router.example.org', port: 7200, portStart: 8000, portEnd: 8100, reservedPorts: '8000,8002', refreshSeconds: 12, historyLimit: 200, newToken: 'replacement-device-token-12345' });
     const before = await manager.status();
     assert.equal(before.allowedRanges[0].start, 8001);
@@ -47,7 +51,7 @@ test('legacy typo migrates once, custom settings and token survive restart', asy
     assert.equal((await manager.status()).token, 'replacement-device-token-12345');
     await manager.shutdown(); manager = createFrp({ directory });
     const after = await manager.status();
-    for (const key of ['host', 'port', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit', 'token']) assert.deepEqual(after[key], before[key]);
+    for (const key of ['compatibilityMode', 'host', 'port', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit', 'token']) assert.deepEqual(after[key], before[key]);
     await manager.action('configure', { host: 'routers.kv9.ru' });
     await manager.shutdown(); manager = createFrp({ directory });
     assert.equal((await manager.status()).host, 'routers.kv9.ru');
