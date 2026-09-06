@@ -377,6 +377,8 @@ function normalizeIncomingDocument(fileName, declaredMime) {
 function isThreadNotFound(error) {
   const message = tgError(error).toLowerCase();
   return message.includes('thread not found') ||
+    message.includes('topic_id_invalid') ||
+    message.includes('message_thread_id_invalid') ||
     message.includes('topic_deleted') ||
     message.includes('topic_closed');
 }

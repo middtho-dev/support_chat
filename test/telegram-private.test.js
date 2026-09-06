@@ -1203,3 +1203,17 @@ test('expired and permanently forbidden deletions stop while new cleanup still p
     assert.match(db.db.prepare('SELECT last_error FROM telegram_customer_cleanup_queue WHERE message_id = 99991').get().last_error, /48 hours/);
   } finally { fakeBot.deleteMessage = originalDelete; }
 });
+
+test('invalid Telegram topic IDs clear only the stale thread association', async () => {
+  const id = 'missing-topic-code-ticket';
+  db.createTicket.run(id, 'Missing topic', 'missing-topic-code-session');
+  db.assignTicket.run('7001', id);
+  db.saveTelegramThread.run(id, '7001', '7001', 98981, null);
+  const original = fakeBot.sendChatAction;
+  fakeBot.sendChatAction = () => Promise.reject(new Error('Bad Request: TOPIC_ID_INVALID'));
+  try {
+    assert.equal(await telegram.checkTopicAlive(db.getTicketById.get(id)), true);
+    assert.equal(db.getTelegramThreadForTicket.get(id), undefined);
+    assert.equal(db.getTicketById.get(id).status, 'open');
+  } finally { fakeBot.sendChatAction = original; }
+});
