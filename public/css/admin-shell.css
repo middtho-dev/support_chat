@@ -94,3 +94,4 @@ body.tg-mini .bubble{background:var(--panel3)!important}body.tg-mini .out .bubbl
 .voice-actions{gap:8px}.voice-actions button{padding:9px 13px}
 @media(max-width:560px){.voice-section .card{padding:16px}.voice-network{align-items:flex-start;flex-direction:column}.voice-network button{width:100%}.voice-field.voice-toggle{min-height:44px}.voice-help ol{padding-left:20px}}
 @media(prefers-reduced-motion:reduce){.voice-switch-track,.voice-switch-track::after{transition:none}}
+.voice-presets{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.voice-presets p{width:100%;margin:0}.voice-job small{color:var(--muted);line-height:1.6}
