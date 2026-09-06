@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const http = require('http');
 const { createFrpProxy } = require('../src/frp-proxy');
-const { deviceUrl, primaryProxy } = require('../tools/frp/public/device-links');
+const { deviceUrl, primaryProxy, groupDevices } = require('../tools/frp/public/device-links');
 
 test('unified FRP API checks admin/Mini App permissions and hides service credentials', async () => {
   const seen = [];
@@ -42,7 +42,30 @@ test('device names use the device HTTP port, SSH uses SSH and unsafe URLs are re
   assert.equal(deviceUrl('router.kv9.ru', web), 'http://router.kv9.ru:8017/');
   assert.equal(deviceUrl('router.kv9.ru', ssh), 'ssh://router.kv9.ru:2221/');
   assert.equal(primaryProxy([ssh, web]), web);
+  assert.equal(primaryProxy([ssh]), undefined);
   assert.equal(deviceUrl('javascript:alert(1)', web), null);
   assert.equal(deviceUrl('router.kv9.ru', { ...web, type: 'udp' }), null);
   assert.equal(deviceUrl('router.kv9.ru', { ...web, port: 99999 }), null);
+});
+
+test('one device contains all its ports; empty stale sessions do not inflate totals', () => {
+  const ports = [
+    { name: 'Home_SSH', clientID: 'new', type: 'tcp', port: 2221, online: true },
+    { name: 'Home_Luci', clientID: 'new', type: 'tcp', port: 8021, online: true },
+    { name: 'Home_extra', clientID: 'new', type: 'udp', port: 9000, online: true },
+    { name: 'Other_Luci', clientID: 'other', type: 'tcp', port: 8040, online: false }
+  ];
+  const rows = groupDevices(ports, [
+    { clientID: 'old', ip: 'same-nat', online: false },
+    { clientID: 'new', ip: 'same-nat', online: true },
+    { clientID: 'other', ip: 'same-nat', online: false },
+    { clientID: 'no-tunnels', online: true }
+  ]);
+  assert.equal(rows.length, 3);
+  const home = rows.find(r => r.name === 'Home');
+  assert.equal(home.ports.length, 3);
+  assert.equal(home.primary.port, 8021);
+  assert.equal(rows.find(r => r.name === 'Other').online, false);
+  assert.equal(rows.find(r => r.name === 'no-tunnels').ports.length, 0);
+  assert.equal(groupDevices([{ name: 'Legacy_Luci', online: true }, { name: 'Legacy_SSH', online: true }]).length, 1);
 });
