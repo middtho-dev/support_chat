@@ -7,6 +7,8 @@ const Database = require('better-sqlite3');
 const { createMaintenance } = require('../src/maintenance');
 
 test('backup is verified and orphan cleanup preserves referenced uploads', async t => {
+  // Backup assertions should not depend on free space on the test runner.
+  t.mock.method(fs, 'statfsSync', () => ({ blocks: 1000n, bavail: 500n, bsize: 4096n }));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'support-maintenance-'));
   const uploadsDir = path.join(root, 'uploads');
   const backupDir = path.join(root, 'backups');
