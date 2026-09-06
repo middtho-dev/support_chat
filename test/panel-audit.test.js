@@ -23,3 +23,14 @@ test('revoked realtime sessions leave the admin room and cannot dispatch actions
     assert.deepEqual(events, ['admin', 'admin_auth_error', 'disconnect']);
   } finally { cleanup(); }
 });
+
+const { cleanupExpired, permanentDeletionError } = require('../src/telegram-cleanup');
+test('Telegram cleanup distinguishes expired, forbidden and transient failures', () => {
+  const now = Date.parse('2026-09-06T12:00:00Z');
+  assert.equal(cleanupExpired('2026-09-04 12:00:00', now), true);
+  assert.equal(cleanupExpired('2026-09-04 12:00:01', now), false);
+  assert.equal(cleanupExpired('invalid', now), false);
+  assert.equal(permanentDeletionError("Bad Request: message can't be deleted for everyone"), true);
+  assert.equal(permanentDeletionError('EFATAL: fetch failed'), false);
+  assert.equal(permanentDeletionError('Too Many Requests: retry after 15'), false);
+});

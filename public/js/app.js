@@ -200,13 +200,13 @@ function scheduleViewportSync(){
 }
 function syncViewport(){
   const app=$('app'),viewport=window.visualViewport;
+  // Pinch zoom must magnify the page rather than shrink its layout again.
+  if(viewport && viewport.scale > 1.01)return;
   const height=Math.round(viewport?.height||window.innerHeight);
-  // Desktop Telegram can expose a visual-viewport offset even though no
-  // mobile system controls overlap the Mini App. Keep that clearance mobile-only.
-  const mobile=window.matchMedia?.('(max-width:600px)').matches;
-  const top=mobile?Math.round(viewport?.offsetTop||0):0;
+  const top=Math.round(viewport?.offsetTop||0);
   app.style.setProperty('--app-height',`${height}px`);
   app.style.setProperty('--app-top',`${top}px`);
+  app.classList.toggle('compact-viewport', height < 540);
   if(S.tid&&_pinToBottom)scrollBot(false);
 }
 
@@ -225,8 +225,8 @@ sb.addEventListener('click',async()=>{
   }catch{showToast('Ошибка подключения','err');sb.disabled=false;sl.textContent='Начать чат'}
 });
 
-function showLogin(){$('ls').classList.add('on');$('cs').classList.remove('on');setTimeout(()=>ni.focus(),150)}
-function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');tryRequestNotifications();setConnStatus('connecting');}
+function showLogin(){$('ls').classList.add('on');$('cs').classList.remove('on');scheduleViewportSync();}
+function showChat(){ni.blur();$('ls').classList.remove('on');$('cs').classList.add('on');scheduleViewportSync();tryRequestNotifications();setConnStatus('connecting');}
 
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
@@ -313,12 +313,15 @@ function acknowledgeVisibleMessages(messages){
     .slice(0,100);
   if(!ids.length)return;
   ids.forEach(id=>S._acknowledged.add(id));
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),12000);
   fetch('/api/session/messages-seen',{
+    signal:controller.signal,
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,messageIds:ids})
   }).then(response=>{
     if(!response.ok)throw new Error('Message acknowledgement failed');
-  }).catch(()=>ids.forEach(id=>S._acknowledged.delete(id)));
+  }).catch(()=>ids.forEach(id=>S._acknowledged.delete(id))).finally(()=>clearTimeout(timeout));
 }
 function mergeIncomingMessages(messages,{notify=false}={}){
   const valid=messages.filter(m=>m?.id);

@@ -1178,3 +1178,28 @@ test('a getUpdates conflict keeps polling available without sending a Telegram a
   assert.equal(telegram.status().polling.owner, true);
   assert.equal(telegram.status().polling.conflicts, 1);
 });
+
+test('expired and permanently forbidden deletions stop while new cleanup still proceeds', async () => {
+  const id = 'cleanup-terminal-ticket';
+  db.createTicket.run(id, 'Cleanup test', 'cleanup-terminal-session');
+  db.enqueueTelegramCustomerCleanup.run('7001', 99991, id, 'retry');
+  db.enqueueTelegramCustomerCleanup.run('7001', 99992, id, 'retry');
+  db.enqueueTelegramCustomerCleanup.run('7001', 99993, id, 'retry');
+  db.db.prepare("UPDATE telegram_customer_cleanup_queue SET created_at = datetime('now', '-49 hours') WHERE message_id = 99991").run();
+  const originalDelete = fakeBot.deleteMessage;
+  let forbiddenAttempts = 0;
+  fakeBot.deleteMessage = function(chatId, messageId) {
+    if (Number(messageId) === 99992) { forbiddenAttempts++; return Promise.reject(new Error("Bad Request: message can't be deleted for everyone")); }
+    return originalDelete.call(this, chatId, messageId);
+  };
+  try {
+    await telegram.processDeliveryQueue();
+    await telegram.processDeliveryQueue();
+    assert.equal(deleted.some(x => x.messageId === 99991), false);
+    assert.equal(forbiddenAttempts, 1);
+    assert.equal(deleted.some(x => x.messageId === 99993), true);
+    const pending = db.getPendingTelegramCustomerCleanup.all(100);
+    assert.equal(pending.some(x => [99991, 99992, 99993].includes(x.message_id)), false);
+    assert.match(db.db.prepare('SELECT last_error FROM telegram_customer_cleanup_queue WHERE message_id = 99991').get().last_error, /48 hours/);
+  } finally { fakeBot.deleteMessage = originalDelete; }
+});

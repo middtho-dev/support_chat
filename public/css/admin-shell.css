@@ -62,3 +62,11 @@ body.tg-mini .bubble{background:var(--panel3)!important}body.tg-mini .out .bubbl
 @media(max-width:560px){.management-tabs{width:100%}.management-tabs button{flex:1}}.msgs{background:var(--bg)}
 .bubble{background:var(--panel2)!important}.out .bubble{background:#263c6b!important}.sys .bubble{background:var(--panel2)!important}
 #reply-txt{overflow-y:auto;resize:none;scrollbar-width:thin}
+
+/* Compact dashboard: content determines card height, not empty fixed blocks. */
+.shell-home{max-width:960px}
+.page-heading{margin-bottom:20px}.page-heading h2{font-size:24px;margin:6px 0}.page-heading p{font-size:14px}
+.overview-stats{gap:10px;margin-bottom:22px}.overview-stats>div{padding:14px 16px;gap:6px;border-radius:11px}.overview-stats strong{font-size:25px}
+.module-grid{gap:10px}.module-card{min-height:0;padding:16px;align-items:center;border-radius:11px}.module-copy{gap:3px}.module-copy strong{font-size:15px}.module-copy>span{font-size:13px;line-height:1.4}.module-icon{width:36px;height:36px;border-radius:9px}.module-icon svg{width:20px;height:20px}
+.module-heading{margin-bottom:10px}.workspace-note{margin-top:16px}.read-all{width:100%;margin:8px 0;color:var(--soft);border:1px solid var(--line);background:var(--panel2)}
+@media(max-width:560px){.module-card{padding:14px;gap:12px;min-height:0}.overview-stats>div{padding:12px 10px}.overview-stats strong{font-size:23px}.panel{padding-top:18px}.page-heading h2{font-size:22px}}
