@@ -199,3 +199,26 @@ test('failed Telegram chat cleanup remains queued for retry', () => {
 
   db.deleteTelegramCustomerCleanup.run('9901', 42);
 });
+
+test('read all preserves tickets and a new message in the same second stays unread', () => {
+  const ids = ['read-all-open', 'read-all-closed'];
+  for (const id of ids) {
+    db.createTicket.run(id, 'Read test', id + '-session');
+    db.saveMessage.run(id + '-message', id, 'user', 'User', 'Message', 'text', null, null, null, null, null);
+  }
+  db.db.prepare("UPDATE tickets SET status = 'closed' WHERE id = ?").run(ids[1]);
+  db.markAllSupportRead.run();
+  assert.equal(db.getTicketsForAdmin.all().filter(t => ids.includes(t.id)).reduce((n,t) => n + t.unread_count, 0), 0);
+  db.saveMessage.run('read-all-new', ids[0], 'user', 'User', 'New', 'text', null, null, null, null, null);
+  assert.equal(db.getTicketsForAdmin.all().find(t => t.id === ids[0]).unread_count, 1);
+  assert.equal(db.getTicketById.get(ids[1]).status, 'closed');
+  db.markSupportRead.run(ids[0]);
+  assert.equal(db.getTicketsForAdmin.all().find(t => t.id === ids[0]).unread_count, 0);
+});
+
+test('permanent Telegram cleanup failures retain a reason without repeated attempts', () => {
+  db.enqueueTelegramCustomerCleanup.run('9901', 43, 'cleanup-queue-ticket', 'temporary');
+  db.blockTelegramCustomerCleanup.run('48 hour limit', '9901', 43);
+  assert.equal(db.getPendingTelegramCustomerCleanup.all(100).some(x => x.message_id === 43), false);
+  assert.equal(db.db.prepare('SELECT last_error FROM telegram_customer_cleanup_queue WHERE message_id = 43').get().last_error, '48 hour limit');
+});

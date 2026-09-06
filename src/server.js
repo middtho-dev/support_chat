@@ -852,6 +852,15 @@ io.on('connection', (socket) => {
     socket.emit('admin_tickets', db.getTicketsForAdmin.all());
   });
 
+  socket.on('admin_read_all', (_payload, ack) => {
+    if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
+    const unread = db.getTicketsForAdmin.all().filter(ticket => ticket.unread_count > 0);
+    db.markAllSupportRead.run();
+    for (const ticket of unread) io.to(`ticket:${ticket.id}`).emit('messages_read');
+    broadcastAdminTickets();
+    ack?.({ ok: true, count: unread.length });
+  });
+
   socket.on('admin_open_ticket', ({ ticketId } = {}) => {
     if (!socket.isAdmin) return;
     const ticket = db.getTicketById.get(ticketId);

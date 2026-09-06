@@ -4,6 +4,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./database');
+const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
 const push = require('./push');
 const { loadSettings, formatTemplate, isWithinWorkHours } = require('./settings');
 const { createTelegramPollingLease } = require('./telegram-lease');
@@ -1572,7 +1573,7 @@ async function pinCustomerControl(chatId, messageId, { repin = false } = {}) {
   });
 }
 
-async function deleteTelegramMessage(chatId, messageId) {
+async function deleteTelegramMessage(chatId, messageId, onPermanent = () => {}) {
   if (!messageId || typeof bot.deleteMessage !== 'function') return false;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -1583,6 +1584,10 @@ async function deleteTelegramMessage(chatId, messageId) {
       if (message.includes('message to delete not found') ||
           message.includes('message_id_invalid')) {
         return true;
+      }
+      if (permanentDeletionError(message)) {
+        onPermanent(tgError(error));
+        return false;
       }
       if (attempt < 3) {
         await wait(150 * attempt);
@@ -3468,9 +3473,12 @@ async function processDeliveryQueue() {
     const operatorCleanupMessages = db.getPendingOperatorMessageCleanup.all(20);
     for (const cleanup of operatorCleanupMessages) {
       if (shuttingDown) break;
-      const removed = await deleteTelegramMessage(cleanup.chat_id, cleanup.telegram_message_id);
+      let permanent = cleanupExpired(cleanup.created_at) ? 'Telegram: deletion window of 48 hours expired' : '';
+      const removed = !permanent && await deleteTelegramMessage(cleanup.chat_id, cleanup.telegram_message_id, reason => { permanent = reason; });
       if (removed) {
         db.deleteOperatorMessageCleanup.run(cleanup.message_id);
+      } else if (permanent) {
+        db.blockOperatorMessageCleanup.run(permanent.slice(0, 1000), cleanup.message_id);
       } else {
         const attempts = Number(cleanup.attempts || 0) + 1;
         const delaySeconds = Math.min(900, 15 * (2 ** Math.min(attempts - 1, 6)));
@@ -3487,9 +3495,12 @@ async function processDeliveryQueue() {
     const cleanupMessages = db.getPendingTelegramCustomerCleanup.all(20);
     for (const cleanup of cleanupMessages) {
       if (shuttingDown) break;
-      const removed = await deleteTelegramMessage(cleanup.chat_id, cleanup.message_id);
+      let permanent = cleanupExpired(cleanup.created_at) ? 'Telegram: deletion window of 48 hours expired' : '';
+      const removed = !permanent && await deleteTelegramMessage(cleanup.chat_id, cleanup.message_id, reason => { permanent = reason; });
       if (removed) {
         db.deleteTelegramCustomerCleanup.run(cleanup.chat_id, cleanup.message_id);
+      } else if (permanent) {
+        db.blockTelegramCustomerCleanup.run(permanent.slice(0, 1000), cleanup.chat_id, cleanup.message_id);
       } else {
         const attempts = Number(cleanup.attempts || 0) + 1;
         const delaySeconds = Math.min(900, 15 * (2 ** Math.min(attempts - 1, 6)));

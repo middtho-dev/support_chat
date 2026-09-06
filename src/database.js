@@ -59,6 +59,13 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN telegram_chat_id TEXT`); } catch 
 
 // Migrations: admin + topic tracking
 try { db.exec(`ALTER TABLE tickets ADD COLUMN support_read_at DATETIME`); } catch {}
+if (!db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'support_read')) {
+  db.transaction(() => {
+    db.exec('ALTER TABLE messages ADD COLUMN support_read INTEGER NOT NULL DEFAULT 0');
+    db.exec(`UPDATE messages SET support_read = 1 WHERE sender = 'user' AND created_at <=
+      (SELECT support_read_at FROM tickets WHERE tickets.id = messages.ticket_id)`);
+  })();
+}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN telegram_topic_deleted INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_tags TEXT DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_note TEXT DEFAULT ''`); } catch {}
@@ -245,6 +252,14 @@ db.exec(`
 `);
 
 // Push subscriptions
+for (const table of ['telegram_customer_cleanup_queue', 'telegram_operator_message_cleanup_queue']) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'blocked_at')) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN blocked_at DATETIME`);
+  }
+  db.exec(`UPDATE ${table} SET blocked_at = CURRENT_TIMESTAMP,
+    last_error = 'Telegram: deletion window of 48 hours expired'
+    WHERE blocked_at IS NULL AND created_at <= datetime('now', '-48 hours')`);
+}
 db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
   id TEXT PRIMARY KEY,
   ticket_id TEXT NOT NULL,
@@ -345,12 +360,16 @@ module.exports = {
   `),
   getPendingTelegramCustomerCleanup: db.prepare(`
     SELECT * FROM telegram_customer_cleanup_queue
-    WHERE next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP
+    WHERE blocked_at IS NULL AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY created_at ASC
     LIMIT ?
   `),
   deleteTelegramCustomerCleanup: db.prepare(`
     DELETE FROM telegram_customer_cleanup_queue WHERE chat_id = ? AND message_id = ?
+  `),
+  blockTelegramCustomerCleanup: db.prepare(`
+    UPDATE telegram_customer_cleanup_queue SET last_error = ?, blocked_at = CURRENT_TIMESTAMP
+    WHERE chat_id = ? AND message_id = ?
   `),
   markTelegramCustomerCleanupAttempt: db.prepare(`
     UPDATE telegram_customer_cleanup_queue
@@ -671,12 +690,16 @@ module.exports = {
   `),
   getPendingOperatorMessageCleanup: db.prepare(`
     SELECT * FROM telegram_operator_message_cleanup_queue
-    WHERE next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP
+    WHERE blocked_at IS NULL AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY created_at ASC
     LIMIT ?
   `),
   deleteOperatorMessageCleanup: db.prepare(`
     DELETE FROM telegram_operator_message_cleanup_queue WHERE message_id = ?
+  `),
+  blockOperatorMessageCleanup: db.prepare(`
+    UPDATE telegram_operator_message_cleanup_queue SET last_error = ?, blocked_at = CURRENT_TIMESTAMP
+    WHERE message_id = ?
   `),
   markOperatorMessageCleanupAttempt: db.prepare(`
     UPDATE telegram_operator_message_cleanup_queue
@@ -957,7 +980,14 @@ module.exports = {
   setSetting: db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
 
   // Admin panel
-  markSupportRead: db.prepare(`UPDATE tickets SET support_read_at = CURRENT_TIMESTAMP WHERE id = ?`),
+  markSupportRead: { run: db.transaction(ticketId => {
+    db.prepare("UPDATE messages SET support_read = 1 WHERE ticket_id = ? AND sender = 'user' AND support_read = 0").run(ticketId);
+    return db.prepare('UPDATE tickets SET support_read_at = CURRENT_TIMESTAMP WHERE id = ?').run(ticketId);
+  }) },
+  markAllSupportRead: { run: db.transaction(() => {
+    db.prepare("UPDATE messages SET support_read = 1 WHERE sender = 'user' AND support_read = 0").run();
+    return db.prepare('UPDATE tickets SET support_read_at = CURRENT_TIMESTAMP').run();
+  }) },
   updateTicketMeta: db.prepare(`UPDATE tickets SET admin_tags = ?, admin_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`),
   getTicketsForAdmin: db.prepare(`
     SELECT t.*,
@@ -969,7 +999,7 @@ module.exports = {
       COALESCE(m.created_at, t.created_at) AS last_activity,
       (SELECT COUNT(*) FROM messages
        WHERE ticket_id = t.id AND sender = 'user'
-         AND created_at > COALESCE(t.support_read_at, '1970-01-01')) AS unread_count
+         AND support_read = 0) AS unread_count
     FROM tickets t
     LEFT JOIN telegram_operators op
       ON op.telegram_user_id = t.assigned_operator_id

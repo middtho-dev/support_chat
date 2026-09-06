@@ -76,7 +76,7 @@ function parseServerDate(value) {
     : raw;
   return new Date(normalized);
 }
-const isMobileLayout = () => window.matchMedia(IS_TG_MINI ? '(max-width: 720px)' : '(max-width: 560px)').matches;
+const isMobileLayout = () => window.matchMedia('(max-width: 980px)').matches;
 function timeAgo(iso) { const sec = Math.max(0, Math.floor((Date.now() - parseServerDate(iso).getTime()) / 1000)); if (sec < 60) return 'сейчас'; if (sec < 3600) return `${Math.floor(sec / 60)} мин`; if (sec < 86400) return `${Math.floor(sec / 3600)} ч`; return `${Math.floor(sec / 86400)} д`; }
 function avatarColor(name = '') { let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0xffff; return COLORS[h % COLORS.length]; }
 function initials(name = '') { return (name.trim() || '?').slice(0, 2).toUpperCase(); }
@@ -234,6 +234,18 @@ function updateTelegramBackButton() {
 function bindStaticUi() {
   $('login-form').addEventListener('submit', event => { event.preventDefault(); login(); });
   $('logout-btn').addEventListener('click', logout);
+  window.matchMedia('(max-width: 980px)').addEventListener('change', () => {
+    if (S.view === 'chat') $('main').classList.toggle('open', !!S.current);
+  });
+  $('read-all').addEventListener('click', () => {
+    if (!socket.connected) return toast('Нет соединения с сервером', 'err');
+    $('read-all').disabled = true;
+    socket.timeout(12000).emit('admin_read_all', {}, (error, result) => {
+      if (!S.token) return;
+      renderSidebar();
+      toast(error || !result?.ok ? 'Не удалось отметить сообщения. Повторите попытку.' : 'Все сообщения прочитаны', error || !result?.ok ? 'err' : 'ok');
+    });
+  });
   $('srch').addEventListener('input', () => { S.search = $('srch').value.trim().toLowerCase(); renderSidebar(); });
   document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => setFilter(btn.dataset.tab)));
   document.querySelectorAll('.navbtn').forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.view)));
@@ -427,7 +439,7 @@ function setView(view) {
 
   if (S.view === 'chat') {
     document.body.classList.toggle('ticket-open', !!S.current);
-    if (isMobileLayout()) $('main').classList.toggle('open', !!S.current);
+    $('main').classList.toggle('open', !!S.current);
     $('welcome').style.display = S.current ? 'none' : 'grid';
     $('chat').style.display = S.current ? 'flex' : 'none';
     if (isMobileLayout() && !S.current) $('main').classList.remove('open');
@@ -446,6 +458,7 @@ function setView(view) {
 }
 
 function renderSidebar() {
+  $('read-all').disabled = !S.tickets.some(t => t.unread_count > 0);
   const open = S.tickets.filter(t => t.status === 'open').length;
   const unread = S.tickets.reduce((sum, t) => sum + (t.status === 'open' && t.unread_count ? 1 : 0), 0);
   $('m-open').textContent = open; $('m-unread').textContent = unread; $('m-all').textContent = S.tickets.length;

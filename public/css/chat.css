@@ -994,3 +994,21 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-off
 .lb img{max-height:90dvh;object-fit:contain}.mfile{overflow-wrap:anywhere}
 @media(min-width:1000px){#app{border-inline:1px solid var(--line)}}
 @media(max-width:600px){#app{min-height:0}.lcard{max-height:100%;overflow:auto}.icn,.sndbtn{min-width:42px}.mbox{padding:24px}}
+
+/* One scroll container keeps both the name field and submit button reachable
+   when the visual viewport shrinks for a software keyboard. */
+#app{min-height:0}
+#ls{flex-direction:column;justify-content:flex-start;overflow-y:auto;overscroll-behavior:contain;background:var(--page);padding:20px}
+#ls .lcard{flex:none;max-height:none;overflow:visible;margin-block:auto;padding:28px;background:var(--header)}
+.lcard>*{flex-shrink:0}.linp{font-size:16px}.linp:focus{background:var(--field);border-color:var(--accent)}
+.lbtn:hover:not(:disabled){background:var(--accent);box-shadow:none}
+#app.compact-viewport #ls{padding:10px 16px}
+#app.compact-viewport .lcard{padding:16px 20px;border-radius:14px}
+#app.compact-viewport .lcard img{width:36px!important;height:36px!important;margin-bottom:6px}
+#app.compact-viewport .ltit{font-size:20px;margin-bottom:4px}
+#app.compact-viewport .lstatus{margin-bottom:6px}
+#app.compact-viewport .lsub{font-size:12px;margin-bottom:10px}
+#app.compact-viewport .linp,#app.compact-viewport .lbtn{height:44px;min-height:44px}
+#app.compact-viewport .hdr{min-height:48px;padding-block:6px}
+#app.compact-viewport .iarea{padding-top:6px;padding-bottom:max(6px,env(safe-area-inset-bottom,0px))}
+@media(max-height:400px){#ls .lcard img,#ls .lstatus{display:none}#ls .lcard{padding:14px 18px}.lsub.offhours{max-height:64px;overflow:auto}}
