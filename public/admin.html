@@ -38,7 +38,6 @@
       <div class="spacer"></div>
       <div class="status"><i id="cdot" class="dot"></i><span id="ctxt">подключение</span></div>
       <button id="logout-btn" class="ghost">Выйти</button>
-      <a class="ghost" href="/admin/frp" target="_blank" rel="noopener noreferrer" title="Отдельный инструмент управления FRP">FRP ↗</a>
       <div id="mobile-ticket-top" class="mobile-ticket-top" aria-hidden="true">
         <button id="mobile-ticket-back" class="mobile-ticket-back" type="button" aria-label="К списку тикетов">‹</button>
         <div id="mobile-ticket-avatar" class="avatar"></div>
@@ -62,6 +61,7 @@
         <button class="navbtn" data-view="templates" title="Шаблоны" aria-label="Шаблоны">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
         </button>
+        <button class="navbtn" data-view="frp" title="Устройства" aria-label="Устройства" hidden>FRP</button>
       </nav>
 
       <aside class="side" id="side">
@@ -98,6 +98,7 @@
         </section>
         <section id="settings" class="panel"></section>
         <section id="templates" class="panel"></section>
+        <section id="frp" class="panel"></section>
       </main>
     </div>
   </div>
@@ -106,5 +107,8 @@
   <script src="/api/realtime/socket.io.js"></script>
   <script src="/js/admin-enhance.js?v=20260806-3"></script>
   <script src="/js/admin.js?v=20260902-control-center"></script>
+  <script src="/js/admin-frp.js"></script>
+  <script src="/js/frp-device-links.js"></script>
+  <script src="/js/frp-panel.js"></script>
 </body>
 </html>

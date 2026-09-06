@@ -406,6 +406,9 @@ function setView(view) {
   document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
   $('settings').classList.toggle('on', S.view === 'settings');
   $('templates').classList.toggle('on', S.view === 'templates');
+  $('frp').classList.toggle('on', S.view === 'frp');
+  document.body.classList.toggle('frp-active', S.view === 'frp');
+  if (S.view === 'frp') window.FrpPanel?.open();
 
   if (S.view === 'chat') {
     $('welcome').style.display = S.current ? 'none' : 'grid';
