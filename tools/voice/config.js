@@ -1,10 +1,10 @@
 'use strict';
-const defaults = {enabled:false,botToken:'',openaiKey:'',ownerIds:'',direction:'incoming',voice:true,videoNote:false,audio:false,chatMode:'all',chatIds:'',excludeChatIds:'',minSeconds:1,maxSeconds:300,dailyMinutes:60,language:'',transcribeModel:'gpt-4o-mini-transcribe',formatModel:'gpt-4.1-mini',polish:true,style:'readable',emoji:false,instructions:'',prefix:'Расшифровка:',deleteOriginal:false,silent:true,retentionHours:24};
+const defaults = {enabled:false,vpnEnabled:false,vpnTelegram:false,vlessUrl:'',botToken:'',openaiKey:'',ownerIds:'',direction:'incoming',voice:true,videoNote:false,audio:false,chatMode:'all',chatIds:'',excludeChatIds:'',minSeconds:1,maxSeconds:300,dailyMinutes:60,language:'',transcribeModel:'gpt-4o-mini-transcribe',formatModel:'gpt-4.1-mini',polish:true,style:'readable',emoji:false,instructions:'',prefix:'Расшифровка:',deleteOriginal:false,silent:true,retentionHours:24};
 function ids(value) { return String(value).split(/[\s,;]+/).filter(Boolean); }
 function validate(input, previous=defaults) {
   const c={...previous};
   for(const key of Object.keys(defaults)) if(Object.hasOwn(input,key)) {
-    if(['botToken','openaiKey'].includes(key) && input[key]==='') continue;
+    if(['botToken','openaiKey','vlessUrl'].includes(key) && input[key]==='') continue;
     if(typeof defaults[key]==='boolean') {if(typeof input[key]!=='boolean') throw Error('Некорректный переключатель: '+key);c[key]=input[key];}
     else if(typeof defaults[key]==='number') {c[key]=Number(input[key]);if(!Number.isInteger(c[key]))throw Error('Нужно целое число: '+key);}
     else {if(typeof input[key]!=='string')throw Error('Нужен текст: '+key);c[key]=input[key].trim();}
@@ -20,6 +20,9 @@ function validate(input, previous=defaults) {
   if(c.botToken&&!/^\d+:[A-Za-z0-9_-]{20,}$/.test(c.botToken))throw Error('Некорректный токен Telegram');
   if(c.openaiKey.length>512||/[\r\n]/.test(c.openaiKey))throw Error('Некорректный ключ OpenAI');
   if(c.enabled&&(!c.botToken||!c.openaiKey||!ids(c.ownerIds).length))throw Error('Для запуска нужны оба ключа и ID владельца аккаунта');
+  if(c.vlessUrl.length>8192)throw Error('Ссылка VLESS слишком длинная');
+  if(c.vlessUrl)require('./vless').parseVless(c.vlessUrl);
+  if(c.vpnEnabled&&!c.vlessUrl)throw Error('Для VPN нужна ссылка VLESS');
   return c;
 }
 function selectMessage(c, connection, m) {

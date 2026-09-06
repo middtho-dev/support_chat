@@ -73,3 +73,24 @@ body.tg-mini .bubble{background:var(--panel3)!important}body.tg-mini .out .bubbl
 
 .voice-section{max-width:980px}.voice-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px}.voice-actions>b{margin-right:auto}.voice-section .card{margin:16px 0;padding:18px}.voice-section summary{cursor:pointer;font-weight:650}.voice-section p,.voice-section li{font-size:13px;color:var(--muted);line-height:1.6}.voice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}.voice-field{display:flex;flex-direction:column;gap:8px}.voice-field input,.voice-field textarea,.voice-field select{width:100%;min-width:0;padding:10px;border-radius:8px}.voice-field input[type=checkbox]{width:22px;height:22px;min-height:22px;align-self:flex-start}.voice-job{padding:12px;border-bottom:1px solid var(--line);display:grid;gap:4px}.voice-job span{color:var(--muted);font-size:12px}#voice-error{color:var(--red)}#voice-connections{overflow-wrap:anywhere}.voice-section h3{margin-top:24px}
 @media(max-width:560px){.voice-grid{grid-template-columns:1fr}.voice-actions>b{width:100%}.navbtn{flex-basis:48px;min-width:0;font-size:9px}}
+
+/* Voice controls keep their own dimensions instead of inheriting text-field sizing. */
+.voice-section .card{border-radius:12px;padding:18px 20px}
+.voice-section summary{font-size:14px;min-height:24px}
+.voice-grid{gap:12px 18px;align-items:start}
+.voice-field{font-size:13px;color:var(--soft);min-width:0}
+.voice-field>span:first-child{line-height:1.45}
+.voice-field.voice-toggle{flex-direction:row;align-items:center;justify-content:space-between;gap:16px;min-height:46px;padding:8px 0}
+.voice-toggle>span:first-child{flex:1}
+.voice-switch{position:relative;display:inline-flex;flex:0 0 36px;width:36px;height:22px;align-items:center}
+.voice-switch input[type=checkbox]{position:absolute;inset:0;opacity:0;margin:0;padding:0;width:36px!important;height:22px!important;min-height:0!important;cursor:pointer;z-index:1}
+.voice-switch-track{width:36px;height:20px;background:var(--panel3);border:1px solid var(--line);border-radius:12px;transition:background .15s}
+.voice-switch-track::after{content:'';display:block;width:14px;height:14px;border-radius:50%;background:#a5afc0;transform:translate(2px,2px);transition:transform .15s,background .15s}
+.voice-switch input:checked+.voice-switch-track{background:#4b68e8;border-color:#4b68e8}
+.voice-switch input:checked+.voice-switch-track::after{transform:translate(18px,2px);background:#fff}
+.voice-switch input:focus-visible+.voice-switch-track{outline:2px solid #9aafff;outline-offset:3px}
+.voice-network{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.voice-network b{font-size:13px}.voice-network p{margin:5px 0 0}.voice-network button{flex-shrink:0}
+.voice-actions{gap:8px}.voice-actions button{padding:9px 13px}
+@media(max-width:560px){.voice-section .card{padding:16px}.voice-network{align-items:flex-start;flex-direction:column}.voice-network button{width:100%}.voice-field.voice-toggle{min-height:44px}.voice-help ol{padding-left:20px}}
+@media(prefers-reduced-motion:reduce){.voice-switch-track,.voice-switch-track::after{transition:none}}
