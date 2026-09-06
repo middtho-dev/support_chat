@@ -102,7 +102,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
     await new Promise(resolve => listener.close(resolve));
     const ranges = rangesFor();
     if (!ranges.length) throw new Error('В диапазоне не осталось разрешённых портов');
-    const config = `bindAddr = ${JSON.stringify(state.bindAddr)}\nbindPort = ${state.port}\nauth.method = "token"\nauth.token = ${JSON.stringify(state.token)}\ntransport.tls.force = true\nwebServer.addr = "127.0.0.1"\nwebServer.port = ${dashboardPort}\nwebServer.user = "admin"\nwebServer.password = ${JSON.stringify(state.dashboardPassword)}\nallowPorts = [${ranges.map(r => `{ start = ${r.start}, end = ${r.end} }`).join(', ')}]\n`;
+    const config = `bindAddr = ${JSON.stringify(state.bindAddr)}\nbindPort = ${state.port}\nauth.method = "token"\nauth.token = ${JSON.stringify(state.compatibilityMode ? "" : state.token)}\ntransport.tls.force = ${!state.compatibilityMode}\nwebServer.addr = "127.0.0.1"\nwebServer.port = ${dashboardPort}\nwebServer.user = "admin"\nwebServer.password = ${JSON.stringify(state.dashboardPassword)}\nallowPorts = [${ranges.map(r => `{ start = ${r.start}, end = ${r.end} }`).join(', ')}]\n`;
     const configPath = path.join(directory, 'frps.toml');
     fs.writeFileSync(configPath, config, { mode: 0o600 });
     if (closing) throw new Error('Панель завершает работу');

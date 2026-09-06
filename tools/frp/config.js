@@ -2,7 +2,7 @@
 const net = require('net');
 
 const DEFAULTS = Object.freeze({ host: 'router.kv9.ru', port: 7000, bindAddr: '0.0.0.0',
-  portStart: 2000, portEnd: 65535, reservedPorts: [3000, 3001], refreshSeconds: 5, historyLimit: 10000 });
+  portStart: 2000, portEnd: 65535, reservedPorts: [3000, 3001], refreshSeconds: 5, historyLimit: 10000, compatibilityMode: false });
 
 function integer(value, min, max, label) {
   const number = Number(value);
@@ -11,6 +11,8 @@ function integer(value, min, max, label) {
 }
 function validateConfig(input) {
   const value = { ...DEFAULTS, ...input };
+  if (![true, false, 'true', 'false'].includes(value.compatibilityMode)) throw new Error('Некорректный режим совместимости');
+  value.compatibilityMode = value.compatibilityMode === true || value.compatibilityMode === 'true';
   value.host = String(value.host || '').trim();
   if (!net.isIP(value.host) && !(value.host.length <= 253 && value.host.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label)))) {
     throw new Error('Укажите домен или IP сервера без протокола и порта');
