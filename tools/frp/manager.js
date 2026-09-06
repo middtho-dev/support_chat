@@ -7,21 +7,14 @@ const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const exec = promisify(execFile);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const { DEFAULTS, validateConfig, initialConfig } = require('./config');
 
-function validateConfig(input) {
-  const host = String(input.host || '').trim();
-  const port = Number(input.port);
-  if (!/^[a-zA-Z0-9.-]{1,253}$/.test(host)) throw new Error('Укажите домен или IPv4 сервера');
-  if (!Number.isInteger(port) || port < 2000 || port > 65535) throw new Error('Порт должен быть от 2000 до 65535');
-  return { host, port };
-}
-
-function allowedRanges(excluded) {
-  const ports = [...new Set(excluded.filter(p => p >= 2000 && p <= 65535))].sort((a, b) => a - b);
+function allowedRanges(excluded, first = DEFAULTS.portStart, last = DEFAULTS.portEnd) {
+  const ports = [...new Set(excluded.filter(p => p >= first && p <= last))].sort((a, b) => a - b);
   const ranges = [];
-  let start = 2000;
+  let start = first;
   for (const port of ports) { if (start < port) ranges.push({ start, end: port - 1 }); start = port + 1; }
-  if (start <= 65535) ranges.push({ start, end: 65535 });
+  if (start <= last) ranges.push({ start, end: last });
   return ranges;
 }
 
@@ -30,13 +23,18 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
   const statePath = path.join(directory, 'state.json');
   const binary = path.join(directory, process.platform === 'win32' ? 'frps.exe' : 'frps');
   let state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {
-    host: 'routers.kv9.ru', port: 7000, enabled: false, token: crypto.randomBytes(32).toString('hex'),
+    ...initialConfig(), schemaVersion: 1, enabled: false, token: crypto.randomBytes(32).toString('hex'),
     dashboardPassword: crypto.randomBytes(32).toString('hex'), devices: []
   };
+  // Correct the original shipped typo once; never overwrite a custom hostname.
+  if (!state.schemaVersion && state.host === 'routers.kv9.ru') state.host = DEFAULTS.host;
+  Object.assign(state, validateConfig({ ...initialConfig(), ...state }), { schemaVersion: 1 });
   let child = null, busy = false, error = null, monitoringError = null, closing = false;
   let dashboardPort = 0;
   let refreshing = null;
   state.clients ||= [];
+  const panelPort = Number(process.env.FRP_PANEL_PORT || 7400);
+  const rangesFor = (config = state) => allowedRanges([config.port, dashboardPort, panelPort, ...config.reservedPorts], config.portStart, config.portEnd);
   const save = () => {
     fs.writeFileSync(statePath + '.tmp', JSON.stringify(state, null, 2), { mode: 0o600 });
     fs.renameSync(statePath + '.tmp', statePath);
@@ -68,13 +66,13 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
           const key = `${d.type}:${d.name}`;
           known.set(key, { ...known.get(key), ...d, port: d.port ?? known.get(key)?.port ?? null, lastSeen: d.online ? new Date().toISOString() : known.get(key)?.lastSeen || null });
         }
-        state.devices = [...known.values()].slice(-10000);
+        state.devices = [...known.values()].slice(-state.historyLimit);
         const knownClients = new Map(state.clients.map(c => [c.key, { ...c, online: false }]));
         for (const c of clients) knownClients.set(c.key, {
           key: c.key, clientID: c.clientID, user: c.user, hostname: c.hostname, ip: c.clientIP,
           online: c.online, lastSeen: c.online ? new Date().toISOString() : knownClients.get(c.key)?.lastSeen || null
         });
-        state.clients = [...knownClients.values()].slice(-10000);
+        state.clients = [...knownClients.values()].slice(-state.historyLimit);
         monitoringError = null;
         save();
       } catch (e) { monitoringError = e.message; }
@@ -102,8 +100,9 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
     await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen(0, '127.0.0.1', resolve); });
     dashboardPort = listener.address().port;
     await new Promise(resolve => listener.close(resolve));
-    const ranges = allowedRanges([state.port, dashboardPort, Number(process.env.FRP_PANEL_PORT || 7400), ...String(process.env.FRP_RESERVED_PORTS || '3000,3001').split(',').map(Number)]);
-    const config = `bindAddr = "0.0.0.0"\nbindPort = ${state.port}\nauth.method = "token"\nauth.token = ${JSON.stringify(state.token)}\ntransport.tls.force = true\nwebServer.addr = "127.0.0.1"\nwebServer.port = ${dashboardPort}\nwebServer.user = "admin"\nwebServer.password = ${JSON.stringify(state.dashboardPassword)}\nallowPorts = [${ranges.map(r => `{ start = ${r.start}, end = ${r.end} }`).join(', ')}]\n`;
+    const ranges = rangesFor();
+    if (!ranges.length) throw new Error('В диапазоне не осталось разрешённых портов');
+    const config = `bindAddr = ${JSON.stringify(state.bindAddr)}\nbindPort = ${state.port}\nauth.method = "token"\nauth.token = ${JSON.stringify(state.token)}\ntransport.tls.force = true\nwebServer.addr = "127.0.0.1"\nwebServer.port = ${dashboardPort}\nwebServer.user = "admin"\nwebServer.password = ${JSON.stringify(state.dashboardPassword)}\nallowPorts = [${ranges.map(r => `{ start = ${r.start}, end = ${r.end} }`).join(', ')}]\n`;
     const configPath = path.join(directory, 'frps.toml');
     fs.writeFileSync(configPath, config, { mode: 0o600 });
     if (closing) throw new Error('Панель завершает работу');
@@ -159,13 +158,19 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       state.version = version; save();
     } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
   }
-  const timer = setInterval(() => { if (!busy && !closing) refresh(); }, 5000);
-  timer.unref();
+  let timer;
+  function scheduleRefresh() {
+    clearInterval(timer);
+    timer = setInterval(() => { if (!busy && !closing) refresh(); }, state.refreshSeconds * 1000);
+    timer.unref();
+  }
+  scheduleRefresh();
   return {
     async init() { if (state.enabled) { busy = true; try { await start(); } catch (e) { error = e.message; } finally { busy = false; } } },
     async status() {
       return { installed: fs.existsSync(binary), version: state.version || null, running: !!child, busy,
-        enabled: state.enabled, host: state.host, port: state.port, error, monitoringError,
+        enabled: state.enabled, ...validateConfig(state), error, monitoringError,
+        allowedRanges: rangesFor(),
         devices: state.devices.map(d => ({ ...d, online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
         clients: state.clients.map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
         token: state.token };
@@ -179,9 +184,11 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
         else if (action === 'stop') { state.enabled = false; save(); await stop(); }
         else if (action === 'configure') {
           if (child) throw new Error('Остановите FRP перед изменением настроек');
-          const validated = validateConfig(config);
-          if ([Number(process.env.FRP_PANEL_PORT || 7400), ...String(process.env.FRP_RESERVED_PORTS || '3000,3001').split(',').map(Number)].includes(validated.port)) throw new Error('Этот порт зарезервирован другим приложением');
-          Object.assign(state, validated); save();
+          const validated = validateConfig({ ...state, ...config });
+          if ([panelPort, ...validated.reservedPorts].includes(validated.port)) throw new Error('Этот порт зарезервирован другим приложением');
+          if (!rangesFor(validated).length) throw new Error('В диапазоне не осталось разрешённых портов');
+          if (config.newToken && (typeof config.newToken !== 'string' || !/^[\x21-\x7e]{24,256}$/.test(config.newToken))) throw new Error('Токен: 24–256 печатных ASCII-символов без пробелов');
+          Object.assign(state, validated, config.newToken ? { token: config.newToken } : {}); save(); scheduleRefresh();
         } else throw new Error('Неизвестная операция');
       } catch (e) { error = e.message; throw e; } finally { busy = false; }
       return this.status();
