@@ -34,7 +34,9 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
   let refreshing = null;
   state.clients ||= [];
   const panelPort = Number(process.env.FRP_PANEL_PORT || 7400);
-  const rangesFor = (config = state) => allowedRanges([config.port, dashboardPort, panelPort, ...config.reservedPorts], config.portStart, config.portEnd);
+  const servicePorts = [...new Set([2019, 3000, 3001, Number(process.env.FRP_CHAT_PORT || 3001), panelPort])];
+  const exclusionsFor = (config = state) => [...new Set([config.port, dashboardPort, ...servicePorts, ...config.reservedPorts])].filter(p => p > 0).sort((a, b) => a - b);
+  const rangesFor = (config = state) => allowedRanges(exclusionsFor(config), config.portStart, config.portEnd);
   const save = () => {
     fs.writeFileSync(statePath + '.tmp', JSON.stringify(state, null, 2), { mode: 0o600 });
     fs.renameSync(statePath + '.tmp', statePath);
@@ -170,7 +172,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
     async status() {
       return { installed: fs.existsSync(binary), version: state.version || null, running: !!child, busy,
         enabled: state.enabled, ...validateConfig(state), error, monitoringError,
-        allowedRanges: rangesFor(),
+        allowedRanges: rangesFor(), excludedPorts: exclusionsFor(),
         devices: state.devices.map(d => ({ ...d, online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
         clients: state.clients.map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
         token: state.token };
@@ -183,12 +185,22 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
         else if (action === 'start') { await start(); state.enabled = true; save(); }
         else if (action === 'stop') { state.enabled = false; save(); await stop(); }
         else if (action === 'configure') {
-          if (child) throw new Error('Остановите FRP перед изменением настроек');
           const validated = validateConfig({ ...state, ...config });
-          if ([panelPort, ...validated.reservedPorts].includes(validated.port)) throw new Error('Этот порт зарезервирован другим приложением');
+          if ([...servicePorts, ...validated.reservedPorts].includes(validated.port)) throw new Error('Этот порт зарезервирован другим приложением');
           if (!rangesFor(validated).length) throw new Error('В диапазоне не осталось разрешённых портов');
           if (config.newToken && (typeof config.newToken !== 'string' || !/^[\x21-\x7e]{24,256}$/.test(config.newToken))) throw new Error('Токен: 24–256 печатных ASCII-символов без пробелов');
+          const previous = { ...validateConfig(state), token: state.token };
+          const restart = !!child;
+          if (restart) { await stop(); if (refreshing) await refreshing; }
           Object.assign(state, validated, config.newToken ? { token: config.newToken } : {}); save(); scheduleRefresh();
+          if (restart) {
+            try { await start(); }
+            catch (e) {
+              await stop(); Object.assign(state, previous); save(); scheduleRefresh();
+              try { await start(); } catch (rollbackError) { throw new Error(`Новые настройки не применены: ${e.message}. Не удалось восстановить запуск: ${rollbackError.message}`); }
+              throw new Error(`Новые настройки не применены, восстановлены предыдущие: ${e.message}`);
+            }
+          }
         } else throw new Error('Неизвестная операция');
       } catch (e) { error = e.message; throw e; } finally { busy = false; }
       return this.status();

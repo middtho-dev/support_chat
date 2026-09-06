@@ -2,7 +2,7 @@
 const net = require('net');
 
 const DEFAULTS = Object.freeze({ host: 'router.kv9.ru', port: 7000, bindAddr: '0.0.0.0',
-  portStart: 2000, portEnd: 65535, reservedPorts: [3000, 3001], refreshSeconds: 5, historyLimit: 10000, compatibilityMode: false });
+  portStart: 1000, portEnd: 65535, reservedPorts: [3000, 3001], refreshSeconds: 5, historyLimit: 10000, compatibilityMode: false });
 
 function integer(value, min, max, label) {
   const number = Number(value);
@@ -19,8 +19,8 @@ function validateConfig(input) {
   }
   value.bindAddr = String(value.bindAddr || '').trim();
   if (!net.isIP(value.bindAddr)) throw new Error('Адрес прослушивания должен быть IPv4 или IPv6');
-  value.port = integer(value.port, 2000, 65535, 'Порт подключения');
-  value.portStart = integer(value.portStart, 2000, 65535, 'Начало диапазона');
+  value.port = integer(value.port, 1000, 65535, 'Порт подключения');
+  value.portStart = integer(value.portStart, 1000, 65535, 'Начало диапазона');
   value.portEnd = integer(value.portEnd, value.portStart, 65535, 'Конец диапазона');
   const reserved = Array.isArray(value.reservedPorts) ? value.reservedPorts : String(value.reservedPorts).split(',').map(p => p.trim()).filter(Boolean);
   value.reservedPorts = [...new Set(reserved.map(p => integer(p, 1, 65535, 'Зарезервированный порт')))].sort((a, b) => a - b);
