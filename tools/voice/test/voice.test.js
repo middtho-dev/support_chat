@@ -46,3 +46,31 @@ test('quota, removed originals and retention are persisted without processing au
  store.data.jobs.forEach(j=>j.created=Date.now()-200*3600000);store.data.config.enabled=false;store.save();worker.prune();
  assert.equal(new Store(dir,'a'.repeat(64)).data.jobs.length,0);
 });
+test('queued work completes while Telegram long polling is still waiting',async t=>{
+ const {store}=fixture(t);store.data.config.polish=false;store.data.config.deleteOriginal=false;
+ let releasePoll,resolveDelivered;const delivered=new Promise(r=>resolveDelivered=r);let polls=0,sends=0;
+ const worker=new Worker(store,{telegram:async method=>{
+   if(method==='getUpdates'){polls++;return new Promise(r=>releasePoll=r);}
+   if(method==='getBusinessConnection')return conn;
+   if(method==='sendMessage'){if(++sends===2)resolveDelivered();return {message_id:20};}
+ },transcribe:async()=> 'Текст',polish:async()=>{throw Error('Fast mode must skip polishing');}});
+ await worker.ingest({update_id:1,business_message:msg});await worker.ingest({update_id:2,business_message:{...msg,message_id:11}});
+ const running=worker.run();let timeout;
+ try{await Promise.race([delivered,new Promise((_,reject)=>timeout=setTimeout(()=>reject(Error('Queue blocked by polling')),2000))]);}
+ finally{clearTimeout(timeout);worker.stopped=true;releasePoll?.([]);await running;}
+ assert.equal(polls,1);assert.equal(sends,2);assert.ok(store.data.jobs.every(j=>j.status==='done'&&j.finishedAt&&j.timings.audio>=0));
+});
+test('deleting an original during transcription cancels delivery',async t=>{
+ const {store}=fixture(t);let release,started;const ready=new Promise(r=>started=r);let sends=0;
+ const worker=new Worker(store,{telegram:async()=>{sends++;return conn;},transcribe:async()=>{started();return new Promise(r=>release=r);}});
+ await worker.ingest({update_id:1,business_message:msg});const processing=worker.process(store.data.jobs[0]);await ready;
+ await worker.ingest({update_id:2,deleted_business_messages:{business_connection_id:'business',chat:msg.chat,message_ids:[10]}});release('Текст');await processing;
+ assert.equal(store.data.jobs[0].status,'cancelled');assert.equal(sends,0);
+});
+test('exhausted API credit is actionable and does not schedule pointless retries',async t=>{
+ const {openaiError}=require('../worker');const {store}=fixture(t);
+ const error=await openaiError(new Response(JSON.stringify({error:{code:'credit_balance_exhausted'}}),{status:429}));
+ assert.equal(error.retryable,false);assert.match(error.message,/средства/);
+ const worker=new Worker(store,{transcribe:async()=>{throw error;}});await worker.ingest({update_id:1,business_message:msg});await worker.process(store.data.jobs[0]);
+ assert.equal(store.data.jobs[0].status,'failed');assert.equal(store.data.jobs[0].attempts,1);
+});
