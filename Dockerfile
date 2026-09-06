@@ -10,6 +10,7 @@ RUN npm ci --omit=dev
 COPY src/ ./src/
 COPY public/ ./public/
 COPY tools/frp/public/app.js ./tools/frp/public/app.js
+COPY tools/frp/public/panel.css ./tools/frp/public/panel.css
 COPY tools/frp/public/device-links.js ./tools/frp/public/device-links.js
 
 # Create data, uploads and backup directories

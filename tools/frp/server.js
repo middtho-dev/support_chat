@@ -14,7 +14,7 @@ function authorized(value, token) {
 }
 
 function createServer(manager, token) {
-  const assets = { '/': ['index.html', 'text/html'], '/device-links.js': ['device-links.js', 'text/javascript'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+  const assets = { '/': ['index.html', 'text/html'], '/device-links.js': ['device-links.js', 'text/javascript'], '/app.js': ['app.js', 'text/javascript'], '/panel.css': ['panel.css', 'text/css; charset=utf-8'], '/style.css': ['style.css', 'text/css'] };
   return http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');

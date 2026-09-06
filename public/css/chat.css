@@ -2,21 +2,21 @@
 
 :root{
   color-scheme:dark;
-  --page:#0b141a;
-  --header:#202c33;
-  --header-soft:#2a3942;
-  --chat:#0b141a;
-  --incoming:#202c33;
-  --outgoing:#005c4b;
-  --composer:#202c33;
-  --field:#2a3942;
-  --accent:#2aabee;
-  --accent-strong:#229ed9;
+  --page:#0d111a;
+  --header:#141b27;
+  --header-soft:#222d3e;
+  --chat:#0d111a;
+  --incoming:#1b2433;
+  --outgoing:#263c6b;
+  --composer:#141b27;
+  --field:#222d3e;
+  --accent:#638bff;
+  --accent-strong:#466de5;
   --green:#25d366;
   --danger:#ff6b6b;
-  --text:#e9edef;
-  --muted:#8696a0;
-  --subtle:#667781;
+  --text:#eef2f9;
+  --muted:#a1aec2;
+  --subtle:#98a8bf;
   --line:rgba(134,150,160,.16);
   --shadow:0 10px 36px rgba(0,0,0,.28);
   --app-height:100dvh;
@@ -986,3 +986,11 @@ input,textarea{
     transition-duration:.01ms!important;
   }
 }
+
+/* Shared visual language and accessible controls. */
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#ls{overflow:auto}.lcard{border-radius:18px}.hdr img{border-radius:12px}.lcard .linp{font-size:16px}
+.mbox{max-width:calc(100vw - 32px)}.mbtns button{min-height:44px}.hbtn,.fprm{min-width:40px;min-height:40px}
+.lb img{max-height:90dvh;object-fit:contain}.mfile{overflow-wrap:anywhere}
+@media(min-width:1000px){#app{border-inline:1px solid var(--line)}}
+@media(max-width:600px){#app{min-height:0}.lcard{max-height:100%;overflow:auto}.icn,.sndbtn{min-width:42px}.mbox{padding:24px}}

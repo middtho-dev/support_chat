@@ -201,7 +201,7 @@ function isAdminToken(token) {
   if (!token || typeof token !== 'string') return false;
   if (ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) return true;
   const session = getMiniAdminSession(token);
-  return !!session;
+  return !!session && getOperatorAccess(session.userId).allowed;
 }
 
 function getMiniAdminSession(token) {
@@ -348,6 +348,7 @@ app.get(['/miniapp', '/tg-admin'], (req, res) => {
 });
 
 app.get('/admin/frp', (_req, res) => res.redirect(302, '/admin?view=frp'));
+app.get('/css/frp-panel.css', (_req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, '../tools/frp/public/panel.css')); });
 app.get('/js/frp-panel.js', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '../tools/frp/public/app.js'));
@@ -728,12 +729,13 @@ function acceptCustomerMessage(data = {}) {
 }
 
 io.on('connection', (socket) => {
+  require('./admin-guard').installAdminGuard(socket, isAdminToken);
   console.log('[Socket] Connected:', socket.id);
   realtimeStats.connections++;
   realtimeStats.lastConnectionAt = new Date().toISOString();
   socket.conn.once('upgrade', () => { realtimeStats.upgrades++; });
 
-  socket.on('join_ticket', ({ ticketId, sessionToken }) => {
+  socket.on('join_ticket', ({ ticketId, sessionToken } = {}) => {
     const ticket = db.getTicketBySessionAny.get(sessionToken);
     if (!ticket || ticket.id !== ticketId) return socket.emit('error', { message: 'Unauthorized' });
     socket.join(`ticket:${ticketId}`);
@@ -838,9 +840,10 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => console.log('[Socket] Disconnected:', socket.id));
 
-  socket.on('admin_auth', ({ token }) => {
+  socket.on('admin_auth', ({ token } = {}) => {
+    socket.isAdmin = false; socket.adminCredential = null; socket.leave('admin');
     if (!isAdminToken(token)) return socket.emit('admin_auth_error', { message: 'Invalid token' });
-    socket.isAdmin = true;
+    socket.isAdmin = true; socket.adminCredential = token;
     socket.adminUsesToken = !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN));
     socket.adminUserId = getMiniAdminSession(token)?.userId || null;
     socket.canManageSettings = socketCanManageSettings(socket);
@@ -849,7 +852,7 @@ io.on('connection', (socket) => {
     socket.emit('admin_tickets', db.getTicketsForAdmin.all());
   });
 
-  socket.on('admin_open_ticket', ({ ticketId }) => {
+  socket.on('admin_open_ticket', ({ ticketId } = {}) => {
     if (!socket.isAdmin) return;
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket) return;
@@ -1061,7 +1064,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true, id: msgId });
   });
 
-  socket.on('admin_typing', ({ ticketId }) => {
+  socket.on('admin_typing', ({ ticketId } = {}) => {
     if (!socket.isAdmin) return;
     io.to(`ticket:${ticketId}`).emit('typing_support');
     const ticket = db.getTicketById.get(ticketId);
@@ -1087,7 +1090,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('admin_close_ticket', ({ ticketId }) => {
+  socket.on('admin_close_ticket', ({ ticketId } = {}) => {
     if (!socket.isAdmin) return;
     const ticket = db.getTicketById.get(ticketId);
     if (!ticket || ticket.status === 'closed') return;

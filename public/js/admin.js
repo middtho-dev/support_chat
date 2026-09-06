@@ -9,7 +9,7 @@ const DEFAULT_TEMPLATES = [
   { label: 'Завершение', text: 'Спасибо, что написали в поддержку KV9RU! Будем рады помочь снова.' }
 ];
 const COLORS = ['#2563eb','#7c3aed','#db2777','#dc2626','#d97706','#059669','#0891b2','#9333ea'];
-const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, systemHealth: null, templates: loadTemplates(), view: 'chat', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
+const S = { token: null, tickets: [], filter: 'open', search: '', current: null, messages: [], settings: null, operators: [], permissions: { canManageSettings: false }, settingsDirty: false, settingsSaving: false, settingsFilter: 'all', settingsQuery: '', settingsSnapshot: '', settingsLastSavedAt: null, maintenance: null, systemHealth: null, templates: loadTemplates(), view: 'home', lastDate: '', file: null, uploading: false, lastTyping: 0, pendingReply: null };
 const socket = io({
   autoConnect: false,
   path: '/api/realtime/',
@@ -80,8 +80,8 @@ const isMobileLayout = () => window.matchMedia(IS_TG_MINI ? '(max-width: 720px)'
 function timeAgo(iso) { const sec = Math.max(0, Math.floor((Date.now() - parseServerDate(iso).getTime()) / 1000)); if (sec < 60) return 'сейчас'; if (sec < 3600) return `${Math.floor(sec / 60)} мин`; if (sec < 86400) return `${Math.floor(sec / 3600)} ч`; return `${Math.floor(sec / 86400)} д`; }
 function avatarColor(name = '') { let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0xffff; return COLORS[h % COLORS.length]; }
 function initials(name = '') { return (name.trim() || '?').slice(0, 2).toUpperCase(); }
-function loadTemplates() { try { return JSON.parse(localStorage.getItem('admin_templates')) || DEFAULT_TEMPLATES; } catch { return DEFAULT_TEMPLATES; } }
-function saveTemplates() { localStorage.setItem('admin_templates', JSON.stringify(S.templates)); }
+function loadTemplates() { try { const rows = JSON.parse(SafeStorage.local.getItem('admin_templates')); if (Array.isArray(rows) && rows.every(t => t && typeof t.label === 'string' && typeof t.text === 'string')) return rows; } catch {} return DEFAULT_TEMPLATES.map(t => ({ ...t })); }
+function saveTemplates() { SafeStorage.local.setItem('admin_templates', JSON.stringify(S.templates)); }
 let toastTimer;
 function toast(text, type = 'info') { const el = $('toast'); clearTimeout(toastTimer); el.textContent = text; el.style.borderColor = type === 'err' ? 'rgba(251,113,133,.45)' : type === 'ok' ? 'rgba(52,211,153,.45)' : ''; el.classList.add('on'); toastTimer = setTimeout(() => el.classList.remove('on'), 2800); }
 function setConn(state) { $('cdot').className = `dot ${state}`; $('ctxt').textContent = state === 'on' ? 'онлайн' : state === 'off' ? 'нет соединения' : 'подключение'; }
@@ -89,18 +89,19 @@ function setConn(state) { $('cdot').className = `dot ${state}`; $('ctxt').textCo
 async function init() {
   initTelegramMiniApp();
   bindStaticUi();
+  setView(pendingTargetTicketId ? 'chat' : (PAGE_PARAMS.get('view') || 'home'));
   renderSettings();
   renderTemplates();
   renderMaintenance();
   setInterval(renderRelativeTimes, 30000);
   setInterval(() => { if (S.view === 'settings' && S.token) loadMaintenance(); }, 20000);
   if (IS_TG_MINI) {
-    sessionStorage.removeItem('admin_token');
+    SafeStorage.session.removeItem('admin_token');
     clearMiniAppCache();
     await loginWithTelegram();
     return;
   }
-  const saved = sessionStorage.getItem('admin_token');
+  const saved = SafeStorage.session.getItem('admin_token');
   if (saved) { S.token = saved; setConn(''); socket.connect(); }
   else setTimeout(() => $('tok')?.focus(), 100);
 }
@@ -115,10 +116,10 @@ function clearMiniAppCache() {
 function initTelegramMiniApp() {
   if (!IS_TG_MINI) return;
   document.body.classList.add('tg-mini');
-  document.title = 'Админка';
-  document.querySelector('.auth-card h1').textContent = 'Админка';
-  document.querySelector('.auth-card p').textContent = 'Вход только через ваш Telegram';
-  document.querySelector('.top h1').textContent = 'Админка';
+  document.title = 'KV9 · Панель управления';
+  document.querySelector('.auth-card h1').textContent = 'KV9 Workspace';
+  document.querySelector('.auth-card p').textContent = 'Вход с помощью Telegram';
+  document.querySelector('.top h1').textContent = 'KV9 Workspace';
   document.querySelector('.top .brand p').textContent = 'Telegram Mini App';
   $('tok').style.display = 'none';
   $('lbtn').style.display = 'none';
@@ -173,16 +174,9 @@ async function loginWithTelegram() {
 }
 
 function applyTelegramTheme() {
-  if (!TG?.themeParams) return;
-  const p = TG.themeParams;
-  const root = document.documentElement.style;
-  if (p.bg_color) root.setProperty('--tg-bg', p.bg_color);
-  if (p.text_color) root.setProperty('--text', p.text_color);
-  if (p.hint_color) root.setProperty('--muted', p.hint_color);
-  if (p.button_color) root.setProperty('--blue2', p.button_color);
-  if (p.button_text_color) root.setProperty('--button-text', p.button_text_color);
+  // Keep one complete palette: partial Telegram overrides can make text unreadable.
+  try { TG?.setHeaderColor?.('#141b27'); TG?.setBackgroundColor?.('#0d111a'); } catch {}
 }
-
 function applyTelegramViewport() {
   if (!IS_TG_MINI) return;
   const stableHeight = Math.round(
@@ -257,11 +251,24 @@ function bindStaticUi() {
 }
 
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
-function logout() { sessionStorage.removeItem('admin_token'); socket.disconnect(); S.token = null; S.tickets = []; S.current = null; S.messages = []; S.permissions = { canManageSettings: false }; document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.(); $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off'); }
-
+function logout() {
+  SafeStorage.session.removeItem('admin_token');
+  S.token = null; socket.disconnect();
+  Object.assign(S, { tickets: [], current: null, messages: [], settings: null, operators: [], maintenance: null, systemHealth: null, settingsDirty: false, settingsSaving: false, file: null, pendingReply: null, permissions: { canManageSettings: false } });
+  window.supportAdminSettings = null; window.adminResetTicketCard?.(); window.FrpPanel?.reset();
+  clearInterval(miniRefreshTimer); miniRefreshTimer = null;
+  document.querySelectorAll('.pop').forEach(p => p.remove());
+  $('cv-msgs').textContent = ''; $('composer').textContent = ''; $('tlist').textContent = '';
+  document.body.classList.remove('ticket-open'); TG?.BackButton?.hide?.();
+  renderSettings(); setView('home');
+  $('app').style.display = 'none'; $('login').style.display = 'grid'; $('tok').value = ''; $('lbtn').disabled = false; setConn('off');
+  if (IS_TG_MINI) { $('lbtn').style.display = ''; $('lbtn').textContent = 'Войти через Telegram'; $('lbtn').onclick = e => { e.preventDefault(); loginWithTelegram(); }; }
+}
 socket.on('connect', () => { setConn('on'); if (S.token) socket.emit('admin_auth', { token: S.token }); });
 socket.on('disconnect', () => setConn('off'));
 socket.on('connect_error', () => {
+  $('lbtn').disabled = false;
+  if ($('app').style.display !== 'grid') $('lerr').textContent = 'Не удалось подключиться. Проверьте сеть и повторите вход.';
   socket.io.opts.transports = ['polling', 'websocket'];
   setConn('connecting');
 });
@@ -269,7 +276,8 @@ socket.io.on('reconnect_attempt', () => setConn('connecting'));
 
 socket.on('admin_auth_ok', auth => {
   S.permissions = auth?.permissions || S.permissions;
-  sessionStorage.setItem('admin_token', S.token);
+  AdminShell.render(S);
+  SafeStorage.session.setItem('admin_token', S.token);
   $('login').style.display = 'none';
   $('app').style.display = 'grid';
   tgImpact('medium');
@@ -303,7 +311,8 @@ socket.on('admin_operators_updated', () => {
 });
 
 socket.on('admin_auth_error', () => {
-  sessionStorage.removeItem('admin_token');
+  logout();
+  SafeStorage.session.removeItem('admin_token');
   $('lbtn').disabled = false;
   $('lerr').textContent = 'Неверный токен доступа';
   setConn('off');
@@ -311,7 +320,8 @@ socket.on('admin_auth_error', () => {
 });
 
 socket.on('admin_tickets', tickets => {
-  S.tickets = tickets;
+  S.tickets = Array.isArray(tickets) ? tickets : [];
+  AdminShell.render(S);
   renderSidebar();
   if (pendingTargetTicketId && S.tickets.some(ticket => ticket.id === pendingTargetTicketId)) {
     const target = pendingTargetTicketId;
@@ -401,16 +411,23 @@ function setFilter(filter) {
 }
 
 function setView(view) {
-  S.view = view === 'health' ? 'settings' : (view || 'chat');
+  S.view = view === 'health' ? 'settings' : (AdminShell.modules.some(m => m.id === view) ? view : 'home');
+  if (S.view === 'frp' && S.token && !S.permissions.canManageSettings) S.view = 'home';
+  $('home').classList.toggle('on', S.view === 'home');
+  document.body.classList.toggle('tool-active', S.view !== 'chat');
+  AdminShell.render(S);
   tgImpact('light');
   document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
   $('settings').classList.toggle('on', S.view === 'settings');
   $('templates').classList.toggle('on', S.view === 'templates');
   $('frp').classList.toggle('on', S.view === 'frp');
-  document.body.classList.toggle('frp-active', S.view === 'frp');
+  document.body.classList.remove('frp-active');
+  document.querySelectorAll('.navbtn').forEach(b => { if (b.dataset.view === S.view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (S.view === 'frp') window.FrpPanel?.open();
 
   if (S.view === 'chat') {
+    document.body.classList.toggle('ticket-open', !!S.current);
+    if (isMobileLayout()) $('main').classList.toggle('open', !!S.current);
     $('welcome').style.display = S.current ? 'none' : 'grid';
     $('chat').style.display = S.current ? 'flex' : 'none';
     if (isMobileLayout() && !S.current) $('main').classList.remove('open');
@@ -449,7 +466,7 @@ function leaveCurrentTicket() {
   updateTelegramBackButton();
 }
 
-function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); document.body.classList.add('ticket-open'); $('mobile-ticket-top').setAttribute('aria-hidden', 'false'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; tgImpact('medium'); updateTelegramBackButton(); renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
+function openTicket(id) { const ticket = S.tickets.find(t => t.id === id); if (!ticket) return; S.pendingReply = null; S.current = ticket; S.current.unread_count = 0; S.messages = []; S.lastDate = ''; setView('chat'); $('main').classList.add('open'); document.body.classList.add('ticket-open'); $('mobile-ticket-top').setAttribute('aria-hidden', 'false'); $('welcome').style.display = 'none'; $('chat').style.display = 'flex'; $('cv-msgs').innerHTML = '<div class="empty">Загрузка сообщений...</div>'; tgImpact('medium'); updateTelegramBackButton(); renderSidebar(); renderChatHeader(); socket.emit('admin_open_ticket', { ticketId: id }); }
 function renderChatHeader() {
   if (!S.current) return;
   const t = S.current;
@@ -478,12 +495,16 @@ function renderChatHeader() {
   mobileBtn.disabled = legacyDeleted || t.status !== 'open';
   mobileBtn.className = `mobile-ticket-toggle ${t.status === 'open' ? 'danger' : 'okbtn'}`;
   mobileBtn.textContent = t.status === 'open' ? 'Закрыть' : (legacyDeleted ? 'Недоступно' : 'Закрыт');
+  // Ticket updates must not replace an active draft or file upload.
+  if ($('composer').dataset.ticket === t.id && $('composer').dataset.status === t.status && $('composer').childElementCount) return;
+  $('composer').dataset.ticket = t.id;
+  $('composer').dataset.status = t.status;
   $('composer').innerHTML = t.status === 'open'
     ? composerHtml()
     : '<div class="closed-note">Тикет закрыт. Для нового обращения создайте новый тикет.</div>';
   if (t.status === 'open') wireComposer();
 }
-function composerHtml() { return `<div id="admin-file-preview" class="admin-file-preview" style="display:none"></div><div class="compose-row"><button id="quick" class="quick" title="Шаблоны" aria-label="Шаблоны ответов"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></button><button id="reply-attach" class="quick" title="Прикрепить файл" aria-label="Прикрепить файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m20.5 11.5-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button><input id="reply-file" type="file" accept="image/*,video/*,audio/*,.jpg,.jpeg,.jpe,.jfif,.heic,.heif,.heics,.heifs,.dng,.avif,.tif,.tiff,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" style="display:none"><textarea id="reply-txt" rows="1" placeholder="Сообщение" aria-label="Ответ клиенту"></textarea><button id="reply-send" class="send" disabled aria-label="Отправить"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 11.2 20.2 4a.8.8 0 0 1 1 1l-7.1 16.1a.8.8 0 0 1-1.5-.1l-2.2-6.5-6.7-1.8a.8.8 0 0 1-.3-1.5Z"/><path d="m10.4 14.5 4-4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button></div><div class="hint"><span>Ctrl+Enter — отправить</span><span id="reply-cnt"></span></div>`; }
+function composerHtml() { return `<div id="admin-file-preview" class="admin-file-preview" style="display:none"></div><div class="compose-row"><button id="quick" class="quick" title="Шаблоны" aria-label="Шаблоны ответов"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></button><button id="reply-attach" class="quick" title="Прикрепить файл" aria-label="Прикрепить файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m20.5 11.5-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button><input id="reply-file" type="file" accept="image/*,video/*,audio/*,.jpg,.jpeg,.jpe,.jfif,.heic,.heif,.heics,.heifs,.dng,.avif,.tif,.tiff,.pdf,.doc,.docx,.zip,.txt,.csv,.xls,.xlsx,.pptx,.7z,.rar" style="display:none"><textarea id="reply-txt" rows="1" placeholder="Сообщение" aria-label="Ответ клиенту"></textarea><button id="reply-send" class="send" disabled aria-label="Отправить"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 11.2 20.2 4a.8.8 0 0 1 1 1l-7.1 16.1a.8.8 0 0 1-1.5-.1l-2.2-6.5-6.7-1.8a.8.8 0 0 1-.3-1.5Z"/><path d="m10.4 14.5 4-4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button></div><div class="hint"><span>Ctrl / ⌘ + Enter — отправить</span><span id="reply-cnt"></span></div>`; }
 function wireComposer() { S.file = null; S.uploading = false; $('reply-txt').addEventListener('input', onReplyInput); $('reply-txt').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } }); $('reply-send').addEventListener('click', sendReply); $('quick').addEventListener('click', showTemplatePicker); $('reply-attach').addEventListener('click', () => $('reply-file').click()); $('reply-file').addEventListener('change', () => { if ($('reply-file').files[0]) setReplyFile($('reply-file').files[0]); $('reply-file').value = ''; }); }
 function renderConversation() { const box = $('cv-msgs'); box.innerHTML = ''; S.lastDate = ''; if (!S.messages.length) { box.innerHTML = '<div class="empty">Сообщений пока нет</div>'; return; } S.messages.forEach(m => appendMessage(m, false)); scrollBottom(false); }
 function appendMessage(msg, scroll = false) { const box = $('cv-msgs'); if (!box) return; box.querySelector('.empty')?.remove(); if (msg.sender !== 'system') { const ds = fmtDate(parseServerDate(msg.created_at)); if (ds !== S.lastDate) { S.lastDate = ds; box.insertAdjacentHTML('beforeend', `<div class="day">${esc(ds)}</div>`); } } const out = msg.sender === 'support'; const sys = msg.sender === 'system'; const sender = !out && !sys ? `<div class="sender">${esc(msg.sender_name || 'Клиент')}</div>` : ''; box.insertAdjacentHTML('beforeend', `<div class="msg ${sys ? 'sys' : out ? 'out' : 'in'}"><div class="bubble">${sender}${messageBody(msg)}${reactionsHtml(msg)}<div class="meta">${fmtTime(parseServerDate(msg.created_at))}</div></div></div>`); if (scroll) scrollBottom(true); }
@@ -503,6 +524,8 @@ async function sendReply() {
   if (!txt || !S.current || S.current.status !== 'open' || S.uploading) return;
   const content = txt.value.trim();
   const file = S.file;
+  const ticketId = S.current.id;
+  const credential = S.token;
   if (!content && !file) return;
   const maxLength = file ? 1000 : 4000;
   if (content.length > maxLength) return toast(`Слишком длинное сообщение — максимум ${maxLength} символов`, 'err');
@@ -529,9 +552,11 @@ async function sendReply() {
     }
     S.uploading = false;
   }
-  const payload = S.pendingReply || { ticketId: S.current.id, content, fileUrl, fileName, fileMime, messageType, clientMessageId: crypto.randomUUID() };
+  if (S.current?.id !== ticketId || S.token !== credential) return;
+  const payload = (S.pendingReply?.ticketId === ticketId ? S.pendingReply : null) || { ticketId, content, fileUrl, fileName, fileMime, messageType, clientMessageId: crypto.randomUUID() };
   S.pendingReply = payload;
   socket.timeout(15000).emit('admin_reply', payload, (timeoutError, ack) => {
+    if (S.current?.id !== ticketId || S.token !== credential) return;
     if (timeoutError || ack?.error) {
       const errorText = ack?.error === 'Message too long'
         ? `Слишком длинное сообщение — максимум ${ack.maxLength || 4000} символов`
@@ -579,12 +604,12 @@ function showTemplatePicker(event) { event.stopPropagation(); document.querySele
 function input(id, label, value, type = 'text', attrs = '') { return `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value ?? '')}" ${attrs}></div>`; }
 function area(id, label, value, rows = 3) { return `<div class="field"><label for="${id}">${label}</label><textarea id="${id}" rows="${rows}">${esc(value ?? '')}</textarea></div>`; }
 function check(id, label, value) { return `<label class="check setting-toggle"><input id="${id}" type="checkbox" ${value ? 'checked' : ''}><span>${label}</span></label>`; }
-function select(id, label, value, options) { return `<div class="field"><label>${label}</label><select id="${id}">${options.map(opt => `<option value="${esc(opt.value)}" ${opt.value === value ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')}</select></div>`; }
+function select(id, label, value, options) { return `<div class="field"><label for="${id}">${label}</label><select id="${id}">${options.map(opt => `<option value="${esc(opt.value)}" ${opt.value === value ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')}</select></div>`; }
 function settingCard(category, title, description, content, accent = 'blue', keywords = '') {
-  return `<section class="card settings-card" data-settings-category="${esc(category)}" data-settings-keywords="${esc(keywords)}">
-    <header class="settings-card-head"><span class="settings-card-mark ${accent}"></span><div><h3>${esc(title)}</h3><p>${esc(description)}</p></div></header>
+  return `<details class="card settings-card" data-settings-category="${esc(category)}" data-settings-keywords="${esc(keywords)}">
+    <summary class="settings-card-head"><span class="settings-card-mark ${accent}"></span><div><h3>${esc(title)}</h3><p>${esc(description)}</p></div></summary>
     <div class="settings-card-body">${content}</div>
-  </section>`;
+  </details>`;
 }
 function operatorSettingsCard() {
   const rows = S.operators.length
@@ -608,7 +633,7 @@ function operatorSettingsCard() {
     '<p class="settings-note">Оператору достаточно открыть бота и нажать /start. Без права на настройки он увидит только рабочий чат.</p>' +
     `<div class="operator-list">${rows}</div>` +
     '<div class="operator-new"><b>Новый оператор</b>' +
-    '<div class="operator-row-fields"><input id="operator-new-id" inputmode="numeric" placeholder="Telegram ID"><input id="operator-new-name" placeholder="Имя оператора"><input id="operator-new-username" placeholder="username (необязательно)"></div>' +
+    '<div class="operator-row-fields"><input id="operator-new-id" aria-label="Telegram ID нового оператора" inputmode="numeric" placeholder="Telegram ID"><input id="operator-new-name" aria-label="Имя нового оператора" placeholder="Имя оператора"><input id="operator-new-username" aria-label="Имя пользователя Telegram" placeholder="username (необязательно)"></div>' +
     '<div class="operator-row-access"><label><input id="operator-new-active" type="checkbox" checked> Принимает тикеты</label><label><input id="operator-new-settings" type="checkbox"> Может менять настройки</label><button id="operator-new-save" type="button" class="save">Добавить оператора</button></div></div>',
     'violet',
     'оператор доступ права Telegram ID настройки'
@@ -935,11 +960,18 @@ function renderSettings() {
     <div class="settings-hero">
       <div><span class="settings-eyebrow">Единый центр</span><h2>Управление и состояние</h2><p>Живые показатели, Telegram, доставка, хранение и настройки собраны на одной странице.</p></div>
     </div>
-    <div id="control-health"></div>
+    <div class="management-tabs" aria-label="Раздел управления"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button></div><div id="control-health"></div>
     <div class="control-divider"></div>
-    ${settingsContent}
+    <div id="settings-config">${settingsContent}</div>
   </div>`;
   renderMaintenance();
+  const selectManagementView = view => {
+    S.managementView = view;
+    $('control-health').hidden = view !== 'status'; $('settings-config').hidden = view !== 'configuration';
+    document.querySelectorAll('[data-management-view]').forEach(b => { b.classList.toggle('on', b.dataset.managementView === view); b.setAttribute('aria-pressed', String(b.dataset.managementView === view)); });
+  };
+  document.querySelectorAll('[data-management-view]').forEach(b => b.addEventListener('click', () => selectManagementView(b.dataset.managementView)));
+  selectManagementView(S.managementView || 'status');
   if (canManage && S.settings) bindSettingsUi();
 }
 
@@ -1000,6 +1032,7 @@ function applySettingsFilter() {
     const haystack = `${card.textContent} ${card.dataset.settingsKeywords || ''}`.toLowerCase();
     const show = categoryMatch && (!query || haystack.includes(query));
     card.hidden = !show;
+    if (show && query) card.open = true;
     if (show) visible++;
   });
   $('settings-empty')?.classList.toggle('on', visible === 0);
@@ -1186,8 +1219,8 @@ function testOperationalAlert() {
   });
 }
 
-function renderTemplates() { $('templates').innerHTML = `<div class="section"><h2>Шаблоны ответов</h2><p>Шаблоны хранятся в браузере оператора и доступны в чате по кнопке #.</p><div class="card"><div id="tpl-list" class="template-list"></div><button id="tpl-add" class="add">Добавить шаблон</button><button id="tpl-reset" class="ghost" style="margin-left:8px">Вернуть стандартные</button></div></div>`; renderTemplateRows(); $('tpl-add').addEventListener('click', () => { S.templates.push({ label: 'Новый', text: '' }); saveTemplates(); renderTemplateRows(); }); $('tpl-reset').addEventListener('click', () => { S.templates = DEFAULT_TEMPLATES.slice(); saveTemplates(); renderTemplateRows(); toast('Шаблоны восстановлены', 'ok'); }); }
-function renderTemplateRows() { const list = $('tpl-list'); if (!list) return; list.innerHTML = S.templates.map((t, i) => `<div class="tpl" data-i="${i}"><input class="tpl-label" value="${esc(t.label)}" placeholder="Название"><input class="tpl-text" value="${esc(t.text)}" placeholder="Текст ответа"><button title="Удалить">×</button></div>`).join('') || '<div class="empty">Шаблонов нет</div>'; list.querySelectorAll('.tpl').forEach(row => { const i = Number(row.dataset.i); row.querySelector('.tpl-label').addEventListener('input', e => { S.templates[i].label = e.target.value; saveTemplates(); }); row.querySelector('.tpl-text').addEventListener('input', e => { S.templates[i].text = e.target.value; saveTemplates(); }); row.querySelector('button').addEventListener('click', () => { S.templates.splice(i, 1); saveTemplates(); renderTemplateRows(); }); }); }
+function renderTemplates() { $('templates').innerHTML = `<div class="section"><h2>Шаблоны ответов</h2><p>Готовые ответы сохраняются в этом браузере. В диалоге откройте кнопку «Шаблоны».</p><div class="card"><div id="tpl-list" class="template-list"></div><button id="tpl-add" class="add">Добавить шаблон</button><button id="tpl-reset" class="ghost" style="margin-left:8px">Вернуть стандартные</button></div></div>`; renderTemplateRows(); $('tpl-add').addEventListener('click', () => { S.templates.push({ label: 'Новый', text: '' }); saveTemplates(); renderTemplateRows(); }); $('tpl-reset').addEventListener('click', () => { S.templates = DEFAULT_TEMPLATES.map(t => ({ ...t })); saveTemplates(); renderTemplateRows(); toast('Шаблоны восстановлены', 'ok'); }); }
+function renderTemplateRows() { const list = $('tpl-list'); if (!list) return; list.innerHTML = S.templates.map((t, i) => `<div class="tpl" data-i="${i}"><input aria-label="Название шаблона" class="tpl-label" value="${esc(t.label)}" placeholder="Название"><textarea class="tpl-text" aria-label="Текст шаблона" placeholder="Текст ответа">${esc(t.text)}</textarea><button aria-label="Удалить шаблон" title="Удалить шаблон">×</button></div>`).join('') || '<div class="empty">Шаблонов нет</div>'; list.querySelectorAll('.tpl').forEach(row => { const i = Number(row.dataset.i); row.querySelector('.tpl-label').addEventListener('input', e => { S.templates[i].label = e.target.value; saveTemplates(); }); row.querySelector('.tpl-text').addEventListener('input', e => { S.templates[i].text = e.target.value; saveTemplates(); }); row.querySelector('button').addEventListener('click', () => { S.templates.splice(i, 1); saveTemplates(); renderTemplateRows(); }); }); }
 
 function fmtBytes(value) {
   const bytes = Number(value || 0);
@@ -1279,15 +1312,15 @@ function renderMaintenance() {
   root.innerHTML = `<div class="control-health-block">
     <div class="maintenance-title"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Telegram, realtime, очереди, резервные копии и диск обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
-      <div class="health-stat ${backupClass}"><span>Backup</span><b>${backupLabel}</b><small>${esc(fmtStatusDate(m.lastBackupAt))}</small></div>
+      <div class="health-stat ${backupClass}"><span>Резервная копия</span><b>${backupLabel}</b><small>${esc(fmtStatusDate(m.lastBackupAt))}</small></div>
       <div class="health-stat ${diskClass}"><span>Диск</span><b>${m.disk ? `${m.disk.usedPercent}%` : '—'}</b><small>${m.disk ? `${fmtBytes(m.disk.freeBytes)} свободно` : 'нет данных'}</small></div>
       <div class="health-stat"><span>Загрузки</span><b>${Number(m.uploads?.files || 0)}</b><small>${fmtBytes(m.uploads?.bytes)}</small></div>
       <div class="health-stat"><span>Очистка</span><b>${Number(m.lastCleanupRemoved || 0)}</b><small>${esc(fmtStatusDate(m.lastCleanupAt))}</small></div>
     </div>
     <div class="card">
-      <h3>CDN и realtime</h3>
+      <h3>Соединения</h3>
       <div class="maintenance-summary">
-        <div class="health-stat ok"><span>Endpoint</span><b>${esc(realtime.path || '/api/realtime/')}</b><small>CDN-safe API path</small></div>
+        <div class="health-stat ok"><span>Адрес API</span><b>${esc(realtime.path || '/api/realtime/')}</b><small>Подключение через API</small></div>
         <div class="health-stat"><span>Подключено</span><b>${Number(realtime.connectedClients || 0)}</b><small>активных клиентов</small></div>
         <div class="health-stat"><span>Транспорт</span><b>WS ${Number(realtimeTransports.websocket || 0)}</b><small>polling ${Number(realtimeTransports.polling || 0)}</small></div>
         <div class="health-stat ${Number(realtime.connectionErrors || 0) ? 'warning' : 'ok'}"><span>Ошибки</span><b>${Number(realtime.connectionErrors || 0)}</b><small>со старта сервера</small></div>

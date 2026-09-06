@@ -68,15 +68,15 @@ socket.io.on('reconnect_attempt',()=>setConnStatus('connecting'));
 /* ── SESSION ── */
 const APP_CACHE_VERSION='2026-09-02-cdn2';
 const SK='sc_v4';
-const saveS=()=>localStorage.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
-const loadS=()=>{try{return JSON.parse(localStorage.getItem(SK))}catch{return null}};
-const clearS=()=>localStorage.removeItem(SK);
+const saveS=()=>SafeStorage.local.setItem(SK,JSON.stringify({t:S.token,id:S.tid,n:S.uname}));
+const loadS=()=>{try{return JSON.parse(SafeStorage.local.getItem(SK))}catch{return null}};
+const clearS=()=>SafeStorage.local.removeItem(SK);
 
 /* ── DRAFT ── */
 const DRAFT_KEY='sc_draft_v2';
-const saveDraft=()=>ti.value?localStorage.setItem(DRAFT_KEY,ti.value):localStorage.removeItem(DRAFT_KEY);
-const loadDraft=()=>{const d=localStorage.getItem(DRAFT_KEY);if(d){ti.value=d;resize();updSend();}};
-const clearDraft=()=>localStorage.removeItem(DRAFT_KEY);
+const saveDraft=()=>ti.value?SafeStorage.local.setItem(DRAFT_KEY,ti.value):SafeStorage.local.removeItem(DRAFT_KEY);
+const loadDraft=()=>{const d=SafeStorage.local.getItem(DRAFT_KEY);if(d){ti.value=d;resize();updSend();}};
+const clearDraft=()=>SafeStorage.local.removeItem(DRAFT_KEY);
 
 /* ── MESSAGE CACHE (instant paint on reload) ── */
 const MCACHE_KEY='sc_msgs_v2';
@@ -85,17 +85,17 @@ function saveMsgCache(){
   if(!S.tid||!S._msgs.length)return;
   try{
     const slice=S._msgs.slice(-MCACHE_LIMIT);
-    localStorage.setItem(MCACHE_KEY,JSON.stringify({tid:S.tid,msgs:slice,closed:S.closed}));
+    SafeStorage.local.setItem(MCACHE_KEY,JSON.stringify({tid:S.tid,msgs:slice,closed:S.closed}));
   }catch{}
 }
 function loadMsgCache(tid){
   try{
-    const raw=localStorage.getItem(MCACHE_KEY);if(!raw)return null;
+    const raw=SafeStorage.local.getItem(MCACHE_KEY);if(!raw)return null;
     const c=JSON.parse(raw);
     return c&&c.tid===tid?c:null;
   }catch{return null}
 }
-function clearMsgCache(){localStorage.removeItem(MCACHE_KEY);}
+function clearMsgCache(){SafeStorage.local.removeItem(MCACHE_KEY);}
 
 /* ── INIT ── */
 async function init(){
@@ -181,12 +181,12 @@ async function init(){
 
 function runClientCacheMigration(){
   try{
-    const prev=localStorage.getItem('sc_cache_version');
+    const prev=SafeStorage.local.getItem('sc_cache_version');
     if(prev===APP_CACHE_VERSION)return;
-    localStorage.removeItem('sc_v3');
-    localStorage.removeItem('sc_draft');
-    localStorage.removeItem('sc_msgs_v1');
-    localStorage.setItem('sc_cache_version',APP_CACHE_VERSION);
+    SafeStorage.local.removeItem('sc_v3');
+    SafeStorage.local.removeItem('sc_draft');
+    SafeStorage.local.removeItem('sc_msgs_v1');
+    SafeStorage.local.setItem('sc_cache_version',APP_CACHE_VERSION);
   }catch{}
   if('serviceWorker' in navigator){
     navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.update())).catch(()=>{});
@@ -231,7 +231,7 @@ function showChat(){$('ls').classList.remove('on');$('cs').classList.add('on');t
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
   if(S.closed)return;
-  dlg('Закрыть тикет?','После закрытия можно начать новый чат.',async()=>{
+  dlg('Закрыть обращение?','После закрытия можно начать новый чат.',async()=>{
     try{
       const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});
       if(!r.ok)throw 0;
@@ -474,7 +474,7 @@ async function send(){
   }
 }
 sndbtn.addEventListener('click',send);
-ti.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+ti.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
 ti.addEventListener('input',()=>{
   if(S.pendingSend&&S.pendingSend.content!==(ti.value.trim()||null))S.pendingSend=null;
   resize();updSend();saveDraft();
@@ -514,11 +514,11 @@ function buildEmoji(){
   const grid=document.createElement('div');grid.className='egrid';
   ECATS.forEach((c,i)=>{
     const b=document.createElement('button');b.className='ecat'+(i===0?' on':'');b.textContent=c.i;
-    b.onclick=()=>{cats.querySelectorAll('.ecat').forEach(x=>x.classList.remove('on'));b.classList.add('on');grid.innerHTML='';c.e.forEach(em=>{const btn=document.createElement('button');btn.className='eitm';btn.textContent=em;btn.onclick=()=>insE(em);grid.appendChild(btn)})};
+    b.onclick=()=>{cats.querySelectorAll('.ecat').forEach(x=>x.classList.remove('on'));b.classList.add('on');grid.innerHTML='';c.e.forEach(em=>{const btn=document.createElement('button');btn.className='eitm';btn.textContent=em;btn.setAttribute('aria-label','Вставить '+em);btn.onclick=()=>insE(em);grid.appendChild(btn)})};
     cats.appendChild(b);
   });
   ep.appendChild(cats);ep.appendChild(grid);
-  ECATS[0].e.forEach(em=>{const btn=document.createElement('button');btn.className='eitm';btn.textContent=em;btn.onclick=()=>insE(em);grid.appendChild(btn)});
+  ECATS[0].e.forEach(em=>{const btn=document.createElement('button');btn.className='eitm';btn.textContent=em;btn.setAttribute('aria-label','Вставить '+em);btn.onclick=()=>insE(em);grid.appendChild(btn)});
 }
 function insE(em){const s=ti.selectionStart,e2=ti.selectionEnd,v=ti.value;ti.value=v.slice(0,s)+em+v.slice(e2);ti.selectionStart=ti.selectionEnd=s+em.length;ti.focus();resize();updSend()}
 ebt.addEventListener('click',()=>{if(ep.style.display==='none'){ep.style.display='block';S.epOpen=true;setTimeout(()=>mwrap.scrollTo({top:mwrap.scrollHeight}),50)}else closeEp()});
@@ -595,14 +595,15 @@ window.mediaFailed=el=>{
 
 /* ── DIALOG ── */
 function dlg(title,msg,cb){
-  const ov=document.createElement('div');ov.className='mov';
-  ov.innerHTML=`<div class="mbox"><h3>${esc(title)}</h3><p>${esc(msg)}</p><div class="mbtns"><button class="mbc">Отмена</button><button class="mbo">Закрыть</button></div></div>`;
-  ov.querySelector('.mbc').onclick=()=>ov.remove();
-  ov.querySelector('.mbo').onclick=()=>{ov.remove();cb()};
-  ov.onclick=e=>{if(e.target===ov)ov.remove()};
-  document.body.appendChild(ov);
+  const focus=document.activeElement,ov=document.createElement('div');ov.className='mov';
+  ov.innerHTML=`<div class="mbox" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h3 id="confirm-title">${esc(title)}</h3><p>${esc(msg)}</p><div class="mbtns"><button class="mbc">Отмена</button><button class="mbo">Закрыть</button></div></div>`;
+  const close=()=>{ov.remove();focus?.focus();};
+  ov.querySelector('.mbc').onclick=close;
+  ov.querySelector('.mbo').onclick=()=>{close();cb()};
+  ov.onclick=e=>{if(e.target===ov)close()};
+  ov.onkeydown=e=>{if(e.key==='Escape')close();if(e.key==='Tab'){e.preventDefault();(document.activeElement===ov.querySelector('.mbc')?ov.querySelector('.mbo'):ov.querySelector('.mbc')).focus();}};
+  document.body.appendChild(ov);ov.querySelector('.mbc').focus();
 }
-
 /* ── TOAST ── */
 const TICO={ok:'✓',err:'✗',info:'ℹ'};
 let tt;
@@ -651,6 +652,7 @@ async function refreshConfig(){
     if(!r.ok)return;
     const d=await r.json();
     Object.assign(CFG,d.settings||{});
+    const hint=document.querySelector('.dropcard span');if(hint)hint.textContent='Фото, видео, аудио и документы до '+(Number(CFG.uploadMaxMb)||50)+' МБ';
     CFG.online=!!d.online;
   }catch{}
 }

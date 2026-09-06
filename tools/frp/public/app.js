@@ -9,7 +9,7 @@
   let current = null, pending = false, loading = false;
   const panel = $('frp');
   panel.innerHTML = `<div class="frp-wrap">
-    <h2>FRP · Устройства</h2>
+    <h2>Устройства</h2>
     <p id="frp-summary"></p>
     <p id="frp-status" role="status">Загрузка…</p>
     <p id="frp-error" role="alert"></p>
@@ -18,7 +18,7 @@
     <p>Установите сервер, затем нажмите «Включить». Включённый сервер автоматически запускается вместе с приложением. Сохранение настроек работающего сервера кратко перезапускает FRP; устройства переподключаются.</p>
     <p id="frp-exclusions"></p></details><h3>Устройства <span id="frp-count"></span></h3>
     <input id="frp-search" type="search" placeholder="Поиск по имени, IP или порту" aria-label="Поиск устройств">
-    <p>Одна строка — одно устройство. Нажмите имя, чтобы открыть веб-интерфейс. Все порты устройства показаны в этой же строке. «Онлайн» означает подключение к FRP, а не проверку веб-сервиса.</p>
+    <p>Нажмите имя для входа в веб-интерфейс. Онлайн — устройство подключено к FRP.</p>
     <div class="frp-table"><table><thead><tr><th>Устройство</th><th>IP</th><th>Статус</th><th>Порты</th><th>Соединения</th><th>Последний раз в сети</th></tr></thead><tbody id="frp-devices"></tbody></table></div>
     <details id="frp-example"><summary>Подключить устройство — пример frpc.toml</summary><p>На устройстве нужен клиент frpc. Замените имя на уникальное, localPort — на порт сервиса устройства, remotePort — на свободный порт сервера. Для нескольких сервисов добавьте блоки [[proxies]].</p><button id="frp-copy" type="button">Скопировать конфигурацию</button><pre id="frp-config"></pre><p>Конфигурация содержит секрет подключения. Указанный в настройках домен должен указывать на этот сервер; порт подключения и используемые порты туннелей должны быть разрешены в firewall.</p></details>
   </div>`;
@@ -34,7 +34,7 @@
     const search = $('frp-search').value.toLowerCase();
     $('frp-count').textContent = `(${devices.filter(d => d.online).length} онлайн / ${devices.length} всего)`;
     $('frp-devices').innerHTML = devices.filter(d => `${d.name} ${d.ip} ${d.ports.map(p => `${p.name} ${p.port}`).join(' ')}`.toLowerCase().includes(search))
-      .map(d => `<tr><td>${link(d.primary, d.name)}${!d.primary ? '<br><small>Нет активного веб-туннеля</small>' : ''}</td><td>${esc(d.ip || '—')}</td><td>${d.stale ? 'Нет данных' : d.online ? '🟢 Онлайн' : 'Отключено'}</td><td>${d.ports.map(p => `<span title="${esc(p.name)}">${esc(p.port ?? '—')}/${esc(p.type)}${/luci|web|http/i.test(p.name) ? ' · Веб' : /ssh/i.test(p.name) ? ' · SSH' : ''}${!p.online ? ' · отключён' : ''}</span>`).join('<br>') || 'Без туннелей'}</td><td>${d.online ? esc(d.connections) : '—'}</td><td>${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('ru-RU')) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Устройства не найдены</td></tr>';
+      .map(d => `<tr><td>${link(d.primary, d.name)}${!d.primary ? '<br><small>Нет активного веб-туннеля</small>' : ''}</td><td data-label="IP-адрес">${esc(d.ip || '—')}</td><td data-label="Состояние">${d.stale ? 'Нет данных' : d.online ? '🟢 Онлайн' : 'Отключено'}</td><td data-label="Порты">${d.ports.map(p => `<span title="${esc(p.name)}">${esc(p.port ?? '—')}/${esc(p.type)}${/luci|web|http/i.test(p.name) ? ' · Веб' : /ssh/i.test(p.name) ? ' · SSH' : ''}${!p.online ? ' · отключён' : ''}</span>`).join('<br>') || 'Без туннелей'}</td><td data-label="Соединения">${d.online ? esc(d.connections) : '—'}</td><td data-label="Последняя активность">${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('ru-RU')) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Устройства не найдены</td></tr>';
   }
   function render(updateFields = false) {
     if (!current) return;
@@ -68,17 +68,17 @@
     loading = true;
     const token = S.token;
     try { const data = await request(); if (token !== S.token) return; const first = !current; current = data; render(first); }
-    catch (e) { $('frp-error').textContent = `Не удалось обновить состояние: ${e.message}`; if (current) { [...current.devices, ...(current.clients || [])].forEach(d => { d.stale = true; d.online = false; }); renderDevices(); } }
+    catch (e) { if (token !== S.token) return; $('frp-error').textContent = `Не удалось обновить состояние: ${e.message}`; if (current) { [...current.devices, ...(current.clients || [])].forEach(d => { d.stale = true; d.online = false; }); renderDevices(); } }
     finally { loading = false; }
   }
   async function action(name, body) {
     if (pending) return;
     pending = true; render();
     $('frp-error').textContent = '';
-    $('frp-status').textContent = name === 'install' ? 'Загрузка и проверка официального FRP…' : 'Выполняется операция…';
+    $('frp-status').textContent = name === 'install' ? 'Загружаем и проверяем FRP…' : 'Выполняется операция…';
     const token = S.token;
     try { const data = await request(name, body); if (token !== S.token) return; current = data; toast('Готово', 'ok'); }
-    catch (e) { toast(e.message, 'err'); if (current) current.error = e.message; }
+    catch (e) { if (token !== S.token) return; toast(e.message, 'err'); if (current) current.error = e.message; }
     finally { pending = false; render(true); }
   }
   panel.querySelectorAll('[data-frp-action]').forEach(button => button.addEventListener('click', () => action(button.dataset.frpAction)));
