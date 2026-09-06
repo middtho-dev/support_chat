@@ -1,0 +1,1 @@
+{"name":"multitool-voice","version":"1.0.0","private":true,"engines":{"node":"20.x"},"scripts":{"start":"node server.js","check":"node --check config.js && node --check store.js && node --check worker.js && node --check server.js","test":"node --test test"}}

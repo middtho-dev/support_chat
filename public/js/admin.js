@@ -424,7 +424,7 @@ function setFilter(filter) {
 
 function setView(view) {
   S.view = view === 'health' ? 'settings' : (AdminShell.modules.some(m => m.id === view) ? view : 'home');
-  if (S.view === 'frp' && S.token && !S.permissions.canManageSettings) S.view = 'home';
+  if (AdminShell.modules.find(m => m.id === S.view)?.manager && S.token && !S.permissions.canManageSettings) S.view = 'home';
   $('home').classList.toggle('on', S.view === 'home');
   document.body.classList.toggle('tool-active', S.view !== 'chat');
   AdminShell.render(S);
@@ -433,6 +433,9 @@ function setView(view) {
   $('settings').classList.toggle('on', S.view === 'settings');
   $('templates').classList.toggle('on', S.view === 'templates');
   $('frp').classList.toggle('on', S.view === 'frp');
+  $('voice').classList.toggle('on', S.view === 'voice');
+  if (S.view === 'voice') window.VoicePanel?.open();
+  else window.VoicePanel?.pause();
   document.body.classList.remove('frp-active');
   document.querySelectorAll('.navbtn').forEach(b => { if (b.dataset.view === S.view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (S.view === 'frp') window.FrpPanel?.open();

@@ -5,6 +5,7 @@ window.AdminShell = (() => {
     { id: 'home', label: 'Обзор', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' },
     { id: 'chat', label: 'Поддержка', description: 'Диалоги с клиентами, сообщения и история обращений.', icon: 'M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z' },
     { id: 'frp', label: 'Устройства', description: 'Удалённый доступ, веб-интерфейсы и управление FRP.', manager: true, icon: 'M3 4h18v12H3zM8 21h8M12 16v5M6 8h2M6 12h4' },
+    { id: 'voice', label: 'Аудио', description: 'Расшифровка голосовых Telegram и оформление текста через OpenAI.', manager: true, icon: 'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8' },
     { id: 'templates', label: 'Шаблоны', description: 'Готовые ответы для поддержки. Сохраняются в этом браузере.', icon: 'M5 3h14v18H5zM8 8h8M8 12h8M8 16h5' },
     { id: 'settings', label: 'Управление', description: 'Состояние системы, операторы и настройки поддержки.', icon: 'M4 7h16M4 17h16M8 4v6M16 14v6' }
   ];
