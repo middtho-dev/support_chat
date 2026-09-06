@@ -40,5 +40,6 @@ jobs:
       - name: Voice standalone checks
         working-directory: tools/voice
         run: |
+          npm ci
           npm run check
           npm test
