@@ -76,4 +76,15 @@ if ! curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-del
 fi
 echo "Панель доступна: https://$panel_domain/"
 echo "Ключ входа FRP_ADMIN_TOKEN хранится в $tool_dir/.env"
-echo "Ссылка в чате: задайте FRP_PANEL_URL=https://$panel_domain в корневом .env и перезапустите чат, если адрес отличается."
+root_dir="$(cd "$tool_dir/../.." && pwd)"
+if [[ -f "$root_dir/.env" ]]; then
+  # Preserve dotenv quoting, never source the file or print credentials.
+  root_env_tmp="$(mktemp "$root_dir/.env.frp.XXXXXX")"
+  chmod 600 "$root_env_tmp"
+  awk '!/^FRP_SERVICE_(URL|TOKEN)=/' "$root_dir/.env" > "$root_env_tmp"
+  printf '\nFRP_SERVICE_URL=http://127.0.0.1:%s\n' "$panel_port" >> "$root_env_tmp"
+  sed -n 's/^FRP_ADMIN_TOKEN=/FRP_SERVICE_TOKEN=/p' .env | tail -n 1 >> "$root_env_tmp"
+  mv "$root_env_tmp" "$root_dir/.env"
+  docker compose --project-directory "$root_dir" -f "$root_dir/docker-compose.yml" up -d --build support-chat
+  echo "Общий раздел «Устройства» подключён: вход через админку чата или Telegram Mini App."
+fi

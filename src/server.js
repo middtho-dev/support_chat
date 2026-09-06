@@ -11,6 +11,7 @@ const telegram = require('./telegram');
 const push = require('./push');
 const { loadSettings, saveSettings, isWithinWorkHours } = require('./settings');
 const { createMaintenance } = require('./maintenance');
+const { createFrpProxy } = require('./frp-proxy');
 const uuidv4 = () => crypto.randomUUID();
 
 const app = express();
@@ -346,16 +347,19 @@ app.get(['/miniapp', '/tg-admin'], (req, res) => {
   res.redirect(302, `/admin?${params.toString()}`);
 });
 
-app.get('/admin/frp', (_req, res) => {
-  try {
-    const url = new URL(process.env.FRP_PANEL_URL || 'https://router.kv9.ru');
-    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid URL');
-    res.set('Cache-Control', 'no-store');
-    res.redirect(302, url.href);
-  } catch {
-    res.status(503).send('Set FRP_PANEL_URL to a valid HTTP(S) URL');
-  }
+app.get('/admin/frp', (_req, res) => res.redirect(302, '/admin?view=frp'));
+app.get('/js/frp-panel.js', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '../tools/frp/public/app.js'));
 });
+app.get('/js/frp-device-links.js', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '../tools/frp/public/device-links.js'));
+});
+app.use('/api/admin/frp', createFrpProxy({ authorize: token => ({
+  authenticated: isAdminToken(token),
+  canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings
+}) }));
 
 app.get('/admin', (req, res) => {
   if (!ADMIN_TOKEN) return res.status(503).send('<h1>Admin panel disabled</h1><p>Set ADMIN_TOKEN in .env to enable.</p>');

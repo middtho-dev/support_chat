@@ -9,6 +9,8 @@ RUN npm ci --omit=dev
 # Copy source
 COPY src/ ./src/
 COPY public/ ./public/
+COPY tools/frp/public/app.js ./tools/frp/public/app.js
+COPY tools/frp/public/device-links.js ./tools/frp/public/device-links.js
 
 # Create data, uploads and backup directories
 RUN mkdir -p /app/data /app/public/uploads /app/backups
