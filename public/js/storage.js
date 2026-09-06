@@ -11,4 +11,3 @@
   if (typeof module !== 'undefined') module.exports = { createStorage };
   else root.SafeStorage = { local: createStorage(() => root.localStorage), session: createStorage(() => root.sessionStorage) };
 })(typeof window === 'undefined' ? {} : window);
-
