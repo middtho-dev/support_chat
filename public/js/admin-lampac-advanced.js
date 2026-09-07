@@ -1,5 +1,5 @@
 'use strict';
-window.mountLampacAdvanced = function ({container, request, operation, toggle}) {
+window.mountLampacAdvanced = function ({container, request, operation, toggle, publicUrl}) {
   let alive = true, tab = 'overview', refreshing = false, settingsLoaded = false;
   const section = container.querySelector('.voice-section');
   const heading = section.querySelector('.page-heading');
@@ -25,7 +25,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle}) 
       tab = key;
       [...navigation.children].forEach((item, index) => item.setAttribute('aria-pressed', String(tabs[index][0] === key)));
       Object.entries(panes).forEach(([name, node]) => node.hidden = name !== key);
-      refresh();
+      refresh(true);
     };
   }
   const bytes = n => {
@@ -46,16 +46,16 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle}) 
         const t = list[Number(button.dataset[attr])];
         if (!confirm(`${action === 'rem' ? 'Удалить торрент и его кеш' : 'Сбросить поток'} «${t.title || t.hash}»? Текущий просмотр будет прерван.`)) return;
         await operation('/torrents', {action, hash: t.hash}, action === 'rem' ? 'Торрент удалён' : 'Поток сброшен');
-        refresh();
+        refresh(true);
       });
     }
   }
   function renderClients(data) {
     const list = data.clients || [], blocked = data.blocked || [];
-    panes.clients.innerHTML = `<div class="card"><h3>Обращения к Lampac</h3><p>Последние ${data.limit || 500} записей · история ${data.retentionDays || 7} дней.</p><details><summary>Учёт подключений и блокировка</summary><p>IP + браузер — наблюдаемое подключение, а не постоянный ID устройства. Несколько устройств за одним роутером могут иметь общий IP. «Недавно» означает запрос за последние 2 минуты, а не подтверждённый просмотр.</p><p>Блокировка закрывает новые запросы к lc.kv9.ru для всего IP. Уже открытый поток может продолжить работу; при необходимости сбросьте его во вкладке «Торренты». Прямые подключения в обход Caddy здесь не учитываются.</p></details><form class="voice-actions" id="lc-block-form"><label class="voice-field">IP для блокировки<input id="lc-block-ip" required maxlength="45" placeholder="IPv4 или IPv6" autocomplete="off"></label><button class="danger" type="submit">Заблокировать IP</button></form><div id="lc-blocked">${blocked.map((ip, i) => `<p><code>${esc(ip)}</code> <button class="ghost" data-unblock="${i}">Разблокировать</button></p>`).join('')}</div></div><div class="lc-list">${list.map((c, i) => `<article class="card"><h3>${esc(c.ip)} · ${blocked.includes(c.ip) ? 'Заблокирован' : Date.now() / 1000 - c.last < 120 ? 'Недавно' : 'Неактивен'}</h3><p>${esc(c.ua || 'Браузер не передал сведения')}</p><p>Последний запрос: ${esc(date(c.last))} · ${esc(c.route)}<br>Первый запрос: ${esc(date(c.first))} · обращений: ${esc(c.requests)}</p>${c.torrent ? `<p>Последний хеш торрента: <code>${esc(c.torrent)}</code></p>` : ''}<button class="${blocked.includes(c.ip) ? 'ghost' : 'danger'}" data-client-block="${i}">${blocked.includes(c.ip) ? 'Разблокировать' : 'Заблокировать IP'}</button></article>`).join('') || empty('Пока нет обращений. Откройте Lampa или запустите видео через публичный адрес.')}</div>`;
+    panes.clients.innerHTML = `<div class="card"><h3>Обращения к Lampac</h3><p>Последние ${data.limit || 500} записей · история ${data.retentionDays || 7} дней.</p><details><summary>Учёт подключений и блокировка</summary><p>IP + браузер — наблюдаемое подключение, а не постоянный ID устройства. Несколько устройств за одним роутером могут иметь общий IP. «Недавно» означает запрос за последние 2 минуты, а не подтверждённый просмотр.</p><p>Блокировка закрывает новые запросы к ${esc(publicUrl)} для всего IP. Уже открытый поток может продолжить работу; при необходимости сбросьте его во вкладке «Торренты». Прямые подключения в обход Caddy здесь не учитываются.</p></details><form class="voice-actions" id="lc-block-form"><label class="voice-field">IP для блокировки<input id="lc-block-ip" required maxlength="45" placeholder="IPv4 или IPv6" autocomplete="off"></label><button class="danger" type="submit">Заблокировать IP</button></form><div id="lc-blocked">${blocked.map((ip, i) => `<p><code>${esc(ip)}</code> <button class="ghost" data-unblock="${i}">Разблокировать</button></p>`).join('')}</div></div><div class="lc-list">${list.map((c, i) => `<article class="card"><h3>${esc(c.ip)} · ${blocked.includes(c.ip) ? 'Заблокирован' : Date.now() / 1000 - c.last < 120 ? 'Недавно' : 'Неактивен'}</h3><p>${esc(c.ua || 'Браузер не передал сведения')}</p><p>Последний запрос: ${esc(date(c.last))} · ${esc(c.route)}<br>Первый запрос: ${esc(date(c.first))} · обращений: ${esc(c.requests)}</p>${c.torrent ? `<p>Последний хеш торрента: <code>${esc(c.torrent)}</code></p>` : ''}<button class="${blocked.includes(c.ip) ? 'ghost' : 'danger'}" data-client-block="${i}">${blocked.includes(c.ip) ? 'Разблокировать' : 'Заблокировать IP'}</button></article>`).join('') || empty('Пока нет обращений. Откройте Lampa или запустите видео через публичный адрес.')}</div>`;
     const block = async (ip, value) => {
       if (value && !confirm(`Заблокировать ${ip}? Доступ потеряют все устройства с этим внешним IP.`)) return;
-      await operation('/clients', {ip, blocked: value}, value ? 'IP заблокирован' : 'IP разблокирован'); refresh();
+      await operation('/clients', {ip, blocked: value}, value ? 'IP заблокирован' : 'IP разблокирован'); refresh(true);
     };
     panes.clients.querySelector('#lc-block-form').onsubmit = e => { e.preventDefault(); block(panes.clients.querySelector('#lc-block-ip').value.trim(), true); };
     panes.clients.querySelectorAll('[data-unblock]').forEach(b => b.onclick = () => block(blocked[Number(b.dataset.unblock)], false));
@@ -88,7 +88,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle}) 
       panes.settings.querySelectorAll('[data-group]').forEach(group => { group.hidden = !group.dataset.group.includes(query); });
     };
     const client = data.client;
-    panes.client.innerHTML = `<form class="card" id="lc-client-form"><h3>Профиль устройств Lampa</h3><p>Каталог, заставка и поведение приложения на ваших устройствах.</p><details><summary>Подключение и применение профиля</summary><p>Применяется через плагин <code>/workspace-client.js</code>. В Lampa на этом сервере он подключается автоматически после сохранения. В стороннем приложении добавьте этот плагин с адресом вашего Lampac вручную. После изменения профиля перезапустите Lampa; некоторые параметры вступают в силу при следующем запуске интерфейса.</p><p>«На устройстве» не меняет выбранный пользователем параметр. Освобождение ранее управляемого параметра возвращает его прежнее значение, если пользователь не успел изменить его сам.</p></details><label class="voice-field">Режим применения<select id="lc-client-mode">${[['disabled', 'Не управлять настройками устройств'], ['revision', 'Один раз после каждого изменения профиля'], ['always', 'При каждом запуске Lampa']].map(([v, label]) => `<option value="${v}" ${v === client.mode ? 'selected' : ''}>${label}</option>`).join('')}</select></label><div class="voice-grid">${client.fields.map(f => `<label class="voice-field">${esc(f.label)}<select data-pref="${esc(f.key)}"><option value="">На устройстве</option>${Object.entries(f.options).map(([value, label]) => `<option value="${esc(value)}" ${client.values[f.key] === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`).join('')}</div><button class="save" type="submit">Сохранить профиль Lampa</button></form>`;
+    panes.client.innerHTML = `<form class="card" id="lc-client-form"><h3>Профиль устройств Lampa</h3><p>Каталог, заставка и поведение приложения на ваших устройствах.</p><details><summary>Подключение и применение профиля</summary><p>Применяется через плагин <code>${esc(publicUrl + "/workspace-client.js")}</code>. В Lampa на этом сервере он подключается автоматически после сохранения. В стороннем приложении добавьте этот плагин с адресом вашего Lampac вручную. После изменения профиля перезапустите Lampa; некоторые параметры вступают в силу при следующем запуске интерфейса.</p><p>«На устройстве» не меняет выбранный пользователем параметр. Освобождение ранее управляемого параметра возвращает его прежнее значение, если пользователь не успел изменить его сам.</p></details><label class="voice-field">Режим применения<select id="lc-client-mode">${[['disabled', 'Не управлять настройками устройств'], ['revision', 'Один раз после каждого изменения профиля'], ['always', 'При каждом запуске Lampa']].map(([v, label]) => `<option value="${v}" ${v === client.mode ? 'selected' : ''}>${label}</option>`).join('')}</select></label><div class="voice-grid">${client.fields.map(f => `<label class="voice-field">${esc(f.label)}<select data-pref="${esc(f.key)}"><option value="">На устройстве</option>${Object.entries(f.options).map(([value, label]) => `<option value="${esc(value)}" ${client.values[f.key] === value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`).join('')}</div><button class="save" type="submit">Сохранить профиль Lampa</button></form>`;
     panes.client.querySelector('form').onsubmit = e => {
       e.preventDefault();
       const values = Object.fromEntries([...panes.client.querySelectorAll('[data-pref]')].filter(el => el.value).map(el => [el.dataset.pref, el.value]));
@@ -96,10 +96,10 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle}) 
     };
     settingsLoaded = true;
   }
-  async function refresh() {
+  async function refresh(force = false) {
     if (!alive || refreshing || tab === 'overview') return;
     // Do not replace a focused input or expanded file list during automatic polling.
-    if (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && tab === 'torrents') return;
+    if (!force && (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && tab === 'torrents')) return;
     refreshing = true; const active = tab;
     try {
       if (active === 'torrents') { const data = await request('/torrents'); if (alive) renderTorrents(data); }

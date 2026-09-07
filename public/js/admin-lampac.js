@@ -21,7 +21,7 @@ window.LampacPanel=(()=>{
     root.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>operation('/action',{action:b.dataset.action},'Команда выполнена'));
     $('lc-refresh').onclick=refresh;
     $('lc-form').onsubmit=e=>{e.preventDefault();operation('/configure',{name:$('lc-name').value,timeout:Number($('lc-timeout').value),lowMemory:$('lc-lowMemory').checked,chromium:$('lc-chromium').checked,modules:Object.fromEntries(modules.map(([key])=>[key,$('lc-'+key).checked]))},'Сохранено. Перезапустите Lampac для применения всех параметров.');};
-    $('lc-ts-load').onclick=loadTorr;state(d);advancedPanel=window.mountLampacAdvanced({container:root,request,operation,toggle});
+    $('lc-ts-load').onclick=loadTorr;state(d);advancedPanel=window.mountLampacAdvanced({container:root,request,operation,toggle,publicUrl:url});
   }
   async function loadTorr(){const g=generation,button=$('lc-ts-load');button.disabled=true;try{const d=await request('/torrserver');if(g!==generation)return;
     $('lc-ts').innerHTML=`<form id="lc-ts-form"><div class="voice-grid">${numbers.map(([key,label,min,max])=>`<label class="voice-field">${esc(label)}<input id="lc-ts-${key}" type="number" required min="${min}" max="${max}" step="1" value="${esc(key==='CacheSize'?d[key]/1048576:d[key])}"></label>`).join('')}${switches.map(([key,label])=>toggle('ts-'+key,label,d[key])).join('')}</div><button class="save" type="submit">Применить настройки TorrServer</button></form>`;
