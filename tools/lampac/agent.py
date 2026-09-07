@@ -1,4 +1,5 @@
 """Loopback-only Lampac management. Run as lampac, never as root."""
+import html
 import copy
 import base64
 import hmac
@@ -155,6 +156,12 @@ def status():
             'internal': '127.0.0.1:' + str(port), 'configPath': str(ROOT / 'init.conf'),
             'version': (ROOT / 'version.txt').read_text().strip()[:80], 'busy': LOCK.locked()}
 
+def activation_page():
+    support=os.environ.get('WORKSPACE_SUPPORT_URL','https://helpo.su').rstrip('/')
+    logo=os.environ.get('WORKSPACE_LOGO_URL',support+'/logo.png')
+    return (Path(__file__).parent/'activation.html').read_text(encoding='utf-8').replace('SUPPORT_URL',html.escape(support,quote=True)).replace('LOGO_URL',html.escape(logo,quote=True))
+
+
 class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
@@ -188,9 +195,17 @@ class Handler(BaseHTTPRequestHandler):
                 original=self.headers.get('X-Workspace-URI','/').split('?',1)[0]
                 if allowed and not original.startswith('/workspace-device/') and original!='/workspace-client.js':
                     allowed=devices.access_allowed(ROOT,self.headers.get('Cookie',''))
+                if not allowed and original in ('/','/index.html'):
+                    payload=activation_page().encode()
+                    self.send_response(403)
+                    self.send_header('Content-Type','text/html; charset=utf-8')
+                    self.send_header('Cache-Control','no-store')
+                    self.send_header('Content-Length',str(len(payload)))
+                    self.end_headers();self.wfile.write(payload)
+                    return
                 self.reply(200 if allowed else 403, {} if allowed else {'error': 'Доступ к Lampac отключён'})
             elif self.path == '/client.js':
-                client = {'url': PUBLIC_URL.rstrip('/'), 'fields': {k:list(v[1] or {'true':1,'false':1}) for k,v in advanced.CLIENT.items()}}
+                client = {'activation':activation_page().split('<!--SCREEN-->')[1].split('<!--POLL-->')[0], 'url': PUBLIC_URL.rstrip('/'), 'fields': {k:list(v[1] or {'true':1,'false':1}) for k,v in advanced.CLIENT.items()}}
                 script = (advanced.client_script(read_config('init.conf')) + '\n' + (Path(__file__).parent/'device-client.js').read_text(encoding='utf-8').replace('DEVICE_CONFIG',json.dumps(client))).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/javascript; charset=utf-8')

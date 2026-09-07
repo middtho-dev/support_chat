@@ -12,6 +12,23 @@
 #lampac .voice-field select { width:100%; min-height:44px; border:1px solid var(--border,#334155); background:var(--input-bg,#101827); color:inherit; border-radius:10px; padding:10px 12px; font:inherit; }
 #lampac .lc-config-group .voice-grid { margin:12px 0; }
 #lampac .lc-empty { padding:20px 0; }
+#lampac .lc-pref-group { border-top:1px solid var(--border,#334155); margin:12px 0; }
+#lampac .lc-pref-group summary { display:flex; gap:12px; align-items:center; }
+#lampac .lc-pref-group summary::before { content:'›'; font-size:20px; }
+#lampac .lc-pref-group[open]>summary::before { transform:rotate(90deg); }
+#lampac .lc-pref-group summary small { opacity:.55; margin-left:auto; }
+#lampac .lc-pref-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; padding:14px 0; border-top:1px solid var(--border,#334155); }
+#lampac .lc-pref-row strong { font-size:14px; }
+#lampac .lc-help { font-size:12px; opacity:.7; margin:6px 0; line-height:1.5; }
+#lampac .lc-pref-row small { font-size:11px; opacity:.6; }
+#lampac .lc-pref-controls { display:grid; gap:8px; align-content:start; width:160px; }
+#lampac .lc-mini-switch { display:flex; justify-content:space-between; gap:10px; align-items:center; min-height:36px; font-size:12px; cursor:pointer; }
+#lampac .lc-mini-switch:has(input:disabled) { opacity:.45; }
+#lampac .lc-pref-controls select { font-size:12px; }
+@media(max-width:480px) {
+ #lampac .lc-pref-row { grid-template-columns:minmax(0,1fr); gap:8px; }
+ #lampac .lc-pref-controls { width:100%; grid-template-columns:1fr 1fr; gap:16px; }
+}
 @media(max-width:600px) {
   #lampac .lc-tabs { gap:6px; }
   #lampac .lc-tabs button { font-size:13px; padding:10px 12px; }

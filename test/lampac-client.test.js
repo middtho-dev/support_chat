@@ -42,3 +42,16 @@ test('menu visibility is rebuilt after a page reload even for an unchanged revis
   vm.runInNewContext(source,context);assert.match(style.textContent,/data-action="movie"/);
   style=null;vm.runInNewContext(source,context);assert.match(style.textContent,/data-action="movie"/);
 });
+
+test('settings policy blocks direct navigation and releases sections through inheritance',()=>{
+ const data=new Map(),events={},opened=[];
+ const storage={get:(k,f)=>data.has(k)?data.get(k):f,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k)};
+ const context={Lampa:{Storage:storage,Settings:{create:n=>opened.push(n),listener:{follow:(n,fn)=>events[n]=fn}},Controller:{toggle:n=>opened.push(n)},Noty:{show(){}}},localStorage:{getItem:k=>data.get(k)??null},setTimeout:fn=>fn()};context.window=context;
+ const run=values=>vm.runInNewContext(script.replace('POLICY',JSON.stringify({mode:'always',revision:'1',values})),context);
+ run({workspace_settings_player:'false',workspace_settings_other:'false'});
+ context.Lampa.Settings.create('player');context.Lampa.Settings.create('third_party');assert.deepEqual(opened,[]);
+ context.Lampa.Settings.create('interface');assert.deepEqual(opened,['interface']);
+ let emptied=false;events.open({name:'player',body:{empty(){emptied=true;}}});assert.equal(emptied,true);
+ run({});context.Lampa.Settings.create('player');assert.equal(opened.at(-1),'player');
+ run({workspace_settings_all:'false'});const count=opened.length;context.Lampa.Settings.create('workspace_device');assert.equal(opened.length,count);
+});

@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py, devices.py, client-profile.js and device-client.js in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, client-profile.js device-client.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -116,3 +116,21 @@ socket IP. Scoped tokens travel in POST bodies, not URLs. Public POST/OPTIONS su
 external Lampa origins; manager routes stay private. The access gate accepts retained
 asset queries such as /access?v=1987573. Caddy normalizes duplicate leading slashes
 before routing, preserving query strings and the shutdown guard.
+
+## Managed device settings and activation
+
+New registrations start with access disabled; existing rows keep their access.
+The administrator enables access in Devices. The activation screen polls every
+5 seconds after a blocked page reload; the running plugin polls every 10 seconds.
+The screen uses WORKSPACE_SUPPORT_URL (default https://helpo.su) and
+WORKSPACE_LOGO_URL (default the support URL plus /logo.png) from the agent environment.
+Only informational status is exposed in the device's Workspace section. Old local
+pause flags are cleared; revoked credentials remain revoked.
+
+General preferences show basics, left-menu visibility and settings-section access.
+Detailed overrides are grouped per device and override general preferences.
+The management switch enables an override; turning it off restores inheritance.
+Existing hidden general values are preserved on save for backward compatibility.
+Settings restrictions hide native sections, remove remote-control focus targets
+and reject direct settings navigation. “Other plugins” covers unknown sections.
+These are client UI restrictions, not protection against modifying the client code.

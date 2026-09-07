@@ -25,6 +25,25 @@ class AgentTests(unittest.TestCase):
                 access.assert_called_once_with(agent.ROOT,'203.0.113.1','','//app.min.js?v=1987573')
         finally:server.shutdown();server.server_close()
 
+    def test_blocked_device_gets_activation_page_but_can_poll(self):
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.advanced,'access',return_value=True),patch.object(agent.devices,'access_allowed',return_value=False):
+                url='http://127.0.0.1:'+str(server.server_port)+'/access'
+                for path,expected in [('/',403),('/app.min.js',403),('/workspace-device/poll',200),('/workspace-client.js',200)]:
+                    req=urllib.request.Request(url,headers={'x-admin-token':'test-token','X-Workspace-URI':path})
+                    try:
+                        with urllib.request.urlopen(req) as response:code=response.status;payload=response.read().decode()
+                    except urllib.error.HTTPError as error:
+                        code=error.code;payload=error.read().decode();error.close()
+                    self.assertEqual(code,expected)
+                    if path=='/':
+                        self.assertIn('workspace-access-disabled',payload)
+                        self.assertIn('/workspace-device/poll',payload)
+                        self.assertIn('https://helpo.su/logo.png',payload)
+        finally:server.shutdown();server.server_close()
+
     def values(self):
         return dict(name='My Lampac', lowMemory=True, chromium=False, timeout=20,
                     modules={key: key != 'DLNA' for key in agent.MODULES})

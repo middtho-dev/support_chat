@@ -57,8 +57,8 @@ def public(root,action,body,ip):
             token=secrets.token_urlsafe(32);code=str(secrets.randbelow(100000000)).zfill(8)
             identifier=secrets.token_hex(12)
             automatic=action=='enroll'
-            conn.execute('INSERT INTO devices (id,credential,code,expires,name,ip,last,paired) VALUES (?,?,?,?,?,?,?,?)',
-                (identifier,digest(token),None if automatic else digest(code),time.time()+300,body['name'],ip,time.time(),int(automatic)))
+            conn.execute('INSERT INTO devices (id,credential,code,expires,name,ip,last,paired,enabled) VALUES (?,?,?,?,?,?,?,?,?)',
+                (identifier,digest(token),None if automatic else digest(code),time.time()+300,body['name'],ip,time.time(),int(automatic),0))
             return {'id':identifier,'token':token,'code':None if automatic else code,'expiresIn':300,'paired':automatic}
         if action!='poll' or set(body)!={'token','applied','snapshot'} or not isinstance(body['token'],str) or not 32<=len(body['token'])<=100 or type(body['applied']) is not int:
             raise ValueError('Некорректный запрос устройства')
@@ -71,7 +71,7 @@ def public(root,action,body,ip):
         if body['applied']==row['revision']:
             applied=body['applied']
         conn.execute('UPDATE devices SET last=?,ip=?,snapshot=?,applied=? WHERE id=?',
-            (time.time(),ip,json.dumps(snapshot),applied,row['id']))
+            (time.time(),ip,json.dumps(snapshot) if snapshot else row['snapshot'],applied,row['id']))
         return {'id':row['id'],'name':row['name'],'enabled':bool(row['enabled']),
                 'overrides':json.loads(row['desired']) if row['paired'] else {},
                 'paired':bool(row['paired']),'revision':row['revision'],
