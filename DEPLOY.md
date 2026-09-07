@@ -128,3 +128,31 @@ customer behavior, and disk thresholds are configured in the admin UI; only
 - Database and uploads live in Docker volumes.
 - `docker compose down` preserves volumes; `docker compose down -v` deletes
   them and must not be used for a normal update.
+# Production addresses and migration
+
+The production checkout is `/root/support_chat` on `31.76.127.223`.
+Git pushes originate there using `/root/.ssh/github_support_chat`, a write deploy
+key scoped to this repository. The private key stays on the server. GitHub PR
+management can use an authenticated administrator workstation.
+
+In **Управление → Домены и адреса**, managers can inspect the server IPv4/IPv6,
+panel and Mini App URLs, current FRP host/ports, and actual A/AAAA answers.
+The page is informational and does not modify DNS. It reads `PUBLIC_SERVER_IPV4`,
+`PUBLIC_SERVER_IPV6`, `PUBLIC_URL`, `TELEGRAM_WEBAPP_URL`, and `REPOSITORY_URL`
+from the root `.env`; FRP settings are read from the running FRP service.
+Restart the chat container after changing environment variables. Keys and
+credentials are excluded from the inventory.
+
+For the current deployment, point the A records for `helpo.su` and
+`router.kv9.ru` to `31.76.127.223`. Inspect AAAA records as well: do not leave an
+old IPv6 destination, and only publish a new IPv6 address after verifying HTTPS
+and FRP over IPv6. Keep FRP records in DNS-only mode when using a CDN that does
+not proxy arbitrary TCP/UDP ports. Device configurations keep their existing
+domain and ports. DNS TTL and client caching affect reconnection time.
+
+During migration, first copy the repository, `.env` files, all five Docker data
+volumes and Caddy certificates. Stop all source application containers before
+the final volume synchronization; start only the destination containers.
+The previous host can temporarily relay HTTP/HTTPS and FRP traffic while DNS
+propagates. Do not run both Telegram pollers or accept writes into both databases.
+Remove the old relay only after DNS and device reconnections are verified.

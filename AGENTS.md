@@ -1,5 +1,16 @@
 # Project workflow
 
+## Production host
+
+- Production runs on `31.76.127.223` in `/root/support_chat` (SSH user `root`).
+- Publish Git branches from this server using its repository-scoped SSH deploy
+  key. Never commit credentials or copy its private key into this repository.
+- `185.147.26.191` is the previous host; during DNS propagation it may only
+  relay traffic. Do not restart application containers there in parallel with
+  production: Telegram polling and databases must have one active owner.
+- Public entry points are `helpo.su` and `router.kv9.ru`. Current deployment
+  addresses and DNS answers are available in Management → Domains and addresses.
+
 ## Source of truth
 
 - GitHub `main` is the canonical branch.
