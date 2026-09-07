@@ -43,17 +43,25 @@ class Worker {
     if(this.adapters.transcribe)return this.adapters.transcribe(job,c);
     const f=await this.telegram('getFile',{file_id:job.fileId});
     if(!f.file_path||f.file_size>20*1024*1024)throw Error('Файл недоступен или превышает 20 МБ');
-    const dir=await fs.mkdtemp(path.join(os.tmpdir(),'voice-'));
+    let dir;
+    const formats={ogg:'audio/ogg',oga:'audio/ogg',mp3:'audio/mpeg',mp4:'audio/mp4',mpeg:'audio/mpeg',mpga:'audio/mpeg',m4a:'audio/mp4',wav:'audio/wav',webm:'audio/webm',flac:'audio/flac'};
     try{
       const response=await this.request(`https://api.telegram.org/file/bot${c.botToken}/${f.file_path}`,{signal:AbortSignal.timeout(60000)});
       if(!response.ok)throw Error('Ошибка загрузки Telegram');
       const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>20*1024*1024){await response.body.cancel().catch(()=>{});throw Error('Файл превышает 20 МБ');}chunks.push(chunk);}
-      const input=path.join(dir,'input'),output=path.join(dir,'audio.mp3');await fs.writeFile(input,Buffer.concat(chunks));
+      let audio=Buffer.concat(chunks),ext=path.extname(f.file_path).slice(1).toLowerCase();
+      let mime=formats[ext];
+      if(!c.originalAudio||!mime){
+      dir=await fs.mkdtemp(path.join(os.tmpdir(),'voice-'));
+      const input=path.join(dir,'input'),output=path.join(dir,'audio.mp3');await fs.writeFile(input,audio);
       await promisify(execFile)(process.env.FFMPEG_PATH||'ffmpeg',['-v','error','-nostdin','-protocol_whitelist','file,pipe','-format_whitelist','ogg,matroska,webm,mov,mp3,wav,flac,aac','-i',input,'-t',String(c.maxSeconds),'-vn','-ac','1','-ar','16000','-b:a','64k','-y',output],{timeout:60000,maxBuffer:100000}).catch(()=>{throw Error('Не удалось преобразовать аудио');});
-      const form=new FormData();form.append('model',c.transcribeModel);form.append('file',new Blob([await fs.readFile(output)],{type:'audio/mpeg'}),'voice.mp3');if(c.language)form.append(c.transcribeModel==='gpt-transcribe'?'languages[]':'language',c.language);if(c.transcribePrompt)form.append('prompt',c.transcribePrompt);
+      audio=await fs.readFile(output);ext='mp3';mime='audio/mpeg';
+      }
+      if(ext==='oga')ext='ogg';
+      const form=new FormData();form.append('model',c.transcribeModel);form.append('file',new Blob([audio],{type:mime}),'voice.'+ext);if(c.language)form.append(c.transcribeModel==='gpt-transcribe'?'languages[]':'language',c.language);if(c.transcribePrompt)form.append('prompt',c.transcribePrompt);
       const r=await this.request('https://api.openai.com/v1/audio/transcriptions',{method:'POST',headers:{Authorization:`Bearer ${c.openaiKey}`},body:form,signal:AbortSignal.timeout(120000)});
       if(!r.ok)throw await openaiError(r);const result=await r.json();if(!result.text?.trim())throw Error('Речь не распознана');return result.text.trim();
-    }finally{await fs.rm(dir,{recursive:true,force:true});}
+    }finally{if(dir)await fs.rm(dir,{recursive:true,force:true});}
   }
   async polish(text,c,timeout=120000){
     if(!c.polish&&!c.emoji)return text;
