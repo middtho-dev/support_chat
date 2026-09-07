@@ -29,6 +29,7 @@ CLIENT = {
     'card_episodes': ('Эпизоды на карточках', None), 'playlist_next': ('Следующая серия автоматически', None),
     'subtitles_start': ('Включать субтитры при запуске', None),
     'torrserver_savedb': ('Сохранять торренты в базе', None),
+    'internal_torrclient': ('Встроенный торрент-клиент · Android / Android TV', None),
     'torrserver_preload': ('Предзагрузка торрентов', None),
     'torrserver_tracktimecode': ('Позиция просмотра TorrServer', None),
 }

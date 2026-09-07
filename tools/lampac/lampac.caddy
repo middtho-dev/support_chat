@@ -3,6 +3,7 @@ lc.kv9.ru {
     bind 0.0.0.0
     @management path_regexp tsManagement (?i)^/+ts/+shutdown(/|$)
     route {
+        uri path_regexp ^/{2,} /
         respond @management "Use the authenticated workspace to manage TorrServer" 403
         forward_auth 127.0.0.1:7600 {
             uri /access
@@ -15,6 +16,17 @@ lc.kv9.ru {
             rewrite * /client.js
             reverse_proxy 127.0.0.1:7600 {
                 header_up X-Admin-Token {$LAMPAC_SERVICE_TOKEN}
+            }
+        }
+        handle /workspace-device/* {
+            @preflight method OPTIONS
+            header Access-Control-Allow-Origin "*"
+            header Access-Control-Allow-Methods "POST, OPTIONS"
+            header Access-Control-Allow-Headers "Content-Type"
+            respond @preflight 204
+            reverse_proxy 127.0.0.1:7600 {
+                header_up X-Admin-Token {$LAMPAC_SERVICE_TOKEN}
+                header_up X-Workspace-IP {remote_host}
             }
         }
         handle {

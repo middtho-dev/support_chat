@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.request
 import advanced
+import devices
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(os.environ.get('LAMPAC_DIR', '/opt/lampac'))
@@ -177,20 +178,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.authorized():
             return self.reply(401, {'error': 'Требуется вход'})
-        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/access', '/client.js']:
+        # Caddy's auth rewrite retains the original query string (e.g. ?v=...).
+        self.path = self.path.split('?', 1)[0]
+        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices', '/access', '/client.js']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         try:
             if self.path == '/access':
                 allowed = advanced.access(ROOT, self.headers.get('X-Workspace-IP', ''), self.headers.get('X-Workspace-UA', ''), self.headers.get('X-Workspace-URI', '/'))
                 self.reply(200 if allowed else 403, {} if allowed else {'error': 'Доступ с этого IP заблокирован'})
             elif self.path == '/client.js':
-                script = advanced.client_script(read_config('init.conf')).encode()
+                client = {'url': PUBLIC_URL.rstrip('/'), 'fields': {k:list(v[1] or {'true':1,'false':1}) for k,v in advanced.CLIENT.items()}}
+                script = (advanced.client_script(read_config('init.conf')) + '\n' + (Path(__file__).parent/'device-client.js').read_text(encoding='utf-8').replace('DEVICE_CONFIG',json.dumps(client))).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/javascript; charset=utf-8')
                 self.send_header('Cache-Control', 'no-store')
                 self.send_header('Content-Length', str(len(script)))
                 self.end_headers()
                 self.wfile.write(script)
+            elif self.path.endswith('/devices'):
+                self.reply(200, devices.listing(ROOT))
             elif self.path.endswith('/advanced'):
                 config = merge(read_config('current.conf'), read_config('init.conf'))
                 self.reply(200, {'fields': advanced.fields(config), 'client': advanced.client_settings(config)})
@@ -209,7 +215,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return self.reply(401, {'error': 'Требуется вход'})
-        if self.path not in ['/api/lampac/action', '/api/lampac/configure', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/client', '/api/lampac/torrents', '/api/lampac/clients']:
+        if self.path in ['/workspace-device/register', '/workspace-device/poll']:
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 8192:
+                    raise ValueError('Некорректный размер запроса')
+                body=json.loads(self.rfile.read(length))
+                if not isinstance(body,dict):
+                    raise ValueError('Нужен объект')
+                return self.reply(200, devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP','')))
+            except PermissionError:
+                return self.reply(403, {'error':'Привязка истекла или отозвана'})
+            except ValueError:
+                return self.reply(400, {'error':'Проверьте запрос или подождите минуту перед повтором'})
+            except Exception:
+                return self.reply(502, {'error':'Управление устройствами временно недоступно'})
+        if self.path not in ['/api/lampac/action', '/api/lampac/configure', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/client', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         if not LOCK.acquire(blocking=False):
             return self.reply(409, {'error': 'Дождитесь завершения предыдущей операции'})
@@ -220,6 +241,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError('Нужен объект JSON')
+            if self.path.endswith('/devices'):
+                return self.reply(200, devices.manage(ROOT, body))
             if self.path.endswith('/advanced') or self.path.endswith('/client'):
                 if (ROOT / 'init.yaml').exists():
                     raise ValueError('Обнаружен init.yaml; требуется JSON-конфигурация')

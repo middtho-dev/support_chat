@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py and client-profile.js in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, client-profile.js and device-client.js in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -76,6 +76,29 @@ plugin runs after initial application setup. No automatic reload interrupts play
 Disabling a profile keeps the plugin installed so devices can release managed keys.
 Supported keys are verified against yumata/lampa app.min.js; provider and plugin fields
 against lampac-nextgen/lampac Modules/LampaWeb and Shared provider configuration models.
+
+## Device control
+
+The profile includes internal_torrclient, the Android/Android TV built-in torrent
+client switch. It cannot install a native torrent engine on unsupported TV platforms.
+The Workspace plugin also adds Settings → Workspace to Lampa. Its eight-digit code
+lasts five minutes and pairs only when submitted by a workspace manager. These are
+Workspace codes, independent of the native CUB remote-configuration service.
+
+Device credentials are random, stored hashed in database/workspace/devices.db, and
+scoped to polling that device's commands. Only the supported preference allowlist is
+reported; accounts, passwords and viewing history are not uploaded. Registration and
+code attempts are rate limited. The TV polls every ten seconds; the panel distinguishes
+queued commands from acknowledged revisions. Offline commands wait for reconnection.
+Revocation invalidates the credential. Local disconnect stops polling but leaves the
+inactive record in the panel until revoked. A per-launch global profile may overwrite
+device changes on a subsequent launch, so use revision mode for independent TV tuning.
+
+Caddy must forward /workspace-device/* to the agent with the trusted service token and
+socket IP. Scoped device tokens travel in POST bodies, not URLs. Public POST/OPTIONS
+supports external Lampa app origins; manager endpoints remain private. The access gate
+accepts retained asset queries such as /access?v=1987573. Caddy normalizes duplicate
+leading slashes before routing, preserving query strings and the shutdown guard.
 
 Validation: python3 -m unittest discover -s tools/lampac -p 'test_*.py', npm run check,
 npm test. Source references: lampac-nextgen/lampac Modules/TorrServer and
