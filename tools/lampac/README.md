@@ -157,3 +157,14 @@ activation screen after reload) handles the explicit device_revoked response by
 registering a fresh, disabled installation. It must be approved again. Temporary
 network or IP-block errors do not trigger reenrollment. The UI reacts on the next
 poll; already established media connections are not retroactively terminated.
+
+## Home screen and CUB header
+
+Per-device Home screen preferences group catalog/start page, interface scale,
+background/theme and poster quality. Header switches independently show search,
+notifications, feed, cast, fullscreen, clock/date and logo where the native client
+provides them. The CUB profile switch is also available as a shared default. Off
+hides profile and Premium entry points and blocks the account settings section;
+it does not log out, erase CUB credentials, disable the CUB catalog or delete data.
+Per-device overrides retain priority. Header visibility updates immediately on
+profile application; native scale/theme changes may require restarting Lampa.

@@ -56,6 +56,15 @@ CLIENT = {
     **{'workspace_menu_'+key: ('Меню: '+label, None) for key,label in
        [('movie','фильмы'),('tv','сериалы'),('cartoon','мультфильмы'),('anime','аниме'),('catalog','каталог'),('history','история'),('favorite','избранное')]},
 }
+HEADER = {'profile':'Профиль CUB и предложение входа', 'search':'Поиск',
+ 'notice':'Уведомления', 'feed':'Лента', 'premium':'Предложение CUB Premium',
+ 'broadcast':'Трансляция', 'fullscreen':'Полноэкранный режим', 'clock':'Часы',
+ 'date':'Дата и день недели', 'logo':'Логотип Lampa'}
+CLIENT.update({'workspace_header_'+k:(v,None) for k,v in HEADER.items()})
+CLIENT.update({'interface_size':('Масштаб интерфейса',{'small':'Компактный','normal':'Обычный','bigger':'Крупный'}),
+ 'poster_size':('Качество постеров',{'w200':'Экономное','w300':'Обычное','w500':'Высокое'})})
+HOME = {'source','start_page','interface_size','poster_size','background','background_type',
+ 'black_style','glass_style','light_version','card_quality','card_episodes','menu_always'}
 # Native component names come from Lampa Settings; unknown plugin sections use "other".
 SETTINGS_SECTIONS = {'all':'Все настройки', 'account':'Аккаунт CUB', 'interface':'Интерфейс',
  'player':'Плеер', 'parser':'Поиск торрентов', 'server':'TorrServer', 'tmdb':'TMDB',
@@ -64,6 +73,8 @@ SETTINGS_SECTIONS = {'all':'Все настройки', 'account':'Аккаун�
 CLIENT.update({'workspace_settings_'+k:(v,None) for k,v in SETTINGS_SECTIONS.items()})
 BASICS = {'source','start_page','internal_torrclient','black_style','card_quality'}
 def preference_meta(key):
+    if key.startswith('workspace_header_'):
+        return {'group':'Верхняя панель', 'description':('Скрывает профиль, предложение Premium и раздел аккаунта CUB. Авторизация и данные аккаунта сохраняются; каталог CUB продолжает работать.' if key=='workspace_header_profile' else 'Показывать этот элемент вверху Lampa. Отсутствующий в вашей версии элемент не добавляется.'), 'global':key=='workspace_header_profile'}
     if key.startswith('workspace_settings_'):
         return {'group':'Доступ к настройкам', 'description':'Включено — раздел доступен на устройстве. Выключено — скрыт и закрыт для перехода. Общий выключатель закрывает все разделы.', 'global':True}
     if key.startswith('workspace_menu_'):
@@ -96,8 +107,10 @@ def preference_meta(key):
       'interface_sound_play':'Воспроизводить звуки при управлении интерфейсом.',
       'source':'Источник каталога фильмов и сериалов. Не меняет источники онлайн-видео.',
       'start_page':'Раздел, открываемый при запуске Lampa.',
-      'black_style':'Использовать чёрную цветовую схему интерфейса.'}
-    return {'group':group, 'description':descriptions.get(key,help), 'global':key in BASICS}
+      'black_style':'Использовать чёрную цветовую схему интерфейса.',
+      'interface_size':'Размер элементов интерфейса: компактный для ПК или крупный для просмотра с расстояния. Требует перезапуска Lampa.',
+      'poster_size':'Разрешение загружаемых постеров. Высокое качество требует больше трафика и памяти.'}
+    return {'group':'Главный экран' if key in HOME else group, 'description':descriptions.get(key,help), 'global':key in BASICS}
 PROVIDER = {
     'enable': ('Включён', 'bool'), 'displayname': ('Название в списке', 'text'),
     'displayindex': ('Порядок в списке', 'int', -1000, 10000),
