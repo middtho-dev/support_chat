@@ -10,6 +10,21 @@ import urllib.error
 import agent
 
 class AgentTests(unittest.TestCase):
+    def test_caddy_auth_accepts_asset_query_strings_without_bypassing_auth(self):
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.advanced,'access',return_value=True) as access:
+                url='http://127.0.0.1:'+str(server.server_port)+'/access?v=1987573'
+                for token,expected in [('',401),('test-token',200)]:
+                    req=urllib.request.Request(url,headers={'x-admin-token':token,'X-Workspace-IP':'203.0.113.1','X-Workspace-URI':'//app.min.js?v=1987573'})
+                    try:
+                        with urllib.request.urlopen(req) as response:code=response.status
+                    except urllib.error.HTTPError as error:code=error.code;error.close()
+                    self.assertEqual(code,expected)
+                access.assert_called_once_with(agent.ROOT,'203.0.113.1','','//app.min.js?v=1987573')
+        finally:server.shutdown();server.server_close()
+
     def values(self):
         return dict(name='My Lampac', lowMemory=True, chromium=False, timeout=20,
                     modules={key: key != 'DLNA' for key in agent.MODULES})

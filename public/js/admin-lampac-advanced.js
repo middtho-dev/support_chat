@@ -11,7 +11,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   const content = document.createElement('div');
   content.className = 'lc-content';
   section.append(navigation, overview, content);
-  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['settings', 'Источники и плагины'], ['client', 'Оформление Lampa']];
+  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства ТВ'], ['settings', 'Источники и плагины'], ['client', 'Оформление Lampa']];
   const panes = {};
   for (const [key, label] of tabs) {
     const button = document.createElement('button');
@@ -61,6 +61,21 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     panes.clients.querySelectorAll('[data-unblock]').forEach(b => b.onclick = () => block(blocked[Number(b.dataset.unblock)], false));
     panes.clients.querySelectorAll('[data-client-block]').forEach(b => b.onclick = () => { const ip = list[Number(b.dataset.clientBlock)].ip; block(ip, !blocked.includes(ip)); });
   }
+  function renderDevices(data) {
+    panes.devices.innerHTML = `<div class="card"><h3>Устройства Lampa</h3><p>На ТВ установите плагин <code>${esc(publicUrl + '/workspace-client.js')}</code>, перезапустите Lampa и откройте «Настройки → Workspace → Подключить к панели по коду». В Lampa с этого сервера плагин подключается автоматически после сохранения профиля.</p><p>Это код Workspace, а не код внешнего сервиса CUB. Срок действия — 5 минут. Команды получает только привязанное устройство.</p><form id="lc-pair-form" class="voice-actions"><label class="voice-field">Код с экрана ТВ<input id="lc-pair-code" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="off" required placeholder="8 цифр"></label><button class="save">Подключить устройство</button></form></div><div class="lc-list">${data.devices.map((d, i) => `<article class="card"><h3>${esc(d.name)}</h3><p>${Date.now()/1000-d.last<35?'На связи':'Нет связи'} · ${esc(d.ip)}<br>Последний ответ: ${esc(date(d.last))}</p><p>${d.applied < d.revision ? 'Ожидает применения на ТВ' : 'Последняя команда подтверждена устройством'}</p><details><summary>Настройки устройства</summary><form data-device-form="${i}"><div class="voice-grid">${data.fields.map(f => `<label class="voice-field">${esc(f.label)}<select data-device-pref="${esc(f.key)}"><option value="">Не менять · сейчас: ${esc(f.options[d.snapshot[f.key]] || 'нет данных')}</option>${Object.entries(f.options).map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></label>`).join('')}</div>${toggle('device-reload-'+i,'Перезапустить Lampa после применения · прервёт просмотр',false)}<p>Отправляются только выбранные параметры. Общий профиль в режиме «При каждом запуске» может переопределить их при следующем запуске.</p><button class="save" ${d.applied < d.revision ? 'disabled' : ''}>Отправить на ТВ</button></form></details><button class="danger" data-revoke="${i}">Отозвать доступ</button></article>`).join('') || empty('Устройства ещё не привязаны.')}</div>`;
+    panes.devices.querySelector('#lc-pair-form').onsubmit=async e=>{e.preventDefault();if(await operation('/devices',{action:'pair',code:panes.devices.querySelector('#lc-pair-code').value},'Устройство привязано'))refresh(true);};
+    panes.devices.querySelectorAll('[data-device-form]').forEach(form=>form.onsubmit=async e=>{
+      e.preventDefault();const i=Number(form.dataset.deviceForm),d=data.devices[i];
+      const values=Object.fromEntries([...form.querySelectorAll('[data-device-pref]')].filter(el=>el.value).map(el=>[el.dataset.devicePref,el.value]));
+      const reload=form.querySelector('#lc-device-reload-'+i).checked;
+      if(reload&&!confirm('Перезапустить Lampa на этом устройстве после применения? Просмотр будет прерван.'))return;
+      if(await operation('/devices',{action:'configure',id:d.id,values,reload},'Команда поставлена в очередь. Ожидается ответ ТВ.'))refresh(true);
+    });
+    panes.devices.querySelectorAll('[data-revoke]').forEach(button=>button.onclick=async()=>{
+      const d=data.devices[Number(button.dataset.revoke)];if(!confirm('Отозвать доступ устройства «'+d.name+'»? Для повторной привязки потребуется новый код.'))return;
+      if(await operation('/devices',{action:'revoke',id:d.id},'Доступ отозван'))refresh(true);
+    });
+  }
   function renderSettings(data) {
     const groups = new Map();
     data.fields.forEach((f, index) => { f.index = index; if (!groups.has(f.group)) groups.set(f.group, []); groups.get(f.group).push(f); });
@@ -99,10 +114,11 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   async function refresh(force = false) {
     if (!alive || refreshing || tab === 'overview') return;
     // Do not replace a focused input or expanded file list during automatic polling.
-    if (!force && (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && tab === 'torrents')) return;
+    if (!force && (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && ['torrents','devices'].includes(tab))) return;
     refreshing = true; const active = tab;
     try {
-      if (active === 'torrents') { const data = await request('/torrents'); if (alive) renderTorrents(data); }
+      if (active === 'devices') { const data = await request('/devices'); if (alive) renderDevices(data); }
+      else if (active === 'torrents') { const data = await request('/torrents'); if (alive) renderTorrents(data); }
       else if (active === 'clients') { const data = await request('/clients'); if (alive) renderClients(data); }
       else if (!settingsLoaded) { const data = await request('/advanced'); if (alive) renderSettings(data); }
       if (alive) message.textContent = '';
