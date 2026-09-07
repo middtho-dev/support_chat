@@ -1,0 +1,19 @@
+#lampac .lc-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; }
+#lampac .lc-tabs button { flex:0 1 auto; min-height:42px; }
+#lampac .lc-tabs button[aria-pressed="true"] { background:var(--accent, #6366f1); color:#fff; border-color:transparent; }
+#lampac [hidden] { display:none !important; }
+#lampac .lc-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr)); gap:16px; align-items:start; }
+#lampac .lc-list .card { margin:0; min-width:0; }
+#lampac .lc-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+#lampac .lc-metrics strong { display:block; font-size:16px; margin-top:4px; }
+#lampac code, #lampac .lc-list p { overflow-wrap:anywhere; word-break:break-word; }
+#lampac summary { cursor:pointer; font-weight:600; padding:8px 0; }
+#lampac details[open] summary { margin-bottom:12px; }
+#lampac .voice-field select { width:100%; min-height:44px; border:1px solid var(--border,#334155); background:var(--input-bg,#101827); color:inherit; border-radius:10px; padding:10px 12px; font:inherit; }
+#lampac .lc-config-group .voice-grid { margin:12px 0; }
+#lampac .lc-empty { padding:20px 0; }
+@media(max-width:600px) {
+  #lampac .lc-tabs { gap:6px; }
+  #lampac .lc-tabs button { font-size:13px; padding:10px 12px; }
+  #lampac .lc-list { grid-template-columns:minmax(0,1fr); }
+}

@@ -2,9 +2,26 @@
 lc.kv9.ru {
     bind 0.0.0.0
     @management path_regexp tsManagement (?i)^/+ts/+shutdown(/|$)
-    respond @management "Use the authenticated workspace to manage TorrServer" 403
-    reverse_proxy 127.0.0.1:9118 {
-        header_up X-Real-IP {remote_host}
+    route {
+        respond @management "Use the authenticated workspace to manage TorrServer" 403
+        forward_auth 127.0.0.1:7600 {
+            uri /access
+            header_up X-Admin-Token {$LAMPAC_SERVICE_TOKEN}
+            header_up X-Workspace-IP {remote_host}
+            header_up X-Workspace-UA {http.request.header.User-Agent}
+            header_up X-Workspace-URI {uri}
+        }
+        handle /workspace-client.js {
+            rewrite * /client.js
+            reverse_proxy 127.0.0.1:7600 {
+                header_up X-Admin-Token {$LAMPAC_SERVICE_TOKEN}
+            }
+        }
+        handle {
+            reverse_proxy 127.0.0.1:9118 {
+                header_up X-Real-IP {remote_host}
+            }
+        }
     }
     encode zstd gzip
     header -Server
