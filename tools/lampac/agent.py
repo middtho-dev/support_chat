@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import advanced
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(os.environ.get('LAMPAC_DIR', '/opt/lampac'))
@@ -63,14 +64,18 @@ def patch_config(config, values):
                           'BaseModule': {'SkipModules': skip},
                           'chromium': {'enable': values['chromium']}, 'listen': {'ResponseCancelAfter': values['timeout']}})
 
-def torr_request(body):
+def torr_request(body, path='/settings'):
+    if path not in ('/settings', '/torrents'):
+        raise ValueError('Unsupported TorrServer endpoint')
     config = merge(read_config('current.conf'), read_config('init.conf'))
     port = int(config.get('TorrServer', {}).get('tsport', 9085))
     passwd = json.loads((ROOT / 'data/ts/accs.db').read_text())['ts']
     headers = {'Content-Type': 'application/json', 'Authorization': 'Basic ' + base64.b64encode(('ts:' + passwd).encode()).decode()}
-    request = urllib.request.Request('http://127.0.0.1:' + str(port) + '/settings', data=json.dumps(body).encode(), headers=headers)
+    request = urllib.request.Request('http://127.0.0.1:' + str(port) + path, data=json.dumps(body).encode(), headers=headers)
     with urllib.request.urlopen(request, timeout=5) as response:
-        raw = response.read(65536)
+        raw = response.read(4 * 1024 * 1024 + 1)
+        if len(raw) > 4 * 1024 * 1024:
+            raise RuntimeError('TorrServer response too large')
         return json.loads(raw) if raw else {}
 
 def torr_patch(current, values):
@@ -172,10 +177,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.authorized():
             return self.reply(401, {'error': 'Требуется вход'})
-        if self.path not in ['/api/lampac', '/api/lampac/torrserver']:
+        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/access', '/client.js']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         try:
-            if self.path.endswith('/torrserver'):
+            if self.path == '/access':
+                allowed = advanced.access(ROOT, self.headers.get('X-Workspace-IP', ''), self.headers.get('X-Workspace-UA', ''), self.headers.get('X-Workspace-URI', '/'))
+                self.reply(200 if allowed else 403, {} if allowed else {'error': 'Доступ с этого IP заблокирован'})
+            elif self.path == '/client.js':
+                script = advanced.client_script(read_config('init.conf')).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/javascript; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', str(len(script)))
+                self.end_headers()
+                self.wfile.write(script)
+            elif self.path.endswith('/advanced'):
+                config = merge(read_config('current.conf'), read_config('init.conf'))
+                self.reply(200, {'fields': advanced.fields(config), 'client': advanced.client_settings(config)})
+            elif self.path.endswith('/torrents'):
+                self.reply(200, {'torrents': advanced.torrents(torr_request)})
+            elif self.path.endswith('/clients'):
+                self.reply(200, advanced.clients(ROOT))
+            elif self.path.endswith('/torrserver'):
                 values = torr_request({'action': 'get'})
                 self.reply(200, {key: values.get(key, False if key in TS_BOOLS else 0) for key in [*TS_NUMBERS, *TS_BOOLS]})
             else:
@@ -186,18 +209,30 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return self.reply(401, {'error': 'Требуется вход'})
-        if self.path not in ['/api/lampac/action', '/api/lampac/configure', '/api/lampac/torrserver']:
+        if self.path not in ['/api/lampac/action', '/api/lampac/configure', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/client', '/api/lampac/torrents', '/api/lampac/clients']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         if not LOCK.acquire(blocking=False):
             return self.reply(409, {'error': 'Дождитесь завершения предыдущей операции'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
-            if not 0 < length <= 4096:
+            if not 0 < length <= 131072:
                 raise ValueError('Некорректный размер запроса')
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError('Нужен объект JSON')
-            if self.path.endswith('/action'):
+            if self.path.endswith('/advanced') or self.path.endswith('/client'):
+                if (ROOT / 'init.yaml').exists():
+                    raise ValueError('Обнаружен init.yaml; требуется JSON-конфигурация')
+                original = read_config('init.conf')
+                effective = merge(read_config('current.conf'), original)
+                updated = advanced.apply_client(original, effective, body, PUBLIC_URL) if self.path.endswith('/client') else advanced.apply_fields(original, effective, body)
+                if updated != original:
+                    save_config(updated)
+            elif self.path.endswith('/torrents'):
+                advanced.torrent_action(torr_request, body)
+            elif self.path.endswith('/clients'):
+                advanced.block(ROOT, body)
+            elif self.path.endswith('/action'):
                 action = body.get('action')
                 if set(body) != {'action'} or action not in ['start', 'stop', 'restart', 'enable', 'disable', 'torr-restart']:
                     raise ValueError('Неизвестная команда')
@@ -232,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
                 save_config(patch_config(original, body))
             self.reply(200, {'ok': True})
         except (ValueError, json.JSONDecodeError):
-            self.reply(400, {'error': 'Проверьте поля: название 1–80 символов, таймаут 5–120 секунд и переключатели. init.conf должен быть JSON без комментариев; init.yaml не поддерживается.'})
+            self.reply(400, {'error': 'Проверьте типы и диапазоны полей. Адреса должны быть корректными, init.conf — JSON без комментариев; init.yaml не поддерживается.'})
         except Exception:
             self.reply(502, {'error': 'Операция не подтверждена. Обновите статус; проверьте службу и права доступа.'})
         finally:
