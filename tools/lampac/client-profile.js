@@ -11,8 +11,21 @@ Object.keys(values).forEach(function(key){if(!(key in backup))backup[key]=localS
 s.set(k,{revision:p.revision,backup:backup,values:values,overrides:overrides});
 applyMenu(s);}
 function applyMenu(s){
+function denied(name){var known=['account','interface','player','parser','server','tmdb','plugins','parental_control','more','workspace_device'];return String(s.get('workspace_settings_all'))==='false'||String(s.get('workspace_settings_'+(known.indexOf(name)>=0?name:'other')))==='false';}
+if(Lampa.Settings&&!window.workspaceSettingsGuard){
+ window.workspaceSettingsGuard=true;
+ var original=Lampa.Settings.create;
+ Lampa.Settings.create=function(name){if(denied(name)){if(Lampa.Noty)Lampa.Noty.show('Настройки доступны в Workspace');return;}return original.apply(this,arguments);};
+ Lampa.Settings.listener.follow('open',function(e){
+  window.workspaceSettingsOpen=e.name;
+  if(e.name==='main')e.body.find('[data-component]').each(function(){var item=window.$(this);var show=!denied(item.data('component'));item.toggle(show).toggleClass('selector',show);});
+  else if(denied(e.name)){e.body.empty();setTimeout(function(){Lampa.Controller.toggle('settings');},0);}
+ });
+}
+if(window.workspaceSettingsOpen&&window.workspaceSettingsOpen!=='main'&&denied(window.workspaceSettingsOpen)){window.workspaceSettingsOpen='main';Lampa.Controller.toggle('settings');}
 if(typeof document!=='undefined'){
  var style=document.getElementById('workspace-menu-visibility');if(!style){style=document.createElement('style');style.id='workspace-menu-visibility';document.head.appendChild(style);}
  style.textContent=['movie','tv','cartoon','anime','catalog','history','favorite'].filter(function(key){return String(s.get('workspace_menu_'+key))==='false';}).map(function(key){return '.menu__item[data-action="'+key+'"]{display:none!important}';}).join('\n');
+ if(String(s.get('workspace_settings_all'))==='false')style.textContent+='\n.open--settings,.settings-folder{display:none!important}';
 }}
 window.workspaceApplyProfile=apply;apply();})();

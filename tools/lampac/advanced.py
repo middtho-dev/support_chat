@@ -56,6 +56,48 @@ CLIENT = {
     **{'workspace_menu_'+key: ('Меню: '+label, None) for key,label in
        [('movie','фильмы'),('tv','сериалы'),('cartoon','мультфильмы'),('anime','аниме'),('catalog','каталог'),('history','история'),('favorite','избранное')]},
 }
+# Native component names come from Lampa Settings; unknown plugin sections use "other".
+SETTINGS_SECTIONS = {'all':'Все настройки', 'account':'Аккаунт CUB', 'interface':'Интерфейс',
+ 'player':'Плеер', 'parser':'Поиск торрентов', 'server':'TorrServer', 'tmdb':'TMDB',
+ 'plugins':'Плагины', 'parental_control':'Родительский контроль', 'more':'Дополнительно',
+ 'workspace_device':'Workspace · информация', 'other':'Разделы других плагинов'}
+CLIENT.update({'workspace_settings_'+k:(v,None) for k,v in SETTINGS_SECTIONS.items()})
+BASICS = {'source','start_page','internal_torrclient','black_style','card_quality'}
+def preference_meta(key):
+    if key.startswith('workspace_settings_'):
+        return {'group':'Доступ к настройкам', 'description':'Включено — раздел доступен на устройстве. Выключено — скрыт и закрыт для перехода. Общий выключатель закрывает все разделы.', 'global':True}
+    if key.startswith('workspace_menu_'):
+        return {'group':'Левое меню', 'description':'Показывать этот пункт в левом меню Lampa. Не отключает сам источник контента.', 'global':True}
+    if key.startswith('screensaver'):
+        group='Заставка';help='Заставка появляется при бездействии. Вид и задержка действуют, когда заставка включена.'
+    elif key.startswith('subtitles'):
+        group='Субтитры';help='Настройка встроенного плеера. Наличие субтитров зависит от выбранного видео.'
+    elif key.startswith(('torrserver','internal_','parser','parse_','cloud_')):
+        group='Торренты';help='Поведение поиска и воспроизведения торрентов на этом устройстве.'
+    elif key.startswith(('player','playlist')):
+        group='Плеер';help='Поведение воспроизведения. Внешний плеер может использовать собственные настройки.'
+    elif key.startswith('proxy'):
+        group='Сеть';help='Проксирование запросов клиента Lampa; не изменяет VPN или прокси сервера Lampac.'
+    elif key in ('source','start_page','adult_content_view'):
+        group='Каталог';help='Каталог и начальный экран этого устройства.'
+    else:
+        group='Интерфейс';help='Оформление интерфейса Lampa. Некоторые изменения требуют перезапуска приложения.'
+    descriptions = {
+      'internal_torrclient':'Использовать торрент-движок приложения Android / Android TV. На других платформах нужен TorrServer; переключатель не устанавливает движок.',
+      'torrserver_gts':'Использовать глобальный адрес TorrServer вместо локально заданного.',
+      'torrserver_savedb':'Сохранять добавленные торренты в базе TorrServer.',
+      'torrserver_preload':'Заранее набирать буфер перед началом воспроизведения.',
+      'torrserver_tracktimecode':'Сохранять позицию просмотра для продолжения видео.',
+      'playlist_next':'Автоматически запускать следующий элемент плейлиста после завершения текущего.',
+      'light_version':'Упрощает оформление для устройств с ограниченной производительностью.',
+      'cache_images':'Кешировать изображения на устройстве, чтобы реже загружать их повторно.',
+      'screensaver_time':'Минуты бездействия до включения заставки.',
+      'card_quality':'Показывать отметку качества видео на карточках.',
+      'interface_sound_play':'Воспроизводить звуки при управлении интерфейсом.',
+      'source':'Источник каталога фильмов и сериалов. Не меняет источники онлайн-видео.',
+      'start_page':'Раздел, открываемый при запуске Lampa.',
+      'black_style':'Использовать чёрную цветовую схему интерфейса.'}
+    return {'group':group, 'description':descriptions.get(key,help), 'global':key in BASICS}
 PROVIDER = {
     'enable': ('Включён', 'bool'), 'displayname': ('Название в списке', 'text'),
     'displayindex': ('Порядок в списке', 'int', -1000, 10000),
@@ -135,7 +177,7 @@ def apply_fields(config, effective, values):
 def client_settings(config):
     current=config.get('WorkspaceUI',{})
     return {'mode':current.get('mode','disabled'), 'values':current.get('values',{}),
-            'fields':[{'key':k,'label':v[0],'options':v[1] or {'true':'Включено','false':'Выключено'}} for k,v in CLIENT.items()]}
+            'fields':[{'key':k,'label':v[0],'options':v[1] or {'true':'Включено','false':'Выключено'}, **preference_meta(k)} for k,v in CLIENT.items()]}
 
 def apply_client(config, effective, body, public_url):
     if set(body) != {'mode','values'} or body['mode'] not in ('disabled','revision','always') or not isinstance(body['values'],dict):

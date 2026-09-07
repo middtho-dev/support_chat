@@ -10,6 +10,7 @@ class DeviceTests(unittest.TestCase):
         self.assertTrue(registration['paired'])
         identifier=registration['id'];cookie='workspace_device='+registration['token']
         self.assertEqual(devices.listing(self.root)['devices'][0]['id'],identifier)
+        self.assertFalse(devices.access_allowed(self.root,cookie))
         devices.manage(self.root,{'action':'rename','id':identifier,'name':'Living room'})
         devices.manage(self.root,{'action':'access','id':identifier,'enabled':False})
         self.assertFalse(devices.access_allowed(self.root,cookie))
@@ -19,6 +20,17 @@ class DeviceTests(unittest.TestCase):
         self.assertTrue(devices.access_allowed(self.root,cookie))
         self.assertEqual(devices.listing(self.root)['devices'][0]['name'],'Living room')
         self.assertEqual(devices.listing(self.root)['devices'][0]['id'],identifier)
+
+    def test_migration_preserves_existing_access_and_new_devices_require_activation(self):
+        old=devices.public(self.root,'enroll',{'name':'Existing'},'203.0.113.1')
+        devices.manage(self.root,{'action':'access','id':old['id'],'enabled':True})
+        new=devices.public(self.root,'enroll',{'name':'New'},'203.0.113.1')
+        self.assertTrue(self.poll(old['token'])['enabled'])
+        self.assertFalse(self.poll(new['token'])['enabled'])
+        self.poll(new['token'])
+        devices.public(self.root,'poll',{'token':new['token'],'applied':0,'snapshot':{}},'203.0.113.1')
+        row=next(d for d in devices.listing(self.root)['devices'] if d['id']==new['id'])
+        self.assertEqual(row['snapshot'],{'internal_torrclient':'false'})
 
     def test_device_overrides_are_cumulative_and_can_return_to_inheritance(self):
         r=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1');identifier=r['id']

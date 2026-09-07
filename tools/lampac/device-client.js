@@ -5,11 +5,16 @@ function start(){
  if(window.workspaceDeviceControl)return;window.workspaceDeviceControl=true;
  var store=Lampa.Storage,key='workspace_device_access',state=store.get(key,{});
  function save(){store.set(key,state);if(state.token&&window.location&&window.location.origin===config.url){document.cookie='workspace_device='+encodeURIComponent(state.token)+'; Path=/; Max-Age=31536000; SameSite=Lax; Secure';}}
+ delete state.paused;
  function access(enabled){
   var cover=document.getElementById('workspace-access-disabled');
-  if(enabled===false){if(!cover){cover=document.createElement('div');cover.id='workspace-access-disabled';cover.textContent='Доступ к Lampac отключён администратором';cover.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#101827;color:#fff;display:flex;align-items:center;justify-content:center;padding:40px;text-align:center;font-size:24px';document.body.appendChild(cover);}Array.prototype.forEach.call(document.querySelectorAll('video'),function(v){v.pause();});}
-  else if(cover)cover.remove();
+  if(enabled===false){
+   if(!cover){var host=document.createElement('div');host.id='workspace-activation-host';host.innerHTML=config.activation;document.body.appendChild(host);cover=document.getElementById('workspace-access-disabled');if(cover){var link=cover.querySelector('a');if(link)link.focus();}}
+   if(cover){var label=cover.querySelector('[data-workspace-id]');if(label)label.textContent=state.id||'Подключение…';}
+   Array.prototype.forEach.call(document.querySelectorAll('video'),function(v){v.pause();});
+  }else if(cover){var host=document.getElementById('workspace-activation-host');if(host)host.remove();else cover.remove();}
  }
+ if(window.addEventListener)window.addEventListener('keydown',function(e){var cover=document.getElementById('workspace-access-disabled');if(!cover)return;e.stopImmediatePropagation();if(e.key==='Tab'){e.preventDefault();var link=cover.querySelector('a');if(link)link.focus();}else if(!(e.key==='Enter'&&e.target.tagName==='A'))e.preventDefault();},true);
  function enroll(){if(busy||state.token||state.paused||state.revoked)return;busy=true;request('enroll',{name:String(store.get('device_name')||'Lampa').slice(0,80)},function(status,data){busy=false;if(status!==200)return;state={token:data.token,id:data.id,paired:true,applied:0,overrides:{}};save();poll();});}
  function note(text){Lampa.Noty.show(text);}
  function request(action,data,done){var xhr=new XMLHttpRequest();xhr.open('POST',config.url+'/workspace-device/'+action);xhr.timeout=12000;xhr.setRequestHeader('Content-Type','application/json');xhr.onload=function(){var result;try{result=JSON.parse(xhr.responseText);}catch(e){result={};}done(xhr.status,result);};xhr.onerror=xhr.ontimeout=function(){done(0,{});};xhr.send(JSON.stringify(data));}
@@ -19,17 +24,15 @@ function start(){
    var changed=JSON.stringify(state.overrides||{})!==JSON.stringify(data.overrides||{});state.overrides=data.overrides||{};save();
    if(changed&&window.workspaceApplyProfile)window.workspaceApplyProfile();
   }
-  access(data.enabled);
+  var activated=state.enabled===false&&data.enabled===true;state.enabled=data.enabled;save();access(data.enabled);if(activated){window.location.reload();return;}
   if(data.paired&&data.revision>(state.applied||0)){
    if(window.workspaceApplyProfile)window.workspaceApplyProfile();else Object.keys(data.values).forEach(function(k){if(config.fields[k]&&config.fields[k].indexOf(data.values[k])>=0)store.set(k,data.values[k]);});
    state.applied=data.revision;save();note('Workspace: настройки применены');
    setTimeout(poll,100);if(data.reload)setTimeout(function(){window.location.reload();},1800);
   }
  });}
- function pair(){if(state.revoked){note('Привязка удалена администратором');return;}state.paused=false;save();if(state.id)note('Workspace ID: '+state.id+' · '+(state.name||'Lampa'));else note('Подключение к Workspace…');poll();}
  Lampa.SettingsApi.addComponent({component:'workspace_device',name:'Workspace',icon:'<svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 21h8m-4-4v4" stroke="currentColor" stroke-width="2"/></svg>'});
- Lampa.SettingsApi.addParam({component:'workspace_device',param:{name:'workspace_pair',type:'button'},field:{name:'Устройство в Workspace',description:'Подключение автоматическое. Показать ID устройства и возобновить управление'},onChange:pair});
- Lampa.SettingsApi.addParam({component:'workspace_device',param:{name:'workspace_forget',type:'button'},field:{name:'Приостановить удалённое управление',description:'ID и индивидуальные настройки сохраняются'},onChange:function(){state.paused=true;save();note('Удалённое управление приостановлено');}});
- if(state.code&&!state.paired)state={};save();timer=setInterval(poll,10000);poll();
+ Lampa.SettingsApi.addParam({component:'workspace_device',param:{name:'workspace_info',type:'static'},field:{name:'Устройство в Workspace',description:'Подключение автоматическое. Управление доступно администратору в Workspace.'},onRender:function(item){item.removeClass('selector');item.find('.settings-param__name').text(state.name||'Устройство в Workspace');item.find('.settings-param__descr').text('ID: '+(state.id||'Подключение…')+' · '+(state.revoked?'Доступ отозван':state.enabled===false?'Ожидает активации':'Подключено')+' · '+config.url);}});
+ if(state.code&&!state.paired)state={};save();if(state.enabled===false)access(false);timer=setInterval(poll,10000);poll();
 }
 start();})();
