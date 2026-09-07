@@ -4,6 +4,7 @@ import base64
 import hmac
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
@@ -81,6 +82,37 @@ def torr_patch(current, values):
     if any(type(values[k]) is not bool for k in TS_BOOLS):
         raise ValueError('Некорректный переключатель TorrServer')
     return {**current, **values}
+
+def torr_pids():
+    expected = (ROOT / 'data/ts/TorrServer-linux').resolve()
+    found = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if entry.stat().st_uid == os.getuid() and (entry / 'exe').resolve() == expected:
+                found.append(int(entry.name))
+        except (OSError, RuntimeError):
+            pass
+    return found
+
+def restart_torrserver():
+    previous = torr_pids()
+    if not previous:
+        raise RuntimeError('TorrServer process is absent')
+    for pid in previous:
+        os.kill(pid, signal.SIGTERM)
+    # Lampac owns this child and restarts it after a ten-second delay.
+    deadline = time.monotonic() + 22
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        if set(torr_pids()) - set(previous):
+            try:
+                torr_request({'action': 'get'})
+                return
+            except Exception:
+                pass
+    raise RuntimeError('TorrServer did not restart')
 
 def save_config(config):
     target = ROOT / 'init.conf'
@@ -167,12 +199,17 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Нужен объект JSON')
             if self.path.endswith('/action'):
                 action = body.get('action')
-                if set(body) != {'action'} or action not in ['start', 'stop', 'restart', 'enable', 'disable']:
+                if set(body) != {'action'} or action not in ['start', 'stop', 'restart', 'enable', 'disable', 'torr-restart']:
                     raise ValueError('Неизвестная команда')
-                command('/usr/bin/sudo', '-n', '/usr/bin/systemctl', action, 'lampac.service')
+                if action == 'torr-restart':
+                    restart_torrserver()
+                else:
+                    command('/usr/bin/sudo', '-n', '/usr/bin/systemctl', action, 'lampac.service')
             elif self.path.endswith('/torrserver'):
                 previous = torr_request({'action': 'get'})
                 updated = torr_patch(previous, body)
+                if all(previous.get(k) == v for k, v in body.items()):
+                    return self.reply(200, {'ok': True, 'unchanged': True})
                 if updated['UseDisk'] and not updated.get('TorrentsSavePath'):
                     cache = ROOT / 'data/ts/workspace-cache'
                     cache.mkdir(parents=True, exist_ok=True)

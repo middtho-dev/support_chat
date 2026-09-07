@@ -1,7 +1,7 @@
 # Change the domain and backend together with DNS and Lampac listen settings.
 lc.kv9.ru {
     bind 0.0.0.0
-    @management path_regexp tsManagement (?i)^/+ts/+(settings|shutdown)(/|$)
+    @management path_regexp tsManagement (?i)^/+ts/+shutdown(/|$)
     respond @management "Use the authenticated workspace to manage TorrServer" 403
     reverse_proxy 127.0.0.1:9118 {
         header_up X-Real-IP {remote_host}
