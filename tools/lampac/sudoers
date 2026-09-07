@@ -1,0 +1,2 @@
+# Install as /etc/sudoers.d/lampac-workspace, root:root, mode 0440.
+lampac ALL=(root) NOPASSWD: /usr/bin/systemctl start lampac.service, /usr/bin/systemctl stop lampac.service, /usr/bin/systemctl restart lampac.service, /usr/bin/systemctl enable lampac.service, /usr/bin/systemctl disable lampac.service

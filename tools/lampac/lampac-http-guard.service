@@ -1,0 +1,13 @@
+[Unit]
+Description=Restrict native TorrServer HTTP to loopback
+Before=lampac.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/lampac-workspace.env
+ExecStart=/bin/sh /usr/local/lib/lampac-workspace/http-guard.sh
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
