@@ -1,0 +1,60 @@
+import copy
+import json
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+import urllib.request
+import urllib.error
+import agent
+
+class AgentTests(unittest.TestCase):
+    def values(self):
+        return dict(name='My Lampac', lowMemory=True, chromium=False, timeout=20,
+                    modules={key: key != 'DLNA' for key in agent.MODULES})
+
+    def test_patch_preserves_unexposed_configuration(self):
+        original={'listen': {'ip':'127.0.0.1','port':9118},'privateKey':'secret',
+                  'BaseModule':{'SkipModules':['Custom','TorrServer'],'LoadModules':['.*']}}
+        before=copy.deepcopy(original);result=agent.patch_config(original,self.values())
+        self.assertEqual(original,before)
+        self.assertEqual(result['BaseModule']['SkipModules'],['Custom','DLNA'])
+        self.assertEqual(result['BaseModule']['LoadModules'],['.*'])
+        self.assertEqual(result['listen']['port'],9118)
+        self.assertEqual(result['privateKey'],'secret')
+        self.assertNotIn('privateKey',agent.settings(result))
+
+    def test_invalid_fields_cannot_select_paths_or_commands(self):
+        for extra in [{'timeout':True},{'name':''},{'modules':{}},{'exec':'id'}]:
+            with self.assertRaises(ValueError):agent.patch_config({},self.values()|extra)
+
+    def test_atomic_config_write_has_backup(self):
+        with tempfile.TemporaryDirectory() as directory,patch.object(agent,'ROOT',Path(directory)):
+            agent.save_config({'secret':'keep'})
+            agent.save_config({'name':'changed'})
+            self.assertEqual(agent.read_config('init.conf'),{'name':'changed'})
+            backups=list((Path(directory)/'database/backup/workspace').glob('*.json'))
+            self.assertEqual(json.loads(backups[0].read_text()),{'secret':'keep'})
+
+    def test_torrserver_patch_preserves_unexposed_settings(self):
+        values={k: bounds[0] for k,bounds in agent.TS_NUMBERS.items()}|{k:False for k in agent.TS_BOOLS}
+        self.assertEqual(agent.torr_patch({'secret':'keep'},values)['secret'],'keep')
+        with self.assertRaises(ValueError):agent.torr_patch({},values|{'CacheSize':-1})
+        with self.assertRaises(ValueError):agent.torr_patch({},values|{'SslKey':'evil'})
+
+    def test_http_auth_and_command_allowlist(self):
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        url='http://127.0.0.1:'+str(server.server_port)+'/api/lampac/action'
+        try:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent,'command') as command:
+                for token,action,expected in [('', 'restart',401),('test-token','restart; id',400),('test-token','restart',200)]:
+                    request=urllib.request.Request(url,data=json.dumps({'action':action}).encode(),headers={'x-admin-token':token})
+                    try:code=urllib.request.urlopen(request).status
+                    except urllib.error.HTTPError as e:code=e.code
+                    self.assertEqual(code,expected)
+                command.assert_called_once_with('/usr/bin/sudo','-n','/usr/bin/systemctl','restart','lampac.service')
+        finally:server.shutdown();server.server_close()
+
+if __name__=='__main__':unittest.main()

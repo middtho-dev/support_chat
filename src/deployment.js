@@ -19,7 +19,8 @@ function createDeploymentInfo({ authorize, env = process.env, fetcher = fetch, r
       const r = await fetcher(new URL('/api/admin/frp', env.FRP_SERVICE_URL || 'http://127.0.0.1:7400'), { headers: { 'x-admin-token': env.FRP_SERVICE_TOKEN }, redirect: 'error', signal: AbortSignal.timeout(3000) });
       if (r.ok) { const c = await r.json(); if (c?.host) frp = { host: c.host, port: c.port, portStart: c.portStart, portEnd: c.portEnd, reservedPorts: c.reservedPorts }; }
     } catch {}
-    const hosts = [...new Set([publicUrl, miniapp].filter(Boolean).map(u => new URL(u).hostname).concat(frp?.host || []).filter(h => h && !net.isIP(h)))];
+    const lampac = safeUrl(env.LAMPAC_PUBLIC_URL);
+    const hosts = [...new Set([publicUrl, miniapp, lampac].filter(Boolean).map(u => new URL(u).hostname).concat(frp?.host || []).filter(h => h && !net.isIP(h)))];
     async function lookup(host, type) {
       let timer;
       try { return await Promise.race([resolver[type](host), new Promise((_, reject) => { timer = setTimeout(() => reject(Error('timeout')), 3000); })]); }
@@ -27,7 +28,7 @@ function createDeploymentInfo({ authorize, env = process.env, fetcher = fetch, r
       finally { clearTimeout(timer); }
     }
     const records = await Promise.all(hosts.map(async host => ({ host, a: await lookup(host, 'resolve4'), aaaa: await lookup(host, 'resolve6') })));
-    res.json({ ipv4, ipv6, publicUrl, miniapp, repository: safeUrl(env.REPOSITORY_URL), frp, records, internal: { chat: `127.0.0.1:${Number(env.PORT) || 3001}`, frp: safeUrl(env.FRP_SERVICE_URL || 'http://127.0.0.1:7400'), voice: safeUrl(env.VOICE_SERVICE_URL || 'http://127.0.0.1:7500') }, checkedAt: new Date().toISOString() });
+    res.json({ ipv4, ipv6, publicUrl, miniapp, lampac, repository: safeUrl(env.REPOSITORY_URL), frp, records, internal: { chat: `127.0.0.1:${Number(env.PORT) || 3001}`, frp: safeUrl(env.FRP_SERVICE_URL || 'http://127.0.0.1:7400'), voice: safeUrl(env.VOICE_SERVICE_URL || 'http://127.0.0.1:7500') }, checkedAt: new Date().toISOString() });
   };
 }
 module.exports = { createDeploymentInfo, safeUrl };

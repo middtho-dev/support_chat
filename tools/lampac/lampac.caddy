@@ -1,0 +1,11 @@
+# Change the domain and backend together with DNS and Lampac listen settings.
+lc.kv9.ru {
+    bind 0.0.0.0
+    @management path /ts/settings /ts/settings/* /ts/shutdown /ts/shutdown/*
+    respond @management "Use the authenticated workspace to manage TorrServer" 403
+    reverse_proxy 127.0.0.1:9118 {
+        header_up X-Real-IP {remote_host}
+    }
+    encode zstd gzip
+    header -Server
+}
