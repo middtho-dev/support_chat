@@ -80,26 +80,39 @@ against lampac-nextgen/lampac Modules/LampaWeb and Shared provider configuration
 ## Device control
 
 The profile includes internal_torrclient, the Android/Android TV built-in torrent
-client switch. It cannot install a native torrent engine on unsupported TV platforms.
-The Workspace plugin also adds Settings → Workspace to Lampa. Its eight-digit code
-lasts five minutes and pairs only when submitted by a workspace manager. These are
-Workspace codes, independent of the native CUB remote-configuration service.
+client switch. It cannot install a native engine on unsupported TV platforms.
+The Workspace plugin automatically enrolls each new installation using a random,
+device-scoped credential. No code or extra login is required. Managers alone can
+configure, rename or disable enrolled devices; enrollment grants no panel access.
+The existing manual code endpoints remain for old clients.
 
-Device credentials are random, stored hashed in database/workspace/devices.db, and
-scoped to polling that device's commands. Only the supported preference allowlist is
-reported; accounts, passwords and viewing history are not uploaded. Registration and
-code attempts are rate limited. The TV polls every ten seconds; the panel distinguishes
-queued commands from acknowledged revisions. Offline commands wait for reconnection.
-Revocation invalidates the credential. Local disconnect stops polling but leaves the
-inactive record in the panel until revoked. A per-launch global profile may overwrite
-device changes on a subsequent launch, so use revision mode for independent TV tuning.
+An installation's server ID and credential persist in Lampa storage. Names are
+independent of IDs. Clearing app storage or using another browser creates a different
+installation; these IDs are not hardware identifiers. Credentials are hashed in
+ database/workspace/devices.db. Disabling access preserves the ID and settings, and
+can be reversed. Deleting a record revokes its credential; the plugin does not silently
+re-enroll a revoked session. A local polling pause preserves the credential and ID.
 
-Caddy must forward /workspace-device/* to the agent with the trusted service token and
-socket IP. Scoped device tokens travel in POST bodies, not URLs. Public POST/OPTIONS
-supports external Lampa app origins; manager endpoints remain private. The access gate
-accepts retained asset queries such as /access?v=1987573. Caddy normalizes duplicate
-leading slashes before routing, preserving query strings and the shutdown guard.
+Per-device desired settings are persistent overrides. They merge cumulatively and
+are reapplied over the global profile on launch and after polling. A field can return
+to inheritance, removing only that override. Global profile changes cannot overwrite
+remaining individual values. The plugin caches overrides for startup while offline.
+Only the preference allowlist is reported; accounts, passwords and history are absent.
+The panel displays actual reported values separately from desired overrides and
+queued/applied revisions. Settings include parser, playback, subtitles, proxy,
+interface sound, card appearance and menu visibility. Menu switches hide only known
+menu entries, not backend APIs or permissions.
 
-Validation: python3 -m unittest discover -s tools/lampac -p 'test_*.py', npm run check,
-npm test. Source references: lampac-nextgen/lampac Modules/TorrServer and
-YouROK/TorrServer server/web/api/settings.go and server/settings/btsets.go.
+The disabled-device screen pauses HTML video and blocks interaction when the next
+poll arrives (normally ten seconds). For same-origin Lampa, the plugin sets a secure
+workspace_device cookie and Caddy's authenticated gate rejects new service requests
+for disabled credentials. The control poll remains reachable so access can be restored.
+External/native players may not carry this cookie; already-open streams may continue.
+This controls known installations, not hostile users who erase storage or use another
+client. Use the existing IP block for address-wide restrictions.
+
+Caddy forwards /workspace-device/* to the agent with the trusted service token and
+socket IP. Scoped tokens travel in POST bodies, not URLs. Public POST/OPTIONS supports
+external Lampa origins; manager routes stay private. The access gate accepts retained
+asset queries such as /access?v=1987573. Caddy normalizes duplicate leading slashes
+before routing, preserving query strings and the shutdown guard.

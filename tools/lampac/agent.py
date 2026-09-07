@@ -185,7 +185,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == '/access':
                 allowed = advanced.access(ROOT, self.headers.get('X-Workspace-IP', ''), self.headers.get('X-Workspace-UA', ''), self.headers.get('X-Workspace-URI', '/'))
-                self.reply(200 if allowed else 403, {} if allowed else {'error': 'Доступ с этого IP заблокирован'})
+                original=self.headers.get('X-Workspace-URI','/').split('?',1)[0]
+                if allowed and not original.startswith('/workspace-device/') and original!='/workspace-client.js':
+                    allowed=devices.access_allowed(ROOT,self.headers.get('Cookie',''))
+                self.reply(200 if allowed else 403, {} if allowed else {'error': 'Доступ к Lampac отключён'})
             elif self.path == '/client.js':
                 client = {'url': PUBLIC_URL.rstrip('/'), 'fields': {k:list(v[1] or {'true':1,'false':1}) for k,v in advanced.CLIENT.items()}}
                 script = (advanced.client_script(read_config('init.conf')) + '\n' + (Path(__file__).parent/'device-client.js').read_text(encoding='utf-8').replace('DEVICE_CONFIG',json.dumps(client))).encode()
@@ -215,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return self.reply(401, {'error': 'Требуется вход'})
-        if self.path in ['/workspace-device/register', '/workspace-device/poll']:
+        if self.path in ['/workspace-device/register', '/workspace-device/enroll', '/workspace-device/poll']:
             try:
                 length = int(self.headers.get('Content-Length', '0'))
                 if not 0 < length <= 8192:
@@ -223,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
                 body=json.loads(self.rfile.read(length))
                 if not isinstance(body,dict):
                     raise ValueError('Нужен объект')
+                if self.path.endswith(('/enroll','/register')) and not devices.access_allowed(ROOT,self.headers.get('Cookie','')):
+                    return self.reply(403, {'error':'Доступ устройства отключён'})
                 return self.reply(200, devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP','')))
             except PermissionError:
                 return self.reply(403, {'error':'Привязка истекла или отозвана'})
