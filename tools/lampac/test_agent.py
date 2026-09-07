@@ -40,9 +40,19 @@ class AgentTests(unittest.TestCase):
                     self.assertEqual(code,expected)
                     if path=='/':
                         self.assertIn('workspace-access-disabled',payload)
-                        self.assertIn('/workspace-device/poll',payload)
+                        self.assertIn('/workspace-device/',payload)
+                        self.assertIn("request('poll'",payload)
                         self.assertIn('https://helpo.su/logo.png',payload)
         finally:server.shutdown();server.server_close()
+
+    def test_bootstrap_preserves_page_and_is_idempotent(self):
+        original='<html><HEAD><script src="/lampainit.js"></script></HEAD><body>Existing Lampa</body></html>'
+        result=agent.bootstrap_page(original)
+        self.assertIn('/workspace-bootstrap.js',result)
+        self.assertIn('<body>Existing Lampa</body>',result)
+        self.assertIn('<script src="/lampainit.js"></script>',result)
+        self.assertEqual(result.count('id="workspace-bootstrap"'),1)
+        self.assertEqual(agent.bootstrap_page(result),result)
 
     def values(self):
         return dict(name='My Lampac', lowMemory=True, chromium=False, timeout=20,

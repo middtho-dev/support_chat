@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py, devices.py, client-profile.js device-client.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, client-profile.js device-client.js, bootstrap.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -90,8 +90,8 @@ An installation's server ID and credential persist in Lampa storage. Names are
 independent of IDs. Clearing app storage or using another browser creates a different
 installation; these IDs are not hardware identifiers. Credentials are hashed in
  database/workspace/devices.db. Disabling access preserves the ID and settings, and
-can be reversed. Deleting a record revokes its credential; the plugin does not silently
-re-enroll a revoked session. A local polling pause preserves the credential and ID.
+can be reversed. Deleting a record revokes its credential; a returning installation
+receives a new disabled ID and requires activation. There is no local polling pause.
 
 Per-device desired settings are persistent overrides. They merge cumulatively and
 are reapplied over the global profile on launch and after polling. A field can return
@@ -134,3 +134,26 @@ Existing hidden general values are preserved on save for backward compatibility.
 Settings restrictions hide native sections, remove remote-control focus targets
 and reject direct settings navigation. “Other plugins” covers unknown sections.
 These are client UI restrictions, not protection against modifying the client code.
+
+## Automatic bootstrap for existing web clients
+
+Caddy serves `/` and `/index.html` through the loopback agent, which reads the
+current native Lampac page and inserts `/workspace-bootstrap.js`. It does not
+modify Lampac files, plugin lists, localStorage, IndexedDB or cached media.
+Only the HTML wrapper and bootstrap use no-store; application assets keep their
+existing cache behavior. The loader waits for Lampa, retries transient script
+failures and skips already running Workspace instances. Native customPlugins
+remain a second path and the device plugin prevents duplicate registration.
+
+Existing users receive the loader on the next network-backed page load. An
+already open/offline cached page cannot be updated until it contacts the server.
+Standalone Lampa applications using only video APIs do not load this HTML and
+still need the Workspace plugin installed once. Newly discovered installations
+follow the normal activation policy; existing Workspace IDs are preserved.
+
+Deleting a device invalidates its cookie immediately. Unknown credentials are
+rejected for content access but may enroll again. The plugin (or standalone
+activation screen after reload) handles the explicit device_revoked response by
+registering a fresh, disabled installation. It must be approved again. Temporary
+network or IP-block errors do not trigger reenrollment. The UI reacts on the next
+poll; already established media connections are not retroactively terminated.

@@ -5,6 +5,7 @@ import base64
 import hmac
 import json
 import os
+import re
 import signal
 from pathlib import Path
 import subprocess
@@ -162,6 +163,14 @@ def activation_page():
     return (Path(__file__).parent/'activation.html').read_text(encoding='utf-8').replace('SUPPORT_URL',html.escape(support,quote=True)).replace('LOGO_URL',html.escape(logo,quote=True))
 
 
+def bootstrap_page(source):
+    """Add an independent loader without editing Lampa files or client storage."""
+    if 'id="workspace-bootstrap"' in source:
+        return source
+    tag='<script id="workspace-bootstrap" defer src="/workspace-bootstrap.js"></script>'
+    return re.sub(r'</head\s*>',lambda match:tag+match.group(),source,count=1,flags=re.I)
+
+
 class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
@@ -187,10 +196,31 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {'error': 'Требуется вход'})
         # Caddy's auth rewrite retains the original query string (e.g. ?v=...).
         self.path = self.path.split('?', 1)[0]
-        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices', '/access', '/client.js']:
+        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices', '/access', '/client.js', '/bootstrap.html', '/bootstrap.js']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         try:
-            if self.path == '/access':
+            if self.path in ('/bootstrap.html','/bootstrap.js'):
+                if self.path.endswith('.html'):
+                    # Fixed loopback target; never accept an upstream URL from a client.
+                    headers={'Accept-Encoding':'identity','Cookie':self.headers.get('Cookie',''),
+                             'User-Agent':self.headers.get('User-Agent',''),
+                             'X-Real-IP':self.headers.get('X-Workspace-IP','')}
+                    req=urllib.request.Request('http://127.0.0.1:9118/',headers=headers)
+                    with urllib.request.urlopen(req,timeout=10) as response:
+                        raw=response.read(2*1024*1024+1)
+                        if len(raw)>2*1024*1024 or 'text/html' not in response.headers.get('Content-Type',''):
+                            raise ValueError('Expected Lampa HTML')
+                        payload=bootstrap_page(raw.decode('utf-8')).encode()
+                    content_type='text/html; charset=utf-8'
+                else:
+                    payload=(Path(__file__).parent/'bootstrap.js').read_bytes()
+                    content_type='application/javascript; charset=utf-8'
+                self.send_response(200)
+                self.send_header('Content-Type',content_type)
+                self.send_header('Cache-Control','no-store')
+                self.send_header('Content-Length',str(len(payload)))
+                self.end_headers();self.wfile.write(payload)
+            elif self.path == '/access':
                 allowed = advanced.access(ROOT, self.headers.get('X-Workspace-IP', ''), self.headers.get('X-Workspace-UA', ''), self.headers.get('X-Workspace-URI', '/'))
                 original=self.headers.get('X-Workspace-URI','/').split('?',1)[0]
                 if allowed and not original.startswith('/workspace-device/') and original!='/workspace-client.js':
@@ -241,11 +271,11 @@ class Handler(BaseHTTPRequestHandler):
                 body=json.loads(self.rfile.read(length))
                 if not isinstance(body,dict):
                     raise ValueError('Нужен объект')
-                if self.path.endswith(('/enroll','/register')) and not devices.access_allowed(ROOT,self.headers.get('Cookie','')):
+                if self.path.endswith(('/enroll','/register')) and not devices.access_allowed(ROOT,self.headers.get('Cookie',''),allow_unknown=True):
                     return self.reply(403, {'error':'Доступ устройства отключён'})
                 return self.reply(200, devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP','')))
             except PermissionError:
-                return self.reply(403, {'error':'Привязка истекла или отозвана'})
+                return self.reply(403, {'error':'Привязка истекла или отозвана','code':'device_revoked'})
             except ValueError:
                 return self.reply(400, {'error':'Проверьте запрос или подождите минуту перед повтором'})
             except Exception:

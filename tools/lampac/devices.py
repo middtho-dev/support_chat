@@ -59,7 +59,7 @@ def public(root,action,body,ip):
             automatic=action=='enroll'
             conn.execute('INSERT INTO devices (id,credential,code,expires,name,ip,last,paired,enabled) VALUES (?,?,?,?,?,?,?,?,?)',
                 (identifier,digest(token),None if automatic else digest(code),time.time()+300,body['name'],ip,time.time(),int(automatic),0))
-            return {'id':identifier,'token':token,'code':None if automatic else code,'expiresIn':300,'paired':automatic}
+            return {'id':identifier,'token':token,'code':None if automatic else code,'expiresIn':300,'paired':automatic,'enabled':False}
         if action!='poll' or set(body)!={'token','applied','snapshot'} or not isinstance(body['token'],str) or not 32<=len(body['token'])<=100 or type(body['applied']) is not int:
             raise ValueError('Некорректный запрос устройства')
         snapshot=values(body['snapshot'])
@@ -127,7 +127,7 @@ def manage(root,body):
             raise ValueError('Недопустимая команда')
         return {'ok':True}
 
-def access_allowed(root,cookie_header):
+def access_allowed(root,cookie_header,allow_unknown=False):
     cookies=SimpleCookie()
     try:cookies.load(cookie_header)
     except Exception:return True
@@ -135,4 +135,4 @@ def access_allowed(root,cookie_header):
     if not token:return True
     with closing(database(root)) as conn:
         row=conn.execute('SELECT enabled FROM devices WHERE credential=?',(digest(token.value),)).fetchone()
-        return row is None or bool(row['enabled'])
+        return allow_unknown if row is None else bool(row['enabled'])
