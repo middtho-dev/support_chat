@@ -33,3 +33,12 @@ test('device profiles override global settings on every launch and release back 
   storage.set('workspace_device_access',{overrides:{}});run(global);assert.equal(storage.get('screensaver'),'true');
   storage.set('workspace_device_access',{overrides:{screensaver:'false'}});run({...global,mode:'disabled'});assert.equal(storage.get('screensaver'),'false');
 });
+test('menu visibility is rebuilt after a page reload even for an unchanged revision profile',()=>{
+  const data=new Map();const storage={get:(k,f)=>data.has(k)?data.get(k):f,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k)};
+  let style;
+  const document={getElementById:()=>style,createElement:()=>({}),head:{appendChild:node=>style=node}};
+  const context={document,Lampa:{Storage:storage},localStorage:{getItem:k=>data.get(k)??null}};context.window=context;
+  const source=script.replace('POLICY',JSON.stringify({mode:'revision',revision:'1',values:{workspace_menu_movie:'false'}}));
+  vm.runInNewContext(source,context);assert.match(style.textContent,/data-action="movie"/);
+  style=null;vm.runInNewContext(source,context);assert.match(style.textContent,/data-action="movie"/);
+});
