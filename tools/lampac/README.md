@@ -90,8 +90,8 @@ An installation's server ID and credential persist in Lampa storage. Names are
 independent of IDs. Clearing app storage or using another browser creates a different
 installation; these IDs are not hardware identifiers. Credentials are hashed in
  database/workspace/devices.db. Disabling access preserves the ID and settings, and
-can be reversed. Deleting a record revokes its credential; the plugin does not silently
-re-enroll a revoked session. A local polling pause preserves the credential and ID.
+can be reversed. Deleting a record revokes its credential; a returning installation
+receives a new disabled ID and requires activation. There is no local polling pause.
 
 Per-device desired settings are persistent overrides. They merge cumulatively and
 are reapplied over the global profile on launch and after polling. A field can return
