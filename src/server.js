@@ -401,6 +401,8 @@ app.post('/api/admin/telegram-auth', (req, res) => {
   });
 });
 
+app.get('/api/admin/deployment', require('./deployment').createDeploymentInfo({ authorize: token => ({ authenticated: isAdminToken(token), canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings }) }));
+
 app.get('/api/admin/maintenance', async (req, res) => {
   if (!isAdminRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
   try {

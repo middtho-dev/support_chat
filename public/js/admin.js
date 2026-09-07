@@ -976,13 +976,16 @@ function renderSettings() {
     <div class="settings-hero">
       <div><span class="settings-eyebrow">Единый центр</span><h2>Управление и состояние</h2><p>Живые показатели, Telegram, доставка, хранение и настройки собраны на одной странице.</p></div>
     </div>
-    <div class="management-tabs" aria-label="Раздел управления"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button></div><div id="control-health"></div>
+    <div class="management-tabs" aria-label="Раздел управления"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button>${canManage ? '<button type="button" data-management-view="addresses">Домены и адреса</button>' : ''}</div><div id="deployment-info" hidden></div><div id="control-health"></div>
     <div class="control-divider"></div>
     <div id="settings-config">${settingsContent}</div>
   </div>`;
   renderMaintenance();
   const selectManagementView = view => {
     S.managementView = view;
+    if (view === 'addresses' && !canManage) view = 'status';
+    $('deployment-info').hidden = view !== 'addresses';
+    if (view === 'addresses') loadDeploymentInfo();
     $('control-health').hidden = view !== 'status'; $('settings-config').hidden = view !== 'configuration';
     document.querySelectorAll('[data-management-view]').forEach(b => { b.classList.toggle('on', b.dataset.managementView === view); b.setAttribute('aria-pressed', String(b.dataset.managementView === view)); });
   };
@@ -1399,3 +1402,20 @@ function renderMaintenance() {
 }
 
 init();
+
+async function loadDeploymentInfo() {
+  const root = $('deployment-info'), token = S.token;
+  if (!root || !S.permissions.canManageSettings) return;
+  root.innerHTML = '<p>Проверяю адреса и DNS…</p>';
+  try {
+    const d = await adminMaintenanceApi('/api/admin/deployment');
+    if (token !== S.token || !root.isConnected) return;
+    const row = (name, value) => `<div class="address-row"><span>${esc(name)}</span><code>${esc(value || 'Не задано')}</code></div>`;
+    root.innerHTML = `<div class="maintenance-title"><div><h2>Домены и адреса</h2><p>Адреса из настроек сервера и текущие ответы DNS. Эта страница не меняет записи у регистратора.</p></div><button class="ghost" id="addresses-refresh">Проверить DNS</button></div>
+      <div class="grid maintenance-grid"><section class="card"><h3>Сервер и панель</h3>${row('IPv4 для A-записей', d.ipv4)}${row('IPv6 для AAAA-записей', d.ipv6)}${row('Панель и поддержка', d.publicUrl)}${row('Telegram Mini App', d.miniapp)}${row('Репозиторий', d.repository)}</section>
+      <section class="card"><h3>Устройства FRP</h3>${d.frp ? row('Адрес подключения', d.frp.host + ':' + d.frp.port) + row('Порты устройств', d.frp.portStart + '–' + d.frp.portEnd) + row('Исключения диапазона', (d.frp.reservedPorts || []).join(', ')) : '<p>FRP недоступен: проверьте раздел «Устройства».</p>'}<p>При переносе сервера меняйте DNS домена подключения. В конфигурациях устройств домен и порты остаются прежними.</p></section></div>
+      <h3>Записи DNS</h3><div class="grid maintenance-grid">${d.records.map(r => `<section class="card"><h3>${esc(r.host)}</h3>${row('A сейчас', r.a === null ? 'Не удалось проверить' : r.a.join(', ') || 'Записи нет')}${row('A должно быть', d.ipv4)}${row('AAAA сейчас', r.aaaa === null ? 'Не удалось проверить' : r.aaaa.join(', ') || 'Записи нет')}<p>${esc(!d.ipv4 ? 'Укажите PUBLIC_SERVER_IPV4 в .env сервера.' : r.a === null ? 'Повторите проверку DNS позже.' : r.a.length === 1 && r.a[0] === d.ipv4 ? 'A-запись соответствует серверу.' : 'A-запись отличается. При прямом подключении замените её на IPv4 выше; при использовании CDN адреса могут отличаться.')}</p>${r.aaaa?.length && !d.ipv6 ? '<p>На сервере не указан публичный IPv6. Проверьте AAAA: старая запись может отправлять часть посетителей на прежний сервер.</p>' : ''}</section>`).join('')}</div>
+      <details class="card"><summary>Внутренние адреса и перенос</summary>${row('Чат', d.internal.chat)}${row('FRP API', d.internal.frp)}${row('Аудиобот API', d.internal.voice)}<p>Внутренние адреса не публикуются в DNS. IPv4/IPv6 задаются в .env: PUBLIC_SERVER_IPV4 и PUBLIC_SERVER_IPV6; адрес панели — PUBLIC_URL; Mini App — TELEGRAM_WEBAPP_URL. После изменения перезапустите сервис. Домен и диапазон FRP меняются в разделе «Устройства».</p><p>Перед сменой A/AAAA перенесите базу, вложения, ключи, сертификаты и настройки. После изменения проверьте HTTPS, Mini App и подключения устройств. На время обновления DNS сохраняйте доступ к старому серверу.</p></details>`;
+    $('addresses-refresh').onclick = loadDeploymentInfo;
+  } catch (e) { if (token === S.token && root.isConnected) root.innerHTML = `<p>${esc(e.message)}</p>`; }
+}
