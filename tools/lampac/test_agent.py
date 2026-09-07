@@ -57,4 +57,21 @@ class AgentTests(unittest.TestCase):
                 command.assert_called_once_with('/usr/bin/sudo','-n','/usr/bin/systemctl','restart','lampac.service')
         finally:server.shutdown();server.server_close()
 
+    def test_restart_only_signals_torrserver_and_checks_new_process(self):
+        with patch.object(agent,'torr_pids',side_effect=[[123],[456]]),patch.object(agent.os,'kill') as kill,patch.object(agent.time,'sleep'),patch.object(agent,'torr_request',return_value={}) as request:
+            agent.restart_torrserver()
+            kill.assert_called_once_with(123,agent.signal.SIGTERM)
+            request.assert_called_once_with({'action':'get'})
+
+    def test_noop_settings_do_not_reset_torrents(self):
+        values={k: bounds[0] for k,bounds in agent.TS_NUMBERS.items()}|{k:False for k in agent.TS_BOOLS}
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent,'torr_request',return_value=values) as request:
+                req=urllib.request.Request('http://127.0.0.1:'+str(server.server_port)+'/api/lampac/torrserver',data=json.dumps(values).encode(),headers={'x-admin-token':'test-token'})
+                self.assertTrue(json.load(urllib.request.urlopen(req))['unchanged'])
+                request.assert_called_once_with({'action':'get'})
+        finally:server.shutdown();server.server_close()
+
 if __name__=='__main__':unittest.main()

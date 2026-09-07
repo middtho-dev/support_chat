@@ -30,8 +30,12 @@ credentials come from data/ts/accs.db and are never returned. Unexposed fields a
 and each write is followed by a readback check. Disk caching uses an existing configured
 path, or data/ts/workspace-cache when no path is set. Cache size is per torrent, in MiB;
 speed limits are KB/s, with zero meaning unlimited. Live changes may interrupt streams.
-Do not expose TorrServer settings/shutdown through the public Caddy route; these are
-managed by the authenticated workspace instead.
+Keep /ts/settings readable: Lampa needs POST {"action":"get"} before playback.
+Set TorrServer.rdb=true in init.conf to prevent external writes through Lampac while
+allowing local agent writes. Caddy blocks only /ts/shutdown. The agent restarts the
+exact Lampac-owned TorrServer executable with SIGTERM and verifies its replacement
+PID and settings API; no whole-Lampac restart is required. Unchanged settings are
+not written, avoiding unnecessary interruption of active streams.
 
 Validation: python3 -m unittest discover -s tools/lampac -p 'test_*.py', npm run check,
 npm test. Source references: lampac-nextgen/lampac Modules/TorrServer and
