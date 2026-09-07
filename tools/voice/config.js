@@ -1,6 +1,6 @@
 'use strict';
 const {formatDefaults,deleteFields}=require('./formatting');
-const defaults = {...formatDefaults,...Object.fromEntries(deleteFields.map(k=>[k,false])),enabled:false,vpnEnabled:false,vpnTelegram:false,vlessUrl:'',botToken:'',openaiKey:'',ownerIds:'',direction:'incoming',voice:true,videoNote:false,audio:false,chatMode:'all',chatIds:'',excludeChatIds:'',minSeconds:1,maxSeconds:300,dailyMinutes:60,language:'',transcribeModel:'gpt-4o-mini-transcribe',formatModel:'gpt-4.1-mini',polish:true,style:'readable',emoji:false,instructions:'',prefix:'Расшифровка:',deleteOriginal:false,silent:true,retentionHours:24};
+const defaults = {...formatDefaults,...Object.fromEntries(deleteFields.map(k=>[k,false])),enabled:false,vpnEnabled:false,vpnTelegram:false,vlessUrl:'',botToken:'',openaiKey:'',ownerIds:'',direction:'incoming',voice:true,videoNote:false,audio:false,chatMode:'all',chatIds:'',excludeChatIds:'',minSeconds:1,maxSeconds:300,dailyMinutes:60,language:'',originalAudio:false,transcribeModel:'gpt-4o-mini-transcribe',formatModel:'gpt-4.1-mini',polish:true,style:'readable',emoji:false,instructions:'',prefix:'Расшифровка:',deleteOriginal:false,silent:true,retentionHours:24};
 function ids(value) { return String(value).split(/[\s,;]+/).filter(Boolean); }
 function validate(input, previous=defaults) {
   const c={...previous};
