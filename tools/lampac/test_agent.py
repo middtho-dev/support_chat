@@ -40,7 +40,8 @@ class AgentTests(unittest.TestCase):
                     self.assertEqual(code,expected)
                     if path=='/':
                         self.assertIn('workspace-access-disabled',payload)
-                        self.assertIn('/workspace-device/poll',payload)
+                        self.assertIn('/workspace-device/',payload)
+                        self.assertIn("request('poll'",payload)
                         self.assertIn('https://helpo.su/logo.png',payload)
         finally:server.shutdown();server.server_close()
 
