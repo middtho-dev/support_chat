@@ -11,7 +11,7 @@ test('deployment inventory requires manager access before reading service or DNS
 test('deployment inventory reads current FRP config and exposes only public addresses', async () => {
   const env={PUBLIC_URL:'https://user:secret@panel.example/path?token=hidden',PUBLIC_SERVER_IPV4:'203.0.113.8',PUBLIC_SERVER_IPV6:'invalid',FRP_SERVICE_TOKEN:'private-service-key',FRP_SERVICE_URL:'http://127.0.0.1:7400'};
   const handler=createDeploymentInfo({authorize:()=>({authenticated:true,canManageSettings:true}),env,
-    fetcher:async(url,options)=>{assert.equal(options.headers['x-admin-token'],env.FRP_SERVICE_TOKEN);return Response.json({config:{host:'routers.example',port:7001,portStart:1000,portEnd:65000,reservedPorts:[3001],token:'hidden-frp-token'},clients:[{secret:'private'}]});},
+    fetcher:async(url,options)=>{assert.equal(options.headers['x-admin-token'],env.FRP_SERVICE_TOKEN);return Response.json({host:'routers.example',port:7001,portStart:1000,portEnd:65000,reservedPorts:[3001],token:'hidden-frp-token',clients:[{secret:'private'}]});},
     resolver:{resolve4:async()=>['198.51.100.2'],resolve6:async()=>{throw Object.assign(Error(),{code:'ENODATA'});}}});
   const res=response();await handler({get:()=>''},res);
   assert.equal(res.data.ipv4,env.PUBLIC_SERVER_IPV4);assert.equal(res.data.ipv6,'');assert.equal(res.data.frp.port,7001);

@@ -17,7 +17,7 @@ function createDeploymentInfo({ authorize, env = process.env, fetcher = fetch, r
     let frp = null;
     if (env.FRP_SERVICE_TOKEN) try {
       const r = await fetcher(new URL('/api/admin/frp', env.FRP_SERVICE_URL || 'http://127.0.0.1:7400'), { headers: { 'x-admin-token': env.FRP_SERVICE_TOKEN }, redirect: 'error', signal: AbortSignal.timeout(3000) });
-      if (r.ok) { const { config: c } = await r.json(); if (c) frp = { host: c.host, port: c.port, portStart: c.portStart, portEnd: c.portEnd, reservedPorts: c.reservedPorts }; }
+      if (r.ok) { const c = await r.json(); if (c?.host) frp = { host: c.host, port: c.port, portStart: c.portStart, portEnd: c.portEnd, reservedPorts: c.reservedPorts }; }
     } catch {}
     const hosts = [...new Set([publicUrl, miniapp].filter(Boolean).map(u => new URL(u).hostname).concat(frp?.host || []).filter(h => h && !net.isIP(h)))];
     async function lookup(host, type) {
