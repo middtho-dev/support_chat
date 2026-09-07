@@ -5,6 +5,33 @@ from unittest.mock import patch
 import devices
 
 class DeviceTests(unittest.TestCase):
+    def test_automatic_enrollment_rename_and_reversible_access_preserve_id(self):
+        registration=devices.public(self.root,'enroll',{'name':'Lampa PC'},'203.0.113.1')
+        self.assertTrue(registration['paired'])
+        identifier=registration['id'];cookie='workspace_device='+registration['token']
+        self.assertEqual(devices.listing(self.root)['devices'][0]['id'],identifier)
+        devices.manage(self.root,{'action':'rename','id':identifier,'name':'Living room'})
+        devices.manage(self.root,{'action':'access','id':identifier,'enabled':False})
+        self.assertFalse(devices.access_allowed(self.root,cookie))
+        self.assertFalse(self.poll(registration['token'])['enabled'])
+        self.assertTrue(devices.access_allowed(self.root,''))
+        devices.manage(self.root,{'action':'access','id':identifier,'enabled':True})
+        self.assertTrue(devices.access_allowed(self.root,cookie))
+        self.assertEqual(devices.listing(self.root)['devices'][0]['name'],'Living room')
+        self.assertEqual(devices.listing(self.root)['devices'][0]['id'],identifier)
+
+    def test_device_overrides_are_cumulative_and_can_return_to_inheritance(self):
+        r=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1');identifier=r['id']
+        def save(values,inherit=[]):devices.manage(self.root,{'action':'configure','id':identifier,'values':values,'inherit':inherit,'reload':False})
+        save({'screensaver':'false'})
+        self.poll(r['token'],1)
+        save({'internal_torrclient':'true'})
+        result=self.poll(r['token'],2)
+        self.assertEqual(result['overrides'],{'screensaver':'false','internal_torrclient':'true'})
+        self.assertEqual(result['values'],{})
+        save({},['screensaver'])
+        self.assertEqual(self.poll(r['token'],3)['overrides'],{'internal_torrclient':'true'})
+
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.root=Path(self.directory.name)
     def tearDown(self):self.directory.cleanup()
