@@ -3,6 +3,27 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {parseVless,xrayConfig}=require('../vless'),{Vpn}=require('../vpn'),{Store}=require('../store'),{validate}=require('../config');
 const base='vless://11111111-1111-4111-8111-111111111111@example.com:443';
 const link=base+'?security=tls&type=ws&host=cdn.example.com&path=%2Fvoice#Example';
+test('cancelled VPN polling resumes immediately without a false network error',async()=>{
+ const {Worker}=require('../worker');let calls=0,worker;
+ const vpn=new Vpn({fetcher:async()=>{
+  calls++;
+  if(calls===1){worker.pollController.abort();throw new TypeError('fetch failed');}
+  worker.stopped=true;return Response.json({ok:true,result:[]});
+ }});
+ vpn.ensure=async()=>{vpn.agent={test:true};};
+ worker=new Worker({data:{config:{enabled:true,vpnEnabled:true,vpnTelegram:true,botToken:'test',openaiKey:'test'},offset:0}},{vpn});
+ let timer;
+ try{await Promise.race([worker.poll(),new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Cancellation triggered retry backoff')),1000))]);}
+ finally{clearTimeout(timer);worker.stopped=true;}
+ assert.equal(calls,2);assert.equal(worker.error,'');
+});
+
+test('real VPN failures remain sanitized and do not retry directly',async()=>{
+ let calls=0;const vpn=new Vpn({fetcher:async()=>{calls++;throw Error('secret transport details');}});
+ vpn.ensure=async()=>{vpn.agent={test:true};};
+ await assert.rejects(vpn.fetch('https://api.openai.com/',{},{vpnEnabled:true}),e=>e.message.includes('VLESS')&&!e.message.includes('secret'));
+ assert.equal(calls,1);
+});
 
 test('VLESS preserves transport settings and rejects unsupported or insecure links',()=>{
  const v=parseVless(link);assert.equal(v.streamSettings.wsSettings.path,'/voice');assert.equal(v.streamSettings.wsSettings.headers.Host,'cdn.example.com');

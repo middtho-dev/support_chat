@@ -53,7 +53,12 @@ class Vpn {
     await this.ensure(config);
     if(!this.agent)throw Error('VPN недоступен');
     try{return await this.fetcher(url,{...options,dispatcher:this.agent,redirect:'error'});}
-    catch{throw Error('Нет соединения через VLESS. Проверьте ссылку и сервер VPN.');}
+    catch(e){
+      // Configuration changes deliberately cancel long polling; keep cancellation
+      // distinct from transport failures so the worker does not back off.
+      if(options?.signal?.aborted||e.name==='AbortError')throw options?.signal?.reason||e;
+      throw Error('Нет соединения через VLESS. Проверьте ссылку и сервер VPN.');
+    }
   }
   async check(config){
     if(!config.vpnEnabled)throw Error('Сохраните ссылку и включите VPN');
