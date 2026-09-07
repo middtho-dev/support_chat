@@ -7,7 +7,7 @@ class Store {
     this.key=Buffer.from(key,'hex');fs.mkdirSync(dir,{recursive:true,mode:0o700});this.file=path.join(dir,'state.json');
     this.data=fs.existsSync(this.file)?JSON.parse(fs.readFileSync(this.file,'utf8')):{config:{...defaults},connections:{},jobs:[],offset:0,quota:{}};
     for(const field of ['botToken','openaiKey','vlessUrl']){const v=this.data.config[field];if(v)this.data.config[field]=this.decrypt(v);}
-    this.data.config={...defaults,...this.data.config};
+    this.data.config={...defaults,...require('./formatting').migrate(this.data.config)};
     for(const j of this.data.jobs)if(j.status==='sending') {j.status='uncertain';j.error='Отправка могла завершиться перед перезапуском. Проверьте чат; автоматический повтор отключён.';}
     this.save();
   }
