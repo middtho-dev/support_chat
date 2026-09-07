@@ -1,5 +1,6 @@
 'use strict';
-const defaults = {enabled:false,vpnEnabled:false,vpnTelegram:false,vlessUrl:'',botToken:'',openaiKey:'',ownerIds:'',direction:'incoming',voice:true,videoNote:false,audio:false,chatMode:'all',chatIds:'',excludeChatIds:'',minSeconds:1,maxSeconds:300,dailyMinutes:60,language:'',transcribeModel:'gpt-4o-mini-transcribe',formatModel:'gpt-4.1-mini',polish:true,style:'readable',emoji:false,instructions:'',prefix:'Расшифровка:',deleteOriginal:false,silent:true,retentionHours:24};
+const {formatDefaults,deleteFields}=require('./formatting');
+const defaults = {...formatDefaults,...Object.fromEntries(deleteFields.map(k=>[k,false])),enabled:false,vpnEnabled:false,vpnTelegram:false,vlessUrl:'',botToken:'',openaiKey:'',ownerIds:'',direction:'incoming',voice:true,videoNote:false,audio:false,chatMode:'all',chatIds:'',excludeChatIds:'',minSeconds:1,maxSeconds:300,dailyMinutes:60,language:'',transcribeModel:'gpt-4o-mini-transcribe',formatModel:'gpt-4.1-mini',polish:true,style:'readable',emoji:false,instructions:'',prefix:'Расшифровка:',deleteOriginal:false,silent:true,retentionHours:24};
 function ids(value) { return String(value).split(/[\s,;]+/).filter(Boolean); }
 function validate(input, previous=defaults) {
   const c={...previous};
@@ -23,6 +24,10 @@ function validate(input, previous=defaults) {
   if(c.vlessUrl.length>8192)throw Error('Ссылка VLESS слишком длинная');
   if(c.vlessUrl)require('./vless').parseVless(c.vlessUrl);
   if(c.vpnEnabled&&!c.vlessUrl)throw Error('Для VPN нужна ссылка VLESS');
+  if(!['inline','paragraph','end'].includes(c.emojiPlacement)||!['sparse','moderate','expressive'].includes(c.emojiDensity))throw Error('Некорректные настройки эмодзи');
+  if(!['none','low','medium'].includes(c.formatEffort))throw Error('Некорректный уровень рассуждения');
+  if(c.outputTokens<256||c.outputTokens>12000||c.transcribePrompt.length>1000)throw Error('Лимит ответа: 256–12000; словарь: до 1000 символов');
+  if(Object.hasOwn(input,'deleteOriginal')&&!deleteFields.some(k=>Object.hasOwn(input,k)))for(const key of deleteFields)c[key]=input.deleteOriginal;
   return c;
 }
 function selectMessage(c, connection, m) {
