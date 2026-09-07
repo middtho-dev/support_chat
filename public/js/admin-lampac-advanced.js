@@ -95,7 +95,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
       if(await operation('/devices',{action:'configure',id:d.id,values,reload,inherit},'Команда поставлена в очередь. Ожидается ответ устройства.'))refresh(true);
     });
     panes.devices.querySelectorAll('[data-revoke]').forEach(button=>button.onclick=async()=>{
-      const d=data.devices[Number(button.dataset.revoke)];if(!confirm('Отозвать доступ устройства «'+d.name+'»? Сохранённый профиль будет удалён.'))return;
+      const d=data.devices[Number(button.dataset.revoke)];if(!confirm('Удалить устройство «'+d.name+'»? Профиль будет удалён, доступ закрыт. При повторном подключении оно появится заново и потребует активации.'))return;
       if(await operation('/devices',{action:'revoke',id:d.id},'Доступ отозван'))refresh(true);
     });
   }

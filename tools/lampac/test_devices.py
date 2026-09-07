@@ -32,6 +32,20 @@ class DeviceTests(unittest.TestCase):
         row=next(d for d in devices.listing(self.root)['devices'] if d['id']==new['id'])
         self.assertEqual(row['snapshot'],{'internal_torrclient':'false'})
 
+    def test_deleted_credentials_lose_access_and_reenrollment_starts_disabled(self):
+        old=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1')
+        cookie='workspace_device='+old['token']
+        devices.manage(self.root,{'action':'access','id':old['id'],'enabled':True})
+        self.assertTrue(devices.access_allowed(self.root,cookie))
+        devices.manage(self.root,{'action':'revoke','id':old['id']})
+        self.assertFalse(devices.access_allowed(self.root,cookie))
+        self.assertTrue(devices.access_allowed(self.root,cookie,allow_unknown=True))
+        with self.assertRaises(PermissionError):self.poll(old['token'])
+        new=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1')
+        self.assertNotEqual(old['id'],new['id'])
+        self.assertFalse(new['enabled'])
+        self.assertFalse(devices.access_allowed(self.root,'workspace_device='+new['token'],allow_unknown=True))
+
     def test_device_overrides_are_cumulative_and_can_return_to_inheritance(self):
         r=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1');identifier=r['id']
         def save(values,inherit=[]):devices.manage(self.root,{'action':'configure','id':identifier,'values':values,'inherit':inherit,'reload':False})
