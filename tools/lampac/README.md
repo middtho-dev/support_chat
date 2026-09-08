@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py, devices.py, client-profile.js device-client.js, bootstrap.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, client-profile.js device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -168,3 +168,22 @@ hides profile and Premium entry points and blocks the account settings section;
 it does not log out, erase CUB credentials, disable the CUB catalog or delete data.
 Per-device overrides retain priority. Header visibility updates immediately on
 profile application; native scale/theme changes may require restarting Lampa.
+
+## Announcements
+
+Devices → Announcements (separate Lampac tab) sends plain-text title/message and
+custom close-button text to one installation or all currently registered devices.
+Recipients are snapshotted at creation; offline/disabled devices receive queued
+notices after connecting/activation. Future registrations are not added implicitly.
+Each recipient has a durable occurrence counter and repeat interval (1–100 shows,
+1–10080 minutes). The client acknowledges display, not reading or button clicks.
+Acknowledgments are scoped to the device credential and are idempotent. Local
+receipts prevent replay after a reload or a lost acknowledgement; server counters
+preserve progress. Concurrent independent tabs of one installation are not a
+transactional display surface; avoid running multiple Lampa tabs for one device.
+
+An open notice is not replaced by the next; further occurrences wait until close
+and interval eligibility. Cancellation stops future shows; an already visible
+notice remains until closed. Arrow keys scroll long text, Enter/Back closes.
+This overlay covers the Lampa web UI, not a separate native external player.
+No arbitrary HTML, links or JavaScript are accepted as announcement content.
