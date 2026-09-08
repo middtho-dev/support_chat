@@ -23,7 +23,8 @@ function start(){
  function poll(){if(state.paused||state.revoked)return;if(!state.token){enroll();return;}if(busy)return;busy=true;var token=state.token;request('poll',{token:token,applied:state.applied||0,snapshot:snapshot()},function(status,data){busy=false;if(token!==state.token||state.paused)return;if(status===403){if(announcements)announcements.update(null,token,state.id,false);access(false);if(data.code==='device_revoked'){state={applied:0,overrides:{},enabled:false};save();enroll();}return;}if(status!==200)return;
   if(data.paired){state.paired=true;state.id=data.id||state.id;state.name=data.name||state.name;delete state.code;
    var changed=JSON.stringify(state.overrides||{})!==JSON.stringify(data.overrides||{});state.overrides=data.overrides||{};save();
-   if(changed&&window.workspaceApplyProfile)window.workspaceApplyProfile();
+   if(typeof data.kv9Theme==='boolean'&&window.workspaceApplyTheme)window.workspaceApplyTheme(data.kv9Theme);
+   else if(changed&&window.workspaceApplyProfile)window.workspaceApplyProfile();
   }
   var activated=state.enabled===false&&data.enabled===true;state.enabled=data.enabled;save();access(data.enabled);if(activated){window.location.reload();return;}
   if(announcements)announcements.update(data.announcement,token,state.id,data.enabled);

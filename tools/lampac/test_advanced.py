@@ -39,14 +39,18 @@ class AdvancedTests(unittest.TestCase):
         self.assertEqual(advanced.apply_client({}, {}, {'mode':'always','values':values},'https://example.org')['WorkspaceUI']['values'],values)
         with self.assertRaises(ValueError):advanced.apply_client({}, {}, {'mode':'always','values':{'interface_size':'huge'}},'https://example.org')
 
-    def test_home_presets_are_valid_and_preserve_unrelated_configuration(self):
-        for preset in advanced.client_settings({})['presets']:
-            values={'parser_use':'true', **preset['values']}
-            result=advanced.apply_client({'token':'keep'}, {}, {'mode':'always','values':values}, 'https://example.org')
+    def test_brand_theme_is_available_globally_without_retired_presets(self):
+        client=advanced.client_settings({})
+        fields={f['key']:f for f in client['fields']}
+        self.assertNotIn('presets',client)
+        self.assertTrue(fields['workspace_kv9_theme']['global'])
+        self.assertNotIn('workspace_home_accent',fields)
+        for enabled in ['true','false']:
+            values={'workspace_kv9_theme':enabled}
+            result=advanced.apply_client({}, {}, {'mode':'always','values':values}, 'https://example.org')
             self.assertEqual(result['WorkspaceUI']['values'],values)
-            self.assertEqual(result['token'],'keep')
         with self.assertRaises(ValueError):
-            advanced.apply_client({}, {}, {'mode':'always','values':{'workspace_home_accent':'red;display:none'}}, 'https://example.org')
+            advanced.apply_client({}, {}, {'mode':'always','values':{'workspace_kv9_theme':'yes'}}, 'https://example.org')
 
     def test_torrent_actions_are_targeted_and_removal_verified(self):
         torrent={'hash':'a'*40,'title':'test','data':'secret','poster':'secret'}

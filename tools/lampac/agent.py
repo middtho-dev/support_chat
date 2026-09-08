@@ -273,7 +273,11 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Нужен объект')
                 if self.path.endswith(('/enroll','/register')) and not devices.access_allowed(ROOT,self.headers.get('Cookie',''),allow_unknown=True):
                     return self.reply(403, {'error':'Доступ устройства отключён'})
-                return self.reply(200, devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP','')))
+                result = devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP',''))
+                if self.path.endswith('/poll'):
+                    policy = read_config('init.conf').get('WorkspaceUI', {})
+                    result['kv9Theme'] = policy.get('mode') != 'disabled' and policy.get('values', {}).get('workspace_kv9_theme') == 'true'
+                return self.reply(200, result)
             except PermissionError:
                 return self.reply(403, {'error':'Привязка истекла или отозвана','code':'device_revoked'})
             except ValueError:

@@ -188,17 +188,20 @@ notice remains until closed. Arrow keys scroll long text, Enter/Back closes.
 This overlay covers the Lampa web UI, not a separate native external player.
 No arbitrary HTML, links or JavaScript are accepted as announcement content.
 
-## Home presets and notice layout
+## KV9 theme switch
 
-The Main screen tab edits shared home and header preferences; device forms offer
-the same KV9, Cinema, Compact and TV presets. Presets fill a draft and require Save.
-They preserve unrelated settings; device overrides keep priority. KV9 uses a dark
-cyan palette with quiet navigation and hidden CUB profile entry points. Native
-scale/background/start-page preferences may require restarting Lampa. Workspace
-accent, navigation surfaces, corners and reduced motion update when policy arrives.
-Choose the native option or release management to remove Workspace styling.
+The shared settings and each device form expose a single KV9 theme switch.
+It uses kv9.ru colors (#2ED3B7, #050B10, #0E1A22, #E6F2F3, #8FA7AD) across
+navigation, catalog cards, detail pages, settings, dialogs and player controls.
+The previous home presets and separate styling options have been removed.
+Legacy styling keys remain accepted for old client snapshots but no longer add CSS.
+The theme only adds CSS; disabling it removes that CSS without modifying native
+preferences, accounts, playback or installed plugins. Reduced-motion preferences
+are respected. Third-party plugins that use isolated iframes retain their own UI.
 
-Announcements use a centered logo, title, scrollable text and button over a translucent
-backdrop. Desktop/TV cards use 78vw by 77vh (about 60% of screen area); narrow and
-short screens adapt to keep the close action reachable. The overlay covers the web
-interface; separate native players are outside the DOM.
+The poll response carries the effective shared theme flag. Device overrides have
+priority, including explicit false. Updates arrive on the next poll (normally ten
+seconds). Reload Lampa once after deploying the new plugin version. Global profile
+mode disabled turns off the shared theme; explicit per-device settings still apply.
+
+Announcements retain their centered layout and translucent 60%-area window.
