@@ -265,7 +265,7 @@ function bindStaticUi() {
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
 function logout() {
   SafeStorage.session.removeItem('admin_token');
-  S.token = null; socket.disconnect();
+  S.token = null; AdminShell.reset(); socket.disconnect();
   Object.assign(S, { tickets: [], current: null, messages: [], settings: null, operators: [], maintenance: null, systemHealth: null, settingsDirty: false, settingsSaving: false, file: null, pendingReply: null, permissions: { canManageSettings: false } });
   window.supportAdminSettings = null; window.adminResetTicketCard?.(); window.FrpPanel?.reset();
   clearInterval(miniRefreshTimer); miniRefreshTimer = null;
@@ -316,6 +316,7 @@ socket.on('admin_settings_updated', s => {
 });
 socket.on('admin_settings_forbidden', () => {
   S.permissions = { ...S.permissions, canManageSettings: false };
+  AdminShell.render(S);
   renderSettings();
 });
 socket.on('admin_operators_updated', () => {

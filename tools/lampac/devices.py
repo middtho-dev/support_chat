@@ -115,7 +115,7 @@ def public(root,action,body,ip):
 
 def listing(root):
     with closing(database(root)) as conn:
-        return {'presets':advanced.client_settings({})['presets'], 'announcements':[dict(r) for r in conn.execute('SELECT a.*,COUNT(d.device) AS recipients,COALESCE(SUM(d.shown),0) AS shown FROM announcements a LEFT JOIN announcement_deliveries d ON d.announcement=a.id GROUP BY a.id ORDER BY a.created DESC LIMIT 50')], 'devices':[{**{k:row[k] for k in ['id','name','ip','last','revision','applied','enabled']},
+        return {'announcements':[dict(r) for r in conn.execute('SELECT a.*,COUNT(d.device) AS recipients,COALESCE(SUM(d.shown),0) AS shown FROM announcements a LEFT JOIN announcement_deliveries d ON d.announcement=a.id GROUP BY a.id ORDER BY a.created DESC LIMIT 50')], 'devices':[{**{k:row[k] for k in ['id','name','ip','last','revision','applied','enabled']},
                             'snapshot':json.loads(row['snapshot']),'desired':json.loads(row['desired'])}
                            for row in conn.execute('SELECT * FROM devices WHERE paired=1 ORDER BY last DESC')],
                 'fields':advanced.client_settings({})['fields']}
