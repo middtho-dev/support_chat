@@ -6,7 +6,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let toastTimer;
   function toast(message) { if (integration) return integration.toast(message); $('toast').textContent = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 5000); }
-  let current = null, pending = false, loading = false;
+  let current = null, pending = false, loading = false, generation = 0;
   const panel = $('frp');
   panel.innerHTML = `<div class="frp-wrap">
     <h2>Устройства</h2>
@@ -14,7 +14,7 @@
     <p id="frp-status" role="status">Загрузка…</p>
     <p id="frp-error" role="alert"></p>
     <div class="frp-actions"><button data-frp-action="install">Установить FRP</button><button data-frp-action="start">Включить</button><button data-frp-action="stop" class="danger">Выключить</button><button id="frp-refresh" class="ghost">Обновить</button></div>
-    <details class="frp-settings-details"><summary>Настройки сервера</summary><form id="frp-settings" class="frp-actions"><label>Подключение устройств<select id="frp-compatibilityMode"><option value="false">Токен и обязательный TLS</option><option value="true">Существующие конфиги: без токена, TLS необязателен</option></select></label><p>Без токена любой клиент, знающий адрес, может зарегистрировать туннель. Ключ входа в панель не меняется.</p><label>Домен сервера<input id="frp-host" required maxlength="253"></label><label>Порт подключения<input id="frp-port" type="number" min="1000" max="65535" required></label><label>Адрес прослушивания<input id="frp-bindAddr" required></label><label>Порты туннелей: от<input id="frp-portStart" type="number" min="1000" max="65535" required></label><label>До<input id="frp-portEnd" type="number" min="1000" max="65535" required></label><label>Дополнительные исключения (через запятую)<input id="frp-reservedPorts"></label><label>Обновлять каждые, сек.<input id="frp-refreshSeconds" type="number" min="2" max="300" required></label><label>Лимит истории<input id="frp-historyLimit" type="number" min="100" max="100000" required></label><label>Новый токен устройств<input id="frp-newToken" type="password" autocomplete="new-password" placeholder="Пусто — оставить текущий" minlength="24" maxlength="256"></label><p>После изменения адреса, порта или токена обновите конфигурацию на устройствах.</p><button type="submit">Сохранить и применить</button></form>
+    <details class="frp-settings-details"><summary>Настройки сервера</summary><form id="frp-settings" class="frp-actions"><details class="frp-config-group"><summary>Подключение и защита</summary><div class="frp-config-grid"><label>Подключение устройств<select id="frp-compatibilityMode"><option value="false">Токен и обязательный TLS</option><option value="true">Существующие конфиги: без токена, TLS необязателен</option></select><small>Для новых клиентов используйте токен и TLS. В режиме совместимости любой клиент, знающий адрес, может зарегистрировать туннель.</small></label><label>Домен сервера<input id="frp-host" required maxlength="253"><small>Домен или IP, по которому устройства подключаются к серверу.</small></label><label>Порт подключения<input id="frp-port" type="number" min="1000" max="65535" required><small>Входной порт FRP. Должен быть доступен устройствам через firewall.</small></label><label>Адрес прослушивания<input id="frp-bindAddr" required><small>Локальный адрес интерфейса, на котором сервер принимает подключения.</small></label><label>Новый токен устройств<input id="frp-newToken" type="password" autocomplete="new-password" placeholder="Пусто — оставить текущий" minlength="24" maxlength="256"><small>Не менее 24 символов. Пусто — оставить текущий. Новый токен потребуется указать на устройствах.</small></label></div></details><details class="frp-config-group"><summary>Порты туннелей</summary><div class="frp-config-grid"><label>Порты туннелей: от<input id="frp-portStart" type="number" min="1000" max="65535" required><small>Нижняя граница диапазона портов, выделяемых туннелям.</small></label><label>До<input id="frp-portEnd" type="number" min="1000" max="65535" required><small>Верхняя граница диапазона. Служебные порты исключаются автоматически.</small></label><label>Дополнительные исключения (через запятую)<input id="frp-reservedPorts"><small>Занятые другими сервисами порты, которые нельзя отдавать устройствам.</small></label></div></details><details class="frp-config-group"><summary>Мониторинг и история</summary><div class="frp-config-grid"><label>Обновлять каждые, сек.<input id="frp-refreshSeconds" type="number" min="2" max="300" required><small>Частота автоматической проверки статусов на этой странице.</small></label><label>Лимит истории<input id="frp-historyLimit" type="number" min="100" max="100000" required><small>Максимальное число сохраняемых записей истории.</small></label></div></details><p>После изменения адреса, порта или токена обновите конфигурацию на устройствах.</p><button type="submit">Сохранить и применить</button></form>
     <p>Установите сервер, затем нажмите «Включить». Включённый сервер автоматически запускается вместе с приложением. Сохранение настроек работающего сервера кратко перезапускает FRP; устройства переподключаются.</p>
     <p id="frp-exclusions"></p></details><h3>Устройства <span id="frp-count"></span></h3>
     <input id="frp-search" type="search" placeholder="Поиск по имени, IP или порту" aria-label="Поиск устройств">
@@ -33,8 +33,9 @@
     const devices = window.FrpLinks.groupDevices(current?.devices, current?.clients);
     const search = $('frp-search').value.toLowerCase();
     $('frp-count').textContent = `(${devices.filter(d => d.online).length} онлайн / ${devices.length} всего)`;
-    $('frp-devices').innerHTML = devices.filter(d => `${d.name} ${d.ip} ${d.ports.map(p => `${p.name} ${p.port}`).join(' ')}`.toLowerCase().includes(search))
+    const rows = devices.filter(d => `${d.name} ${d.ip} ${d.ports.map(p => `${p.name} ${p.port}`).join(' ')}`.toLowerCase().includes(search))
       .map(d => `<tr><td>${link(d.primary, d.name)}${!d.primary ? '<br><small>Нет активного веб-туннеля</small>' : ''}</td><td data-label="IP-адрес">${esc(d.ip || '—')}</td><td data-label="Состояние">${d.stale ? 'Нет данных' : d.online ? '🟢 Онлайн' : 'Отключено'}</td><td data-label="Порты">${d.ports.map(p => `<span title="${esc(p.name)}">${esc(p.port ?? '—')}/${esc(p.type)}${/luci|web|http/i.test(p.name) ? ' · Веб' : /ssh/i.test(p.name) ? ' · SSH' : ''}${!p.online ? ' · отключён' : ''}</span>`).join('<br>') || 'Без туннелей'}</td><td data-label="Соединения">${d.online ? esc(d.connections) : '—'}</td><td data-label="Последняя активность">${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('ru-RU')) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Устройства не найдены</td></tr>';
+    const table=$('frp-devices');if(table.innerHTML!==rows&&!table.contains(document.activeElement))table.innerHTML=rows;
   }
   function render(updateFields = false) {
     if (!current) return;
@@ -55,6 +56,7 @@
   async function request(action, body) {
     const response = await fetch(`/api/admin/frp${action ? `/${action}` : ''}`, {
       method: action ? 'POST' : 'GET', headers: { 'x-admin-token': S.token, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(action ? 120000 : 10000), cache: 'no-store',
       ...(action ? { body: JSON.stringify(body || {}) } : {})
     });
     const data = await response.json();
@@ -66,20 +68,21 @@
     if (!S.permissions.canManageSettings) { panel.querySelector('.frp-wrap').hidden = true; return; }
     panel.querySelector('.frp-wrap').hidden = false;
     loading = true;
-    const token = S.token;
-    try { const data = await request(); if (token !== S.token) return; const first = !current; current = data; render(first); }
-    catch (e) { if (token !== S.token) return; $('frp-error').textContent = `Не удалось обновить состояние: ${e.message}`; if (current) { [...current.devices, ...(current.clients || [])].forEach(d => { d.stale = true; d.online = false; }); renderDevices(); } }
-    finally { loading = false; }
+    const token = S.token, g = generation;
+    try { const data = await request(); if (token !== S.token || g !== generation) return; const first = !current; current = data; render(first); }
+    catch (e) { if (token !== S.token || g !== generation) return; $('frp-error').textContent = `Не удалось обновить состояние: ${e.message}`; if (current) { [...current.devices, ...(current.clients || [])].forEach(d => { d.stale = true; d.online = false; }); renderDevices(); } }
+    finally { if(g === generation) loading = false; }
   }
   async function action(name, body) {
     if (pending) return;
+    generation++; loading = false;
     pending = true; render();
     $('frp-error').textContent = '';
     $('frp-status').textContent = name === 'install' ? 'Загружаем и проверяем FRP…' : 'Выполняется операция…';
-    const token = S.token;
-    try { const data = await request(name, body); if (token !== S.token) return; current = data; toast('Готово', 'ok'); }
-    catch (e) { if (token !== S.token) return; toast(e.message, 'err'); if (current) current.error = e.message; }
-    finally { pending = false; render(true); }
+    const token = S.token, g = generation; let applied = false;
+    try { const data = await request(name, body); if (token !== S.token || g !== generation) return; current = data; applied = true; toast('Готово', 'ok'); }
+    catch (e) { if (token !== S.token || g !== generation) return; toast(e.message, 'err'); if (current) current.error = e.message; }
+    finally { if(g === generation && token === S.token){pending = false; render(applied && name === 'configure');} }
   }
   panel.querySelectorAll('[data-frp-action]').forEach(button => button.addEventListener('click', () => action(button.dataset.frpAction)));
   $('frp-settings').addEventListener('submit', event => { event.preventDefault(); action('configure', Object.fromEntries(['compatibilityMode', 'host', 'port', 'bindAddr', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit', 'newToken'].map(key => [key, $('frp-' + key).value]))); });
@@ -104,7 +107,7 @@
   }
   window.FrpPanel = {
     open: load,
-    reset: () => { current = null; $('frp-config').textContent = ''; $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
+    reset: () => { generation++; loading = false; pending = false; current = null; $('frp-config').textContent = ''; $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
   };
   panel.addEventListener('click', event => {
     const anchor = event.target.closest('[data-device-link]');
@@ -112,5 +115,7 @@
     if (integration) { event.preventDefault(); integration.openLink(anchor.href); }
   });
   async function poll() { if (!document.hidden) await load(); setTimeout(poll, (current?.refreshSeconds || 5) * 1000); }
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
+  window.addEventListener('online',load);
   poll();
 })();
