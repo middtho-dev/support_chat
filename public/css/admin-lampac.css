@@ -34,3 +34,5 @@
   #lampac .lc-tabs button { font-size:13px; padding:10px 12px; }
   #lampac .lc-list { grid-template-columns:minmax(0,1fr); }
 }
+
+.lc-home-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:20px 0}.lc-home-preset{text-align:left;display:flex;flex-direction:column;gap:8px;padding:20px!important;white-space:normal!important}.lc-home-preset strong{font-size:20px}.lc-home-preset span{font-size:13px;line-height:1.5;opacity:.8}.lc-home-preset[aria-pressed="true"]{outline:2px solid #45b9e9;outline-offset:2px;background:rgba(69,185,233,.12)}

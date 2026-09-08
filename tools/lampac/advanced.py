@@ -65,6 +65,19 @@ CLIENT.update({'interface_size':('Масштаб интерфейса',{'small':
  'poster_size':('Качество постеров',{'w200':'Экономное','w300':'Обычное','w500':'Высокое'})})
 HOME = {'source','start_page','interface_size','poster_size','background','background_type',
  'black_style','glass_style','light_version','card_quality','card_episodes','menu_always'}
+HOME_STYLE = {
+ 'workspace_home_accent': ('Цвет акцента', {'native':'Как в Lampa','cyan':'KV9 · голубой','violet':'Фиолетовый','amber':'Янтарный','mint':'Мятный'}),
+ 'workspace_home_surface': ('Подложка верхней панели и меню', {'native':'Как в Lampa','glass':'Полупрозрачная','solid':'Тёмная'}),
+ 'workspace_home_corners': ('Скругление панелей', {'native':'Как в Lampa','soft':'Мягкое','square':'Прямое'}),
+ 'workspace_home_motion': ('Движение интерфейса', {'native':'Как в Lampa','reduced':'Минимум анимации'})}
+CLIENT.update(HOME_STYLE)
+HOME.update(HOME_STYLE)
+HOME.update({'animation','advanced_animation','helper','interface_sound_play'})
+PRESETS = [
+ {'id':'kv9','name':'KV9','description':'Тёмное стекло, голубой акцент, спокойный интерфейс без CUB-профиля.', 'values':{'start_page':'main','black_style':'true','glass_style':'true','background':'true','background_type':'simple','interface_size':'normal','poster_size':'w500','workspace_home_accent':'cyan','workspace_home_surface':'glass','workspace_home_corners':'soft','workspace_home_motion':'reduced','workspace_header_profile':'false','workspace_header_premium':'false','workspace_header_clock':'true','workspace_header_search':'true'}},
+ {'id':'cinema','name':'Кино','description':'Фон с постером, высокое качество обложек и минимум верхней панели.', 'values':{'start_page':'main','black_style':'true','glass_style':'false','background':'true','background_type':'poster','interface_size':'normal','poster_size':'w500','workspace_home_accent':'amber','workspace_home_surface':'solid','workspace_home_corners':'soft','workspace_home_motion':'native','workspace_header_profile':'false','workspace_header_premium':'false','workspace_header_clock':'false','workspace_header_search':'true'}},
+ {'id':'compact','name':'Компактный','description':'Небольшие элементы и лёгкое оформление для монитора или слабого устройства.', 'values':{'start_page':'main','black_style':'true','glass_style':'false','background':'false','interface_size':'small','poster_size':'w300','workspace_home_accent':'mint','workspace_home_surface':'solid','workspace_home_corners':'square','workspace_home_motion':'reduced','workspace_header_profile':'false','workspace_header_premium':'false','workspace_header_clock':'true','workspace_header_search':'true'}},
+ {'id':'tv','name':'Для ТВ','description':'Крупный интерфейс и заметный фокус для управления пультом.', 'values':{'start_page':'main','black_style':'true','glass_style':'false','background':'true','background_type':'simple','interface_size':'bigger','poster_size':'w500','workspace_home_accent':'cyan','workspace_home_surface':'solid','workspace_home_corners':'soft','workspace_home_motion':'reduced','workspace_header_profile':'false','workspace_header_premium':'false','workspace_header_clock':'true','workspace_header_search':'true'}}]
 # Native component names come from Lampa Settings; unknown plugin sections use "other".
 SETTINGS_SECTIONS = {'all':'Все настройки', 'account':'Аккаунт CUB', 'interface':'Интерфейс',
  'player':'Плеер', 'parser':'Поиск торрентов', 'server':'TorrServer', 'tmdb':'TMDB',
@@ -73,8 +86,10 @@ SETTINGS_SECTIONS = {'all':'Все настройки', 'account':'Аккаун�
 CLIENT.update({'workspace_settings_'+k:(v,None) for k,v in SETTINGS_SECTIONS.items()})
 BASICS = {'source','start_page','internal_torrclient','black_style','card_quality'}
 def preference_meta(key):
+    if key in HOME_STYLE:
+        return {'group':'Главный экран','description':'Оформление Workspace применяется сразу после получения профиля. «Как в Lampa» убирает это переопределение.','global':True}
     if key.startswith('workspace_header_'):
-        return {'group':'Верхняя панель', 'description':('Скрывает профиль, предложение Premium и раздел аккаунта CUB. Авторизация и данные аккаунта сохраняются; каталог CUB продолжает работать.' if key=='workspace_header_profile' else 'Показывать этот элемент вверху Lampa. Отсутствующий в вашей версии элемент не добавляется.'), 'global':key=='workspace_header_profile'}
+        return {'group':'Верхняя панель', 'description':('Скрывает профиль, предложение Premium и раздел аккаунта CUB. Авторизация и данные аккаунта сохраняются; каталог CUB продолжает работать.' if key=='workspace_header_profile' else 'Показывать этот элемент вверху Lampa. Отсутствующий в вашей версии элемент не добавляется.'), 'global':True}
     if key.startswith('workspace_settings_'):
         return {'group':'Доступ к настройкам', 'description':'Включено — раздел доступен на устройстве. Выключено — скрыт и закрыт для перехода. Общий выключатель закрывает все разделы.', 'global':True}
     if key.startswith('workspace_menu_'):
@@ -110,7 +125,7 @@ def preference_meta(key):
       'black_style':'Использовать чёрную цветовую схему интерфейса.',
       'interface_size':'Размер элементов интерфейса: компактный для ПК или крупный для просмотра с расстояния. Требует перезапуска Lampa.',
       'poster_size':'Разрешение загружаемых постеров. Высокое качество требует больше трафика и памяти.'}
-    return {'group':'Главный экран' if key in HOME else group, 'description':descriptions.get(key,help), 'global':key in BASICS}
+    return {'group':'Главный экран' if key in HOME else group, 'description':descriptions.get(key,help), 'global':key in BASICS or key in HOME}
 PROVIDER = {
     'enable': ('Включён', 'bool'), 'displayname': ('Название в списке', 'text'),
     'displayindex': ('Порядок в списке', 'int', -1000, 10000),
@@ -189,7 +204,7 @@ def apply_fields(config, effective, values):
 
 def client_settings(config):
     current=config.get('WorkspaceUI',{})
-    return {'mode':current.get('mode','disabled'), 'values':current.get('values',{}),
+    return {'presets':copy.deepcopy(PRESETS), 'mode':current.get('mode','disabled'), 'values':current.get('values',{}),
             'fields':[{'key':k,'label':v[0],'options':v[1] or {'true':'Включено','false':'Выключено'}, **preference_meta(k)} for k,v in CLIENT.items()]}
 
 def apply_client(config, effective, body, public_url):

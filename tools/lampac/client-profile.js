@@ -28,6 +28,13 @@ if(typeof document!=='undefined'){
  style.textContent=['movie','tv','cartoon','anime','catalog','history','favorite'].filter(function(key){return String(s.get('workspace_menu_'+key))==='false';}).map(function(key){return '.menu__item[data-action="'+key+'"]{display:none!important}';}).join('\n');
  var header={profile:'.open--profile',search:'.open--search',notice:'.open--notice',feed:'.open--feed',premium:'.open--premium',broadcast:'.open--broadcast',fullscreen:'.full--screen',clock:'.head__time-now',date:'.head__time-date,.head__time-week',logo:'.head__logo-icon'};
  Object.keys(header).forEach(function(key){if(String(s.get('workspace_header_'+key))==='false'||key==='premium'&&String(s.get('workspace_header_profile'))==='false')style.textContent+='\n'+header[key].split(',').map(function(selector){return '.head '+selector;}).join(',')+'{display:none!important}';});
+ var accent={cyan:'#45b9e9',violet:'#b398ff',amber:'#edbc64',mint:'#6cd5b5'}[s.get('workspace_home_accent')];
+ if(accent)style.textContent+='\n.head .selector.focus,.menu .selector.focus{background:'+accent+'!important;color:#07111d!important}.head .selector.focus,.menu .selector.focus{outline:2px solid '+accent+';outline-offset:3px}';
+ var surface={glass:'rgba(12,23,38,.84)',solid:'#101b2b'}[s.get('workspace_home_surface')];
+ if(surface)style.textContent+='\n.head,.menu{background:'+surface+'!important}';
+ var corners={soft:'18px',square:'0px'}[s.get('workspace_home_corners')];
+ if(corners)style.textContent+='\n.head .selector,.menu .menu__item{border-radius:'+corners+'!important}';
+ if(s.get('workspace_home_motion')==='reduced')style.textContent+='\n.head *,.menu *{transition:none!important;animation:none!important}';
  if(String(s.get('workspace_settings_all'))==='false')style.textContent+='\n.open--settings,.settings-folder{display:none!important}';
 }}
 window.workspaceApplyProfile=apply;apply();})();

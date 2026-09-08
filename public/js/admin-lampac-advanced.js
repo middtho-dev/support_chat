@@ -11,7 +11,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   const content = document.createElement('div');
   content.className = 'lc-content';
   section.append(navigation, overview, content);
-  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства'], ['announcements','Объявления'], ['settings', 'Источники и плагины'], ['client', 'Общие настройки']];
+  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства'], ['announcements','Объявления'], ['settings', 'Источники и плагины'], ['home', 'Главный экран'], ['client', 'Общие настройки']];
   const panes = {};
   for (const [key, label] of tabs) {
     const button = document.createElement('button');
@@ -63,12 +63,29 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   }
   function preferences(fields, values, snapshot, global = false) {
     const groups = new Map();
-    fields.forEach(f => {const group = global && !f.key.startsWith('workspace_') ? 'Основное' : f.group || 'Настройки'; if (!groups.has(group)) groups.set(group, []); groups.get(group).push(f);});
+    fields.forEach(f => {const group = f.group || 'Настройки'; if (!groups.has(group)) groups.set(group, []); groups.get(group).push(f);});
     return [...groups].map(([group, items]) => `<details class="lc-pref-group"><summary>${esc(group)} <small>${items.length}</small></summary>${items.map(f => {
       const managed = Object.hasOwn(values, f.key), value = values[f.key] ?? snapshot[f.key] ?? Object.keys(f.options)[0];
       const bool = Object.keys(f.options).length === 2 && 'true' in f.options && 'false' in f.options;
       return `<div class="lc-pref-row" data-pref-label="${esc((f.label+' '+group+' '+(f.description||'')).toLowerCase())}" data-key="${esc(f.key)}"><div><strong>${esc(f.label)}</strong><p class="lc-help">${esc(f.description||'Параметр приложения Lampa.')}</p><small>На устройстве: ${esc(f.options[snapshot[f.key]] || 'нет данных')}</small></div><div class="lc-pref-controls"><label class="lc-mini-switch"><span>${global?'Управлять':'Индивидуально'}</span><span class="voice-switch"><input type="checkbox" role="switch" data-managed ${managed?'checked':''}><span class="voice-switch-track" aria-hidden="true"></span></span></label>${bool?`<label class="lc-mini-switch"><span>Включено</span><span class="voice-switch"><input type="checkbox" role="switch" data-value ${value==='true'?'checked':''} ${managed?'':'disabled'}><span class="voice-switch-track" aria-hidden="true"></span></span></label>`:`<label class="voice-field"><span class="sr-only">${esc(f.label)}</span><select data-value ${managed?'':'disabled'}>${Object.entries(f.options).map(([v,l])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`}</div></div>`;
     }).join('')}</details>`).join('');
+  }
+  function presetPicker(presets) {
+    return `<div class="lc-home-presets">${presets.map(p=>`<button type="button" class="ghost lc-home-preset" data-preset="${esc(p.id)}"><strong>${esc(p.name)}</strong><span>${esc(p.description)}</span></button>`).join('')}</div><p data-preset-status role="status" class="lc-help">Пресет заполняет настройки ниже. Проверьте их и нажмите «Сохранить». Остальные параметры сохраняются.</p>`;
+  }
+  function bindPresets(form, presets) {
+    form.querySelectorAll('[data-preset]').forEach(button=>button.onclick=()=>{
+      const preset=presets.find(p=>p.id===button.dataset.preset);if(!preset)return;
+      for(const [key,value] of Object.entries(preset.values)) {
+        const row=[...form.querySelectorAll('[data-key]')].find(r=>r.dataset.key===key);if(!row)continue;
+        row.querySelector('[data-managed]').checked=true;
+        const input=row.querySelector('[data-value]');input.disabled=false;
+        if(input.type==='checkbox')input.checked=value==='true';else input.value=value;
+      }
+      form.querySelectorAll('[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+      const mode=form.querySelector('[data-home-mode]');if(mode&&mode.value==='disabled')mode.value='always';
+      form.querySelector('[data-preset-status]').textContent='Выбран «'+preset.name+'». Можно изменить отдельные параметры перед сохранением.';
+    });
   }
   function bindPreferences(form) {
     form.querySelectorAll('[data-managed]').forEach(el=>el.onchange=()=>{el.closest('[data-key]').querySelector('[data-value]').disabled=!el.checked;});
@@ -83,10 +100,10 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     });return {values,inherit};
   }
   function renderDevices(data) {
-    panes.devices.innerHTML = `<div class="card"><h3>Устройства Lampa · ${data.devices.length}</h3><p>При запуске Lampa с плагином Workspace устройство появляется здесь автоматически. Новые устройства ожидают активации: нажмите «Включить доступ» в карточке. На стороннем клиенте один раз добавьте <code>${esc(publicUrl + '/workspace-client.js')}</code>.</p><details><summary>Как работают ID, профили и доступ</summary><p>ID сохраняется в этой установке Lampa. После очистки данных приложения появится новый ID. Индивидуальные настройки приоритетнее общего профиля, в том числе после перезапуска. «Общий профиль» снимает индивидуальное значение.</p><p>Отключение блокирует интерфейс подключённого клиента и новые запросы с его cookie. Это управление известной установкой, а не аппаратная блокировка: очистка данных или другой клиент создаёт новое устройство. Для блокировки всего внешнего адреса используйте вкладку «Подключения».</p></details></div><div class="lc-list">${data.devices.map((d, i) => `<article class="card"><h3>${esc(d.name)}</h3><p>ID: <code>${esc(d.id)}</code></p><p>${d.enabled===0?'Ожидает включения доступа':Date.now()/1000-d.last<35?'На связи':'Нет связи'} · ${esc(d.ip)}<br>Последний ответ: ${esc(date(d.last))}</p><p>${d.applied < d.revision ? 'Ожидает применения на устройстве' : 'Последняя команда подтверждена'}</p><form data-rename-form="${i}" class="voice-actions"><label class="voice-field">Название<input name="deviceName" required maxlength="80" value="${esc(d.name)}"></label><button class="ghost">Переименовать</button></form><button class="${d.enabled===0?'save':'danger'}" data-access="${i}">${d.enabled===0?'Включить доступ':'Отключить доступ'}</button><details><summary>Настройки устройства</summary><form data-device-form="${i}"><label class="voice-field">Найти настройку<input type="search" data-pref-search placeholder="Например, меню или плеер"></label>${preferences(data.fields,d.desired||{},d.snapshot||{})}${toggle('device-reload-'+i,'Перезапустить Lampa после применения · прервёт просмотр',false)}<p>Заданные здесь значения сохраняются и перекрывают общий профиль при каждом запуске.</p><button class="save" ${d.applied < d.revision ? 'disabled' : ''}>Сохранить профиль устройства</button></form></details><button class="ghost" data-revoke="${i}">Удалить устройство</button></article>`).join('') || empty('Запустите Lampa с плагином Workspace: устройство появится автоматически.')}</div>`;
+    panes.devices.innerHTML = `<div class="card"><h3>Устройства Lampa · ${data.devices.length}</h3><p>При запуске Lampa с плагином Workspace устройство появляется здесь автоматически. Новые устройства ожидают активации: нажмите «Включить доступ» в карточке. На стороннем клиенте один раз добавьте <code>${esc(publicUrl + '/workspace-client.js')}</code>.</p><details><summary>Как работают ID, профили и доступ</summary><p>ID сохраняется в этой установке Lampa. После очистки данных приложения появится новый ID. Индивидуальные настройки приоритетнее общего профиля, в том числе после перезапуска. «Общий профиль» снимает индивидуальное значение.</p><p>Отключение блокирует интерфейс подключённого клиента и новые запросы с его cookie. Это управление известной установкой, а не аппаратная блокировка: очистка данных или другой клиент создаёт новое устройство. Для блокировки всего внешнего адреса используйте вкладку «Подключения».</p></details></div><div class="lc-list">${data.devices.map((d, i) => `<article class="card"><h3>${esc(d.name)}</h3><p>ID: <code>${esc(d.id)}</code></p><p>${d.enabled===0?'Ожидает включения доступа':Date.now()/1000-d.last<35?'На связи':'Нет связи'} · ${esc(d.ip)}<br>Последний ответ: ${esc(date(d.last))}</p><p>${d.applied < d.revision ? 'Ожидает применения на устройстве' : 'Последняя команда подтверждена'}</p><form data-rename-form="${i}" class="voice-actions"><label class="voice-field">Название<input name="deviceName" required maxlength="80" value="${esc(d.name)}"></label><button class="ghost">Переименовать</button></form><button class="${d.enabled===0?'save':'danger'}" data-access="${i}">${d.enabled===0?'Включить доступ':'Отключить доступ'}</button><details><summary>Настройки устройства</summary><form data-device-form="${i}"><label class="voice-field">Найти настройку<input type="search" data-pref-search placeholder="Например, меню или плеер"></label>${presetPicker(data.presets||[])}${preferences(data.fields,d.desired||{},d.snapshot||{})}${toggle('device-reload-'+i,'Перезапустить Lampa после применения · прервёт просмотр',false)}<p>Заданные здесь значения сохраняются и перекрывают общий профиль при каждом запуске.</p><button class="save" ${d.applied < d.revision ? 'disabled' : ''}>Сохранить профиль устройства</button></form></details><button class="ghost" data-revoke="${i}">Удалить устройство</button></article>`).join('') || empty('Запустите Lampa с плагином Workspace: устройство появится автоматически.')}</div>`;
     panes.devices.querySelectorAll('[data-rename-form]').forEach(form=>form.onsubmit=async e=>{e.preventDefault();if(await operation('/devices',{action:'rename',id:data.devices[Number(form.dataset.renameForm)].id,name:form.elements.deviceName.value.trim()},'Устройство переименовано'))refresh(true);});
     panes.devices.querySelectorAll('[data-access]').forEach(button=>button.onclick=async()=>{const d=data.devices[Number(button.dataset.access)];if(d.enabled!==0&&!confirm('Отключить доступ «'+d.name+'»? Его настройки сохранятся.'))return;if(await operation('/devices',{action:'access',id:d.id,enabled:d.enabled===0},d.enabled===0?'Доступ включён':'Доступ отключён'))refresh(true);});
-    panes.devices.querySelectorAll('[data-device-form]').forEach(bindPreferences);
+    panes.devices.querySelectorAll('[data-device-form]').forEach(form=>{bindPreferences(form);bindPresets(form,data.presets||[]);});
     panes.devices.querySelectorAll('[data-device-form]').forEach(form=>form.onsubmit=async e=>{
       e.preventDefault();const i=Number(form.dataset.deviceForm),d=data.devices[i];
       const {values,inherit}=preferenceChanges(form,d.desired||{});
@@ -139,11 +156,17 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
       panes.settings.querySelectorAll('[data-group]').forEach(group => { group.hidden = !group.dataset.group.includes(query); });
     };
     const client = data.client;
-    const commonFields=client.fields.filter(f=>f.global);
+    const homeField=f=>['Главный экран','Верхняя панель'].includes(f.group);
+    const commonFields=client.fields.filter(f=>f.global&&!homeField(f));
     panes.client.innerHTML = `<form class="card" id="lc-client-form"><h3>Общие настройки Lampa</h3><p>Основные параметры, левое меню и доступ к разделам настроек. Подробные параметры — в карточках устройств. Индивидуальные значения имеют приоритет.</p><label class="voice-field">Режим применения<select id="lc-client-mode">${[['disabled','Не применять общий профиль'],['revision','После изменения профиля'],['always','При каждом запуске']].map(([v,l])=>`<option value="${v}" ${v===client.mode?'selected':''}>${l}</option>`).join('')}</select></label><p class="lc-help">«Управлять» задаёт общее значение. При выключении параметр остаётся под управлением устройства. Чтобы закрыть раздел настроек, включите управление и выключите его доступность. Workspace на устройстве показывает только информацию.</p>${preferences(commonFields,client.values,{},true)}<button class="save">Сохранить общие настройки</button></form>`;
     const commonForm=panes.client.querySelector('form');bindPreferences(commonForm);
     commonForm.onsubmit=async e=>{e.preventDefault();const changes=preferenceChanges(commonForm,client.values),values={...client.values,...changes.values};changes.inherit.forEach(k=>delete values[k]);
-      if(await operation('/client',{mode:panes.client.querySelector('#lc-client-mode').value,values},'Общие настройки сохранены. Перезапустите Lampa.'))client.values=values;
+      if(await operation('/client',{mode:panes.client.querySelector('#lc-client-mode').value,values},'Общие настройки сохранены. Перезапустите Lampa.')){client.values=values;client.mode=panes.client.querySelector('#lc-client-mode').value;panes.home.querySelector('[data-home-mode]').value=client.mode;}
+    };
+    panes.home.innerHTML=`<form class="card"><h3>Главный экран Lampa</h3><p>Общий вид для подключённых устройств. Индивидуальные значения в карточках устройств имеют приоритет.</p>${presetPicker(client.presets||[])}<label class="voice-field">Применение общего профиля<select data-home-mode>${[['disabled','Не применять'],['revision','После изменения'],['always','При каждом запуске']].map(([v,l])=>`<option value="${v}" ${v===client.mode?'selected':''}>${l}</option>`).join('')}</select></label>${preferences(client.fields.filter(homeField),client.values,{},true)}<p class="lc-help">Оформление Workspace обновится после получения профиля. Масштаб, стартовая страница и часть настроек Lampa действуют после её перезапуска.</p><button class="save">Сохранить главный экран</button></form>`;
+    const homeForm=panes.home.querySelector('form');bindPreferences(homeForm);bindPresets(homeForm,client.presets||[]);
+    homeForm.onsubmit=async e=>{e.preventDefault();const changes=preferenceChanges(homeForm,client.values),values={...client.values,...changes.values};changes.inherit.forEach(k=>delete values[k]);const mode=homeForm.querySelector('[data-home-mode]').value;
+      if(await operation('/client',{mode,values},'Главный экран сохранён. Индивидуальные профили устройств сохранены.')){client.values=values;client.mode=mode;panes.client.querySelector('#lc-client-mode').value=mode;}
     };
     settingsLoaded = true;
   }

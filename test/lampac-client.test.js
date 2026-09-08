@@ -68,3 +68,16 @@ test('header profile controls hide CUB entry points and restore without deleting
  assert.doesNotMatch(style.textContent,/open--profile/);context.Lampa.Settings.create('account');assert.deepEqual(opened,['account']);
  run({});assert.equal(data.get('account').token,'preserve-me');
 });
+
+test('home styling follows device overrides and releases managed CSS',()=>{
+ const data=new Map();let style;
+ const storage={get:(k,f)=>data.has(k)?data.get(k):f,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k)};
+ const context={document:{getElementById:()=>style,createElement:()=>({}),head:{appendChild:n=>style=n}},Lampa:{Storage:storage},localStorage:{getItem:k=>data.get(k)??null}};context.window=context;
+ const run=values=>vm.runInNewContext(script.replace('POLICY',JSON.stringify({mode:'always',revision:'1',values})),context);
+ storage.set('workspace_device_access',{overrides:{workspace_home_accent:'violet'}});
+ run({workspace_home_accent:'cyan',workspace_home_surface:'glass'});
+ assert.match(style.textContent,/#b398ff/);assert.doesNotMatch(style.textContent,/#45b9e9/);
+ storage.set('workspace_device_access',{overrides:{}});run({workspace_home_accent:'cyan'});
+ assert.match(style.textContent,/#45b9e9/);assert.doesNotMatch(style.textContent,/rgba\(12,23,38/);
+ run({});assert.doesNotMatch(style.textContent,/#45b9e9|border-radius|transition:none/);
+});
