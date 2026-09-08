@@ -9,11 +9,11 @@
   let current = null, pending = false, loading = false, generation = 0;
   const panel = $('frp');
   panel.innerHTML = `<div class="frp-wrap">
-    <h2>Устройства</h2>
+    <h2>FRP</h2>
     <p id="frp-summary"></p>
     <p id="frp-status" role="status">Загрузка…</p>
     <p id="frp-error" role="alert"></p>
-    <div class="frp-actions"><button data-frp-action="install">Установить FRP</button><button data-frp-action="start">Включить</button><button data-frp-action="stop" class="danger">Выключить</button><button id="frp-refresh" class="ghost">Обновить</button></div>
+    <div class="frp-actions"><button data-frp-action="install">Установить FRP</button><button id="frp-toggle" data-frp-action="start">Включить</button><button id="frp-refresh" class="ghost">Обновить</button></div>
     <details class="frp-settings-details"><summary>Настройки сервера</summary><form id="frp-settings" class="frp-actions"><details class="frp-config-group"><summary>Подключение и защита</summary><div class="frp-config-grid"><label>Подключение устройств<select id="frp-compatibilityMode"><option value="false">Токен и обязательный TLS</option><option value="true">Существующие конфиги: без токена, TLS необязателен</option></select><small>Для новых клиентов используйте токен и TLS. В режиме совместимости любой клиент, знающий адрес, может зарегистрировать туннель.</small></label><label>Домен сервера<input id="frp-host" required maxlength="253"><small>Домен или IP, по которому устройства подключаются к серверу.</small></label><label>Порт подключения<input id="frp-port" type="number" min="1000" max="65535" required><small>Входной порт FRP. Должен быть доступен устройствам через firewall.</small></label><label>Адрес прослушивания<input id="frp-bindAddr" required><small>Локальный адрес интерфейса, на котором сервер принимает подключения.</small></label><label>Новый токен устройств<input id="frp-newToken" type="password" autocomplete="new-password" placeholder="Пусто — оставить текущий" minlength="24" maxlength="256"><small>Не менее 24 символов. Пусто — оставить текущий. Новый токен потребуется указать на устройствах.</small></label></div></details><details class="frp-config-group"><summary>Порты туннелей</summary><div class="frp-config-grid"><label>Порты туннелей: от<input id="frp-portStart" type="number" min="1000" max="65535" required><small>Нижняя граница диапазона портов, выделяемых туннелям.</small></label><label>До<input id="frp-portEnd" type="number" min="1000" max="65535" required><small>Верхняя граница диапазона. Служебные порты исключаются автоматически.</small></label><label>Дополнительные исключения (через запятую)<input id="frp-reservedPorts"><small>Занятые другими сервисами порты, которые нельзя отдавать устройствам.</small></label></div></details><details class="frp-config-group"><summary>Мониторинг и история</summary><div class="frp-config-grid"><label>Обновлять каждые, сек.<input id="frp-refreshSeconds" type="number" min="2" max="300" required><small>Частота автоматической проверки статусов на этой странице.</small></label><label>Лимит истории<input id="frp-historyLimit" type="number" min="100" max="100000" required><small>Максимальное число сохраняемых записей истории.</small></label></div></details><p>После изменения адреса, порта или токена обновите конфигурацию на устройствах.</p><button type="submit">Сохранить и применить</button></form>
     <p>Установите сервер, затем нажмите «Включить». Включённый сервер автоматически запускается вместе с приложением. Сохранение настроек работающего сервера кратко перезапускает FRP; устройства переподключаются.</p>
     <p id="frp-exclusions"></p></details><h3>Устройства <span id="frp-count"></span></h3>
@@ -46,8 +46,8 @@
     const locked = pending || current.busy;
     panel.querySelector('[data-frp-action="install"]').disabled = locked || current.running;
     panel.querySelector('[data-frp-action="install"]').textContent = current.installed ? 'Обновить FRP' : 'Установить FRP';
-    panel.querySelector('[data-frp-action="start"]').disabled = locked || current.running || !current.installed;
-    panel.querySelector('[data-frp-action="stop"]').disabled = locked || (!current.running && !current.enabled);
+    const running=current.running||current.enabled;
+    $('frp-toggle').dataset.frpAction=running?'stop':'start';$('frp-toggle').textContent=running?'Выключить':'Включить';$('frp-toggle').className=running?'danger':'';$('frp-toggle').disabled=locked||!current.installed;
     $('frp-settings').querySelectorAll('input,button,select').forEach(el => { el.disabled = locked; });
     if (updateFields) { for (const key of ['compatibilityMode', 'host', 'port', 'bindAddr', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit']) $('frp-' + key).value = Array.isArray(current[key]) ? current[key].join(',') : current[key]; $('frp-newToken').value = ''; }
     $('frp-config').textContent = $('frp-example').open ? example() : '';
