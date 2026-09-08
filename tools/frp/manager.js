@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const exec = promisify(execFile);
+const { availablePorts, suggestPort, validateRouter, buildInstaller } = require('./installer');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const { DEFAULTS, validateConfig, initialConfig } = require('./config');
 
@@ -33,6 +34,8 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
   let dashboardPort = 0;
   let refreshing = null;
   state.clients ||= [];
+  state.installerReservations ||= [];
+  state.usedPorts = [...new Set([...(state.usedPorts || []), ...state.devices.map(d => Number(d.port)).filter(p => p > 0)])];
   const panelPort = Number(process.env.FRP_PANEL_PORT || 7400);
   const servicePorts = [...new Set([2019, 3000, 3001, Number(process.env.FRP_CHAT_PORT || 3001), panelPort])];
   const exclusionsFor = (config = state) => [...new Set([config.port, dashboardPort, ...servicePorts, ...config.reservedPorts])].filter(p => p > 0).sort((a, b) => a - b);
@@ -69,6 +72,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
           known.set(key, { ...known.get(key), ...d, port: d.port ?? known.get(key)?.port ?? null, lastSeen: d.online ? new Date().toISOString() : known.get(key)?.lastSeen || null });
         }
         state.devices = [...known.values()].slice(-state.historyLimit);
+        state.usedPorts = [...new Set([...state.usedPorts, ...lists.flat().map(d => Number(d.port)).filter(p => p > 0)])];
         const knownClients = new Map(state.clients.map(c => [c.key, { ...c, online: false }]));
         for (const c of clients) knownClients.set(c.key, {
           key: c.key, clientID: c.clientID, user: c.user, hostname: c.hostname, ip: c.clientIP,
@@ -173,6 +177,8 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       return { installed: fs.existsSync(binary), version: state.version || null, running: !!child, busy,
         enabled: state.enabled, ...validateConfig(state), error, monitoringError,
         allowedRanges: rangesFor(), excludedPorts: exclusionsFor(),
+        installerPort: suggestPort(availablePorts(state, rangesFor(), state.usedPorts)),
+        installerReservations: state.installerReservations,
         devices: state.devices.map(d => ({ ...d, online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
         clients: state.clients.map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
         token: state.token };
@@ -181,7 +187,27 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       if (busy || closing) throw new Error('Дождитесь завершения текущей операции');
       busy = true; error = null;
       try {
-        if (action === 'install') await install();
+        if (action === 'generate-installer') {
+          validateRouter(config);
+          await refresh();
+          if (monitoringError) throw new Error('Не удалось проверить занятые порты: обновите соединение с FRP');
+          const port = Number(config.port);
+          if (!availablePorts(state, rangesFor(), state.usedPorts).includes(port)) throw new Error('Порт занят или запрещён. Выберите свободный порт 20000–23000.');
+          // Also reject ports held by other local services (the panel uses host networking).
+          const listener = require('net').createServer();
+          try { await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen({ port, host: state.bindAddr, exclusive: true }, resolve); }); }
+          catch { throw new Error('Этот порт занят другим сервисом на сервере'); }
+          await new Promise(resolve => listener.close(resolve));
+          const file = buildInstaller(state, port, config);
+          const reservation = { port, ip: config.ip.trim(), createdAt: new Date().toISOString() };
+          state.installerReservations.push(reservation); save();
+          return { file, filename: `kv9-openwrt-${port}.bat`, status: { ...await this.status(), busy: false } };
+        }
+        else if (action === 'release-installer') {
+          const port = Number(config.port);
+          state.installerReservations = state.installerReservations.filter(r => r.port !== port); save();
+        }
+        else if (action === 'install') await install();
         else if (action === 'start') { await start(); state.enabled = true; save(); }
         else if (action === 'stop') { state.enabled = false; save(); await stop(); }
         else if (action === 'configure') {

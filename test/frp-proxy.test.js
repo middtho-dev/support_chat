@@ -27,10 +27,16 @@ test('unified FRP API checks admin/Mini App permissions and hides service creden
       assert.deepEqual(await response.json(), { running: true });
     }
     assert.equal((await fetch(url + '/start', { method: 'POST', headers: { 'x-admin-token': 'mini-manager', 'Content-Type': 'application/json' }, body: '{}' })).status, 200);
+    for (const action of ['generate-installer', 'release-installer']) {
+      for (const token of ['admin', 'mini-manager', 'mini-operator', 'expired']) {
+        const response = await fetch(url + '/' + action, { method: 'POST', headers: { 'x-admin-token': token, 'Content-Type': 'application/json' }, body: '{}' });
+        assert.equal(response.status, token === 'expired' ? 401 : token === 'mini-operator' ? 403 : 200);
+      }
+    }
     revoked = true;
     assert.equal((await fetch(url, { headers: { 'x-admin-token': 'mini-manager' } })).status, 403);
     assert.equal((await fetch(url + '/shell', { method: 'POST', headers: { 'x-admin-token': 'admin' } })).status, 404);
-    assert.equal(seen.length, 3); assert.ok(seen.every(r => r.token === 'internal-service-secret'));
+    assert.equal(seen.length, 7); assert.ok(seen.every(r => r.token === 'internal-service-secret'));
     await new Promise(resolve => upstream.close(resolve));
     assert.equal((await fetch(url, { headers: { 'x-admin-token': 'admin' } })).status, 502);
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); upstream.closeAllConnections(); upstream.close(); }

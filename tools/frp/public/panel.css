@@ -21,3 +21,9 @@
 #frp-error{color:var(--red,#ff8799)!important;white-space:pre-wrap;overflow-wrap:anywhere}#frp-error:empty{display:none}
 #frp-status{display:inline-block;margin:8px 0;padding:8px 12px;border:1px solid var(--line,#2a3547);border-radius:8px;background:var(--panel,#141b27);color:var(--text,#eef2f9)!important}
 @media(max-width:600px){#frp h2{font-size:24px}#frp #frp-settings{grid-template-columns:1fr}#frp details{padding:16px}#frp input,#frp select{font-size:16px}#frp .frp-actions>button{flex:1 1 40%}#frp table,#frp tbody{display:block}#frp thead{display:none}#frp tr{display:grid;grid-template-columns:1fr 1fr;padding:16px;gap:12px;border-bottom:1px solid var(--line,#2a3547)}#frp tr:last-child{border-bottom:0}#frp td{display:block;padding:0;border:0;white-space:normal;overflow-wrap:anywhere}#frp td:first-child{grid-column:1/-1;font-size:16px}#frp td[data-label]::before{content:attr(data-label);display:block;font-size:11px;font-weight:400;color:var(--muted,#a1aec2);margin-bottom:3px}#frp td:last-child{grid-column:1/-1}#frp .frp-table{overflow:visible}}
+
+#frp .frp-installer{padding:20px;border:1px solid var(--line,#2a3547);border-radius:12px;background:var(--panel,#141b27)}
+#frp .frp-installer>h3{margin-top:0}#frp .frp-installer-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+#frp .frp-installer small{color:var(--muted,#a1aec2);line-height:1.5}#frp .frp-port-picker{display:flex;gap:8px}#frp .frp-port-picker input{flex:1;min-width:0}
+#frp .frp-reservation{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line,#2a3547)}#frp .frp-reservation small{display:block}#frp-installer-result{overflow-wrap:anywhere}
+@media(max-width:800px){#frp .frp-installer-grid{grid-template-columns:1fr}#frp .frp-installer{padding:16px}}
