@@ -2,7 +2,9 @@
 // Keep module controls in their owning panel; the rail delegates to those controls.
 (() => {
   const main = document.getElementById('main');
-  const selectors = { lampac: '.lc-tabs', voice: '.voice-tabs', settings: '.management-tabs' };
+  const mobile = matchMedia('(max-width:560px)');
+  mobile.addEventListener('change', () => schedule());
+  const selectors = { lampac: '.lc-tabs', voice: '.voice-tabs', settings: '.management-tabs', frp: '.frp-tabs' };
   let scheduled = false;
   function sync() {
     scheduled = false;
@@ -15,15 +17,13 @@
         nav.setAttribute('aria-label', 'Разделы: ' + document.querySelector(`.navbtn[data-view="${id}"]`).textContent.trim());
         document.querySelector(`.navbtn[data-view="${id}"]`).after(nav);
       }
-      const active = panel.classList.contains('on') && !(id === 'settings' && document.body.classList.contains('support-active'));
+      const active = !!S.token && panel.classList.contains('on') && !(id === 'settings' && document.body.classList.contains('support-active'));
       nav.hidden = !active;
       if (!active) continue;
       const source = panel.querySelector(selectors[id] || '.frp-wrap');
-      if (!source) continue;
-      if (id !== 'frp' && !source.classList.contains('module-nav-source')) source.classList.add('module-nav-source');
-      const entries = id === 'frp'
-        ? [['Устройства', panel.querySelector('#frp-search')], ['Подключить роутер', panel.querySelector('.frp-installer')], ['Настройки сервера', panel.querySelector('.frp-settings-details')]].filter(([, node]) => node)
-        : [...source.querySelectorAll('button')].map(button => [button.textContent, button]);
+      if (!source) { nav.hidden = true; nav.replaceChildren(); delete nav.dataset.signature; continue; }
+      if (!source.classList.contains('module-nav-source')) source.classList.add('module-nav-source');
+      const entries = [...source.querySelectorAll('button')].map(button => [button.textContent, button]);
       const signature = entries.map(([label, node]) => label + ':' + node.classList.contains('on') + ':' + node.getAttribute('aria-pressed') + ':' + node.disabled).join('|');
       if (nav.dataset.signature === signature && nav._source === source) continue;
       nav.dataset.signature = signature; nav._source = source;
@@ -33,15 +33,20 @@
         const selected = node.classList.contains('on') || node.getAttribute('aria-pressed') === 'true';
         button.classList.toggle('on', selected); button.setAttribute('aria-current', selected ? 'page' : 'false');
         button.onclick = () => {
-          if (id === 'frp') {
-            if (node.tagName === 'DETAILS') node.open = true;
-            node.scrollIntoView({ block: 'start', behavior: 'auto' });
-          } else node.click();
+          node.click();
           schedule();
         };
         return button;
       }));
       nav.querySelector('.on')?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    }
+    for (const nav of document.querySelectorAll('.support-nav')) {
+      const id = nav.id === 'support-nav' ? 'chat' : nav.id.replace('-subnav', '');
+      const parent = mobile.matches ? document.body : document.querySelector('.rail');
+      if (nav.parentElement !== parent) {
+        if (mobile.matches) parent.append(nav);
+        else document.querySelector(`.navbtn[data-view="${id}"]`).after(nav);
+      }
     }
     document.body.classList.toggle('module-subnav-active', !!document.querySelector('.module-subnav:not([hidden]) button'));
     main.querySelectorAll('.panel details').forEach(details => {

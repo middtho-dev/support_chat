@@ -128,7 +128,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     const form = panes.settings.querySelector('form');
     form.oninput = () => panes.settings.querySelector('#lc-dirty').textContent = `Изменено параметров: ${Object.keys(changes()).length}`;
     form.onsubmit = async e => {
-      e.preventDefault(); const body = changes(); if (!Object.keys(body).length) return;
+      e.preventDefault(); const body = changes(); if (!Object.keys(body).length) { panes.settings.querySelector('#lc-dirty').textContent = 'Нет изменений для сохранения'; return; }
       if (await operation('/advanced', body, 'Настройки сохранены. Для модулей может понадобиться перезапуск Lampac.')) {
         for (const f of data.fields) if (Object.hasOwn(body, f.path)) {
           f.value = f.kind === 'secret' ? '' : body[f.path];
