@@ -24,6 +24,7 @@ function start(){
   if(data.paired){state.paired=true;state.id=data.id||state.id;state.name=data.name||state.name;delete state.code;
    var changed=JSON.stringify(state.overrides||{})!==JSON.stringify(data.overrides||{});state.overrides=data.overrides||{};save();
    if(window.workspaceUIControls)window.workspaceUIControls.update(data.uiValues||{});
+   if(typeof data.kv9Ambient==='boolean')window.workspaceLiveAmbient=data.kv9Ambient;
    if(typeof data.kv9Theme==='boolean'&&window.workspaceApplyTheme)window.workspaceApplyTheme(data.kv9Theme);
    else if(changed&&window.workspaceApplyProfile)window.workspaceApplyProfile();
   }

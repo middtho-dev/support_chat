@@ -45,6 +45,21 @@ class AgentTests(unittest.TestCase):
                         self.assertIn('https://helpo.su/logo.png',payload)
         finally:server.shutdown();server.server_close()
 
+    def test_poll_releases_disabled_global_ambient_and_normalizes_visibility(self):
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        alias=agent.advanced.discovered_key('m','movie')
+        try:
+            for mode,ambient in [('always',False),('disabled',True)]:
+                config={'WorkspaceUI':{'mode':mode,'values':{'workspace_kv9_theme':'true','workspace_kv9_ambient':'false',alias:'false'}}}
+                with patch.object(agent,'TOKEN','test-token'),patch.object(agent,'read_config',return_value=config),patch.object(agent.devices,'public',return_value={'paired':True}):
+                    request=urllib.request.Request('http://127.0.0.1:'+str(server.server_port)+'/workspace-device/poll',data=b'{}',headers={'Content-Type':'application/json','x-admin-token':'test-token'})
+                    with urllib.request.urlopen(request) as response:result=json.load(response)
+                    self.assertEqual(result['kv9Ambient'],ambient)
+                    self.assertEqual(result['kv9Theme'],mode=='always')
+                    self.assertEqual(result['uiValues'],{'workspace_menu_movie':'false'} if mode=='always' else {})
+        finally:server.shutdown();server.server_close()
+
     def test_bootstrap_preserves_page_and_is_idempotent(self):
         original='<html><HEAD><script src="/lampainit.js"></script></HEAD><body>Existing Lampa</body></html>'
         result=agent.bootstrap_page(original)

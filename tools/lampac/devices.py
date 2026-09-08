@@ -18,6 +18,7 @@ def database(root):
     conn.row_factory=sqlite3.Row
     conn.execute('CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, credential TEXT UNIQUE, code TEXT UNIQUE, expires REAL, paired INTEGER DEFAULT 0, name TEXT, ip TEXT, last REAL, desired TEXT DEFAULT \'{}\', revision INTEGER DEFAULT 0, applied INTEGER DEFAULT 0, snapshot TEXT DEFAULT \'{}\', reload INTEGER DEFAULT 0)')
     conn.execute('CREATE TABLE IF NOT EXISTS ui_controls (device TEXT,key TEXT,label TEXT,group_name TEXT,PRIMARY KEY(device,key))')
+    conn.execute('CREATE TABLE IF NOT EXISTS ui_control_descriptions (device TEXT,key TEXT,description TEXT,PRIMARY KEY(device,key))')
     conn.execute('CREATE TABLE IF NOT EXISTS limits (key TEXT PRIMARY KEY, start REAL, attempts INTEGER)')
     conn.execute('CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY,title TEXT,message TEXT,button TEXT,repeats INTEGER,interval_seconds INTEGER,created REAL,cancelled INTEGER DEFAULT 0)')
     conn.execute('CREATE TABLE IF NOT EXISTS announcement_deliveries (announcement TEXT,device TEXT,shown INTEGER DEFAULT 0,last REAL DEFAULT 0,PRIMARY KEY(announcement,device))')
@@ -106,9 +107,13 @@ def public(root,action,body,ip):
             controls=body['controls']
             if not isinstance(controls,list) or len(controls)>500:raise ValueError('Некорректный список пунктов')
             for item in controls:
-                if not isinstance(item,dict) or set(item)!={'key','label','group'} or not advanced.dynamic_key(item['key']) or any(not isinstance(item[k],str) or not 1<=len(item[k])<=120 or any(ord(c)<32 for c in item[k]) for k in ['label','group']):raise ValueError('Некорректный пункт интерфейса')
+                if not isinstance(item,dict) or set(item) not in ({'key','label','group'},{'key','label','group','description'}) or not advanced.dynamic_key(item['key']) or any(not isinstance(item[k],str) or not 1<=len(item[k])<=120 or any(ord(c)<32 for c in item[k]) for k in ['label','group']):raise ValueError('Некорректный пункт интерфейса')
+                description=item.get('description','')
+                if not isinstance(description,str) or len(description)>120 or any(ord(c)<32 for c in description):raise ValueError('Некорректное описание пункта')
             conn.execute('DELETE FROM ui_controls WHERE device=?',(row['id'],))
             conn.executemany('INSERT OR REPLACE INTO ui_controls VALUES (?,?,?,?)',[(row['id'],c['key'],c['label'],c['group']) for c in controls])
+            conn.execute('DELETE FROM ui_control_descriptions WHERE device=?',(row['id'],))
+            conn.executemany('INSERT OR REPLACE INTO ui_control_descriptions VALUES (?,?,?)',[(row['id'],c['key'],c.get('description','')) for c in controls])
         applied=row['applied']
         if body['applied']==row['revision']:
             applied=body['applied']
@@ -116,19 +121,20 @@ def public(root,action,body,ip):
             (time.time(),ip,json.dumps(snapshot) if snapshot else row['snapshot'],applied,row['id']))
         return {'id':row['id'],'name':row['name'],'enabled':bool(row['enabled']),
                 'announcement':next_announcement(conn,row['id']) if row['paired'] and row['enabled'] else None,
-                'overrides':json.loads(row['desired']) if row['paired'] else {},
+                'overrides':advanced.normalize_preferences(json.loads(row['desired'])) if row['paired'] else {},
                 'paired':bool(row['paired']),'revision':row['revision'],
-                'values':json.loads(row['desired']) if row['paired'] and applied<row['revision'] else {},
+                'values':advanced.normalize_preferences(json.loads(row['desired'])) if row['paired'] and applied<row['revision'] else {},
                 'reload':bool(row['reload']) if row['paired'] and applied<row['revision'] else False}
 
 def control_listing(root):
     with closing(database(root)) as conn:
-        return [dict(key=r['key'],label=r['label'],group=r['group_name']) for r in conn.execute('SELECT key,MIN(label) AS label,MIN(group_name) AS group_name FROM ui_controls GROUP BY key ORDER BY group_name,label LIMIT 1000')]
+        return [dict(key=r['key'],label=r['label'],group=r['group_name'],**({'description':r['description']} if r['description'] else {})) for r in conn.execute('SELECT c.key,MIN(c.label) AS label,MIN(c.group_name) AS group_name,MAX(d.description) AS description FROM ui_controls c LEFT JOIN ui_control_descriptions d ON c.device=d.device AND c.key=d.key GROUP BY c.key ORDER BY group_name,label LIMIT 1000')]
 
 def listing(root):
     with closing(database(root)) as conn:
         return {'announcements':[dict(r) for r in conn.execute('SELECT a.*,COUNT(d.device) AS recipients,COALESCE(SUM(d.shown),0) AS shown FROM announcements a LEFT JOIN announcement_deliveries d ON d.announcement=a.id GROUP BY a.id ORDER BY a.created DESC LIMIT 50')], 'devices':[{**{k:row[k] for k in ['id','name','ip','last','revision','applied','enabled']},
-                            'snapshot':json.loads(row['snapshot']),'desired':json.loads(row['desired'])}
+                            'controls':[c['key'] for c in conn.execute('SELECT key FROM ui_controls WHERE device=?',(row['id'],))],
+                            'snapshot':json.loads(row['snapshot']),'desired':advanced.normalize_preferences(json.loads(row['desired']))}
                            for row in conn.execute('SELECT * FROM devices WHERE paired=1 ORDER BY last DESC')],
                 'fields':advanced.client_settings({},control_listing(root))['fields']}
 
@@ -159,20 +165,23 @@ def manage(root,body):
         if action=='revoke' and set(body)=={'action','id'}:
             conn.execute('DELETE FROM devices WHERE id=?',(row['id'],))
             conn.execute('DELETE FROM ui_controls WHERE device=?',(row['id'],))
+            conn.execute('DELETE FROM ui_control_descriptions WHERE device=?',(row['id'],))
         elif action=='rename' and set(body)=={'action','id','name'} and isinstance(body['name'],str) and 1<=len(body['name'].strip())<=80 and not any(ord(c)<32 for c in body['name']):
             conn.execute('UPDATE devices SET name=? WHERE id=?',(body['name'].strip(),row['id']))
         elif action=='access' and set(body)=={'action','id','enabled'} and type(body['enabled']) is bool:
             conn.execute('UPDATE devices SET enabled=? WHERE id=?',(int(body['enabled']),row['id']))
         elif action=='configure' and set(body) in ({'action','id','values','reload'},{'action','id','values','reload','inherit'}) and type(body['reload']) is bool:
-            patch=values(body['values'])
+            patch=advanced.normalize_preferences(values(body['values']))
             inherit=body.get('inherit',[])
             if not isinstance(inherit,list) or any(not isinstance(k,str) or (k not in advanced.CLIENT and not advanced.dynamic_key(k)) for k in inherit) or set(inherit)&set(patch):
                 raise ValueError('Некорректное наследование параметров')
+            inherit=[advanced.CONTROL_ALIASES.get(k,k) for k in inherit]
+            if set(inherit)&set(patch):raise ValueError('Некорректное наследование параметров')
             if row['applied']<row['revision']:
                 raise ValueError('Дождитесь подтверждения предыдущей команды от ТВ')
             if not patch and not inherit and not body['reload']:
                 raise ValueError('Нет изменений')
-            desired=json.loads(row['desired'])|patch
+            desired=advanced.normalize_preferences(json.loads(row['desired']))|patch
             for key in inherit:desired.pop(key,None)
             conn.execute('UPDATE devices SET desired=?,revision=revision+1,reload=? WHERE id=?',
                          (json.dumps(desired),int(body['reload']),row['id']))

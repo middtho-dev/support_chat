@@ -34,3 +34,22 @@
   #lampac .lc-tabs button { font-size:13px; padding:10px 12px; }
   #lampac .lc-list { grid-template-columns:minmax(0,1fr); }
 }
+
+#lampac .voice-toggle .lc-help { display:block; font-weight:400; max-width:52em; }
+#lampac details>summary { cursor:pointer; padding:14px 0; }
+#lampac .lc-pref-row[hidden],#lampac [data-field-search][hidden] { display:none; }
+#lampac .lc-config-group .voice-grid { align-items:start; }
+#lampac .lc-pref-controls { width:180px; }
+@media(max-width:560px){#lampac .lc-pref-controls{width:100%;}#lampac .lc-pref-group summary{flex-wrap:wrap;}#lampac .lc-pref-group summary small{margin-left:0;}}
+
+#lampac .lc-pref-family { border:1px solid var(--border,#334155);border-radius:12px;margin:14px 0;padding:0 14px; }
+#lampac .lc-pref-family>summary { font-weight:600; }
+#lampac .lc-pref-family>summary small { margin-left:8px;font-weight:400;opacity:.7; }
+#lampac .lc-pref-family-body { padding:0 4px 8px; }
+
+#lampac { --accent:#2ed3b7; }
+#lampac .lc-tabs button[aria-pressed="true"],#lampac .save { background:#2ed3b7;color:#050b10; }
+#lampac .voice-switch input:checked+.voice-switch-track { background:#2ed3b7;border-color:#2ed3b7; }
+#lampac .voice-switch input:checked+.voice-switch-track::after { background:#050b10; }
+#lampac .voice-switch input:focus-visible+.voice-switch-track { outline-color:#2ed3b7; }
+#lampac .lc-help { font-size:13px;opacity:.85;line-height:1.6; }
