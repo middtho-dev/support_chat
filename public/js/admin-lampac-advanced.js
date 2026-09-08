@@ -11,7 +11,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   const content = document.createElement('div');
   content.className = 'lc-content';
   section.append(navigation, overview, content);
-  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства'], ['settings', 'Источники и плагины'], ['client', 'Общие настройки']];
+  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства'], ['announcements','Объявления'], ['settings', 'Источники и плагины'], ['client', 'Общие настройки']];
   const panes = {};
   for (const [key, label] of tabs) {
     const button = document.createElement('button');
@@ -99,6 +99,19 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
       if(await operation('/devices',{action:'revoke',id:d.id},'Доступ отозван'))refresh(true);
     });
   }
+  function renderAnnouncements(data) {
+    const previous=panes.announcements.querySelector('form'),draft=previous?Object.fromEntries([...previous.elements].filter(el=>el.name).map(el=>[el.name,el.value])):null;
+    const list=data.announcements||[];
+    panes.announcements.innerHTML=`<form class="card" id="lc-announcement-form"><h3>Объявление на устройствах</h3><p>Большое окно с логотипом поверх Lampa. Устройства не в сети получат его после подключения и активации. «Все» — устройства, добавленные к моменту отправки.</p><div class="voice-grid"><label class="voice-field">Получатели<select name="target"><option value="all">Все устройства · ${data.devices.length}</option>${data.devices.map(d=>`<option value="${esc(d.id)}">${esc(d.name)} · ${esc(d.id.slice(-6))}</option>`).join('')}</select></label><label class="voice-field">Заголовок<input name="title" required maxlength="120" placeholder="Важная информация"></label></div><label class="voice-field">Текст объявления<textarea name="message" required maxlength="5000" rows="6" placeholder="Напишите объявление. Переносы строк сохранятся."></textarea></label><div class="voice-grid"><label class="voice-field">Текст кнопки закрытия<input name="button" required maxlength="60" value="Понятно"></label><label class="voice-field">Показов каждому устройству<input name="repeats" type="number" min="1" max="100" step="1" value="1" required></label><label class="voice-field">Интервал между показами, минут<input name="intervalMinutes" type="number" min="1" max="10080" step="1" value="60" required></label></div><p class="lc-help">Показ учитывается при открытии окна, отдельно для каждого устройства. Повтор не откроется, пока пользователь не закроет предыдущее окно. Длинный текст можно листать стрелками пульта; Enter или «Назад» закрывает окно.</p><button class="save" ${data.devices.length?'':'disabled'}>Отправить объявление</button></form><div class="lc-list">${list.map((a,i)=>`<article class="card"><h3>${esc(a.title)}</h3><p>${a.cancelled?'Дальнейшие показы остановлены':a.shown>=a.recipients*a.repeats?'Все показы подтверждены':'Доставляется'} · ${esc(date(a.created))}</p><p>Показано ${a.shown} из ${a.recipients*a.repeats} · устройств: ${a.recipients}<br>Каждому: ${a.repeats} · интервал: ${a.interval_seconds/60} мин.</p><details><summary>Текст и кнопка</summary><p style="white-space:pre-wrap">${esc(a.message)}</p><p>Кнопка: ${esc(a.button)}</p></details>${!a.cancelled&&a.shown<a.recipients*a.repeats?`<button class="ghost" data-stop-announcement="${i}">Остановить дальнейшие показы</button>`:''}</article>`).join('')||empty('Объявлений пока нет.')}</div>`;
+    const form=panes.announcements.querySelector('form');if(draft)Object.entries(draft).forEach(([k,v])=>{form.elements[k].value=v;});
+    form.elements.repeats.oninput=()=>{form.elements.intervalMinutes.disabled=Number(form.elements.repeats.value)===1;};form.elements.repeats.oninput();
+    form.onsubmit=async e=>{e.preventDefault();const body={action:'announce',target:form.elements.target.value,title:form.elements.title.value.trim(),message:form.elements.message.value.trim(),button:form.elements.button.value.trim(),repeats:Number(form.elements.repeats.value),intervalMinutes:Number(form.elements.repeats.value)===1?60:Number(form.elements.intervalMinutes.value)};
+      const recipient=body.target==='all'?`всем ${data.devices.length} устройствам`:form.elements.target.selectedOptions[0].textContent;
+      if(!confirm(`Отправить «${body.title}» ${recipient}? Показы каждому: ${body.repeats}.`))return;
+      if(await operation('/devices',body,'Объявление отправлено. Ожидаются показы на устройствах.')){form.reset();refresh(true);}
+    };
+    panes.announcements.querySelectorAll('[data-stop-announcement]').forEach(button=>button.onclick=async()=>{if(await operation('/devices',{action:'announcement-cancel',id:list[Number(button.dataset.stopAnnouncement)].id},'Дальнейшие показы остановлены. Уже открытое окно пользователь закроет кнопкой.'))refresh(true);});
+  }
   function renderSettings(data) {
     const groups = new Map();
     data.fields.forEach((f, index) => { f.index = index; if (!groups.has(f.group)) groups.set(f.group, []); groups.get(f.group).push(f); });
@@ -137,10 +150,11 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   async function refresh(force = false) {
     if (!alive || refreshing || tab === 'overview') return;
     // Do not replace a focused input or expanded file list during automatic polling.
-    if (!force && (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && ['torrents','devices'].includes(tab))) return;
+    if (!force && (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && ['torrents','devices','announcements'].includes(tab))) return;
     refreshing = true; const active = tab;
     try {
-      if (active === 'devices') { const data = await request('/devices'); if (alive) renderDevices(data); }
+      if (active === 'announcements') {const data=await request('/devices');if(alive)renderAnnouncements(data);}
+      else if (active === 'devices') { const data = await request('/devices'); if (alive) renderDevices(data); }
       else if (active === 'torrents') { const data = await request('/torrents'); if (alive) renderTorrents(data); }
       else if (active === 'clients') { const data = await request('/clients'); if (alive) renderClients(data); }
       else if (!settingsLoaded) { const data = await request('/advanced'); if (alive) renderSettings(data); }

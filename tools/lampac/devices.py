@@ -18,6 +18,9 @@ def database(root):
     conn.row_factory=sqlite3.Row
     conn.execute('CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, credential TEXT UNIQUE, code TEXT UNIQUE, expires REAL, paired INTEGER DEFAULT 0, name TEXT, ip TEXT, last REAL, desired TEXT DEFAULT \'{}\', revision INTEGER DEFAULT 0, applied INTEGER DEFAULT 0, snapshot TEXT DEFAULT \'{}\', reload INTEGER DEFAULT 0)')
     conn.execute('CREATE TABLE IF NOT EXISTS limits (key TEXT PRIMARY KEY, start REAL, attempts INTEGER)')
+    conn.execute('CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY,title TEXT,message TEXT,button TEXT,repeats INTEGER,interval_seconds INTEGER,created REAL,cancelled INTEGER DEFAULT 0)')
+    conn.execute('CREATE TABLE IF NOT EXISTS announcement_deliveries (announcement TEXT,device TEXT,shown INTEGER DEFAULT 0,last REAL DEFAULT 0,PRIMARY KEY(announcement,device))')
+    conn.execute('CREATE INDEX IF NOT EXISTS announcement_device ON announcement_deliveries(device)')
     if 'enabled' not in {r[1] for r in conn.execute('PRAGMA table_info(devices)')}:
         try:
             conn.execute('ALTER TABLE devices ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1')
@@ -46,6 +49,29 @@ def values(body):
             raise ValueError('Недоступный параметр устройства')
     return body
 
+def next_announcement(conn,device):
+    row=conn.execute('SELECT a.*,d.shown FROM announcements a JOIN announcement_deliveries d ON a.id=d.announcement WHERE d.device=? AND a.cancelled=0 AND d.shown<a.repeats AND (d.shown=0 OR d.last+a.interval_seconds<=?) ORDER BY a.created,a.id LIMIT 1',(device,time.time())).fetchone()
+    return {k:row[k] for k in ['id','title','message','button']}|{'occurrence':row['shown']+1} if row else None
+
+
+def announce(conn,body):
+    if set(body)!={'action','target','title','message','button','repeats','intervalMinutes'}:
+        raise ValueError('Некорректное объявление')
+    for key,maximum in [('title',120),('message',5000),('button',60)]:
+        value=body[key]
+        if not isinstance(value,str) or not 1<=len(value.strip())<=maximum or any(ord(c)<32 and (key!='message' or c not in '\n\t') for c in value):
+            raise ValueError('Проверьте текст объявления')
+    if type(body['repeats']) is not int or not 1<=body['repeats']<=100 or type(body['intervalMinutes']) is not int or not 1<=body['intervalMinutes']<=10080:
+        raise ValueError('Показы: 1–100; интервал: 1–10080 минут')
+    if not isinstance(body['target'],str):raise ValueError('Нужен получатель')
+    recipients=[r[0] for r in conn.execute('SELECT id FROM devices WHERE paired=1'+('' if body['target']=='all' else ' AND id=?'),() if body['target']=='all' else (body['target'],))]
+    if not recipients:raise ValueError('Нет устройств для отправки')
+    identifier=secrets.token_hex(12)
+    conn.execute('INSERT INTO announcements (id,title,message,button,repeats,interval_seconds,created) VALUES (?,?,?,?,?,?,?)',(identifier,body['title'].strip(),body['message'].strip(),body['button'].strip(),body['repeats'],body['intervalMinutes']*60,time.time()))
+    conn.executemany('INSERT INTO announcement_deliveries (announcement,device) VALUES (?,?)',[(identifier,d) for d in recipients])
+    return {'ok':True,'id':identifier,'recipients':len(recipients)}
+
+
 def public(root,action,body,ip):
     ip=advanced.address(ip)
     with closing(database(root)) as conn, conn:
@@ -60,6 +86,14 @@ def public(root,action,body,ip):
             conn.execute('INSERT INTO devices (id,credential,code,expires,name,ip,last,paired,enabled) VALUES (?,?,?,?,?,?,?,?,?)',
                 (identifier,digest(token),None if automatic else digest(code),time.time()+300,body['name'],ip,time.time(),int(automatic),0))
             return {'id':identifier,'token':token,'code':None if automatic else code,'expiresIn':300,'paired':automatic,'enabled':False}
+        if action=='announcement-ack':
+            if set(body)!={'token','id','occurrence'} or not isinstance(body['token'],str) or not isinstance(body['id'],str) or type(body['occurrence']) is not int:
+                raise ValueError('Некорректное подтверждение')
+            row=conn.execute('SELECT id FROM devices WHERE credential=? AND paired=1 AND enabled=1',(digest(body['token']),)).fetchone()
+            if not row:raise PermissionError('Доступ отозван')
+            limit(conn,'ack:'+row['id'],30)
+            conn.execute('UPDATE announcement_deliveries SET shown=?,last=? WHERE device=? AND announcement=? AND shown=? AND EXISTS (SELECT 1 FROM announcements a WHERE a.id=announcement AND a.cancelled=0 AND a.repeats>=? AND (shown=0 OR last+a.interval_seconds<=?))',(body['occurrence'],time.time(),row['id'],body['id'],body['occurrence']-1,body['occurrence'],time.time()))
+            return {'ok':True}
         if action!='poll' or set(body)!={'token','applied','snapshot'} or not isinstance(body['token'],str) or not 32<=len(body['token'])<=100 or type(body['applied']) is not int:
             raise ValueError('Некорректный запрос устройства')
         snapshot=values(body['snapshot'])
@@ -73,6 +107,7 @@ def public(root,action,body,ip):
         conn.execute('UPDATE devices SET last=?,ip=?,snapshot=?,applied=? WHERE id=?',
             (time.time(),ip,json.dumps(snapshot) if snapshot else row['snapshot'],applied,row['id']))
         return {'id':row['id'],'name':row['name'],'enabled':bool(row['enabled']),
+                'announcement':next_announcement(conn,row['id']) if row['paired'] and row['enabled'] else None,
                 'overrides':json.loads(row['desired']) if row['paired'] else {},
                 'paired':bool(row['paired']),'revision':row['revision'],
                 'values':json.loads(row['desired']) if row['paired'] and applied<row['revision'] else {},
@@ -80,7 +115,7 @@ def public(root,action,body,ip):
 
 def listing(root):
     with closing(database(root)) as conn:
-        return {'devices':[{**{k:row[k] for k in ['id','name','ip','last','revision','applied','enabled']},
+        return {'announcements':[dict(r) for r in conn.execute('SELECT a.*,COUNT(d.device) AS recipients,COALESCE(SUM(d.shown),0) AS shown FROM announcements a LEFT JOIN announcement_deliveries d ON d.announcement=a.id GROUP BY a.id ORDER BY a.created DESC LIMIT 50')], 'devices':[{**{k:row[k] for k in ['id','name','ip','last','revision','applied','enabled']},
                             'snapshot':json.loads(row['snapshot']),'desired':json.loads(row['desired'])}
                            for row in conn.execute('SELECT * FROM devices WHERE paired=1 ORDER BY last DESC')],
                 'fields':advanced.client_settings({})['fields']}
@@ -90,6 +125,11 @@ def manage(root,body):
         raise ValueError('Нужен объект')
     action=body.get('action')
     with closing(database(root)) as conn, conn:
+        if action=='announce':return announce(conn,body)
+        if action=='announcement-cancel' and set(body)=={'action','id'}:
+            if not isinstance(body['id'],str):raise ValueError('Нужен ID')
+            conn.execute('UPDATE announcements SET cancelled=1 WHERE id=?',(body['id'],))
+            return {'ok':True}
         if action=='pair':
             if set(body)!={'action','code'} or not isinstance(body['code'],str) or len(body['code'])!=8 or not body['code'].isascii() or not body['code'].isdigit():
                 raise ValueError('Нужен восьмизначный код Workspace с экрана ТВ')

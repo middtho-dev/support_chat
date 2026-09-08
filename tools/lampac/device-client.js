@@ -18,13 +18,15 @@ function start(){
  function enroll(){if(busy||state.token||state.paused||state.revoked)return;busy=true;request('enroll',{name:String(store.get('device_name')||'Lampa').slice(0,80)},function(status,data){busy=false;if(status!==200)return;state={token:data.token,id:data.id,paired:true,applied:0,overrides:{},enabled:data.enabled};save();if(data.enabled===false)access(false);poll();});}
  function note(text){Lampa.Noty.show(text);}
  function request(action,data,done){var xhr=new XMLHttpRequest();xhr.open('POST',config.url+'/workspace-device/'+action);xhr.timeout=12000;xhr.setRequestHeader('Content-Type','application/json');xhr.onload=function(){var result;try{result=JSON.parse(xhr.responseText);}catch(e){result={};}done(xhr.status,result);};xhr.onerror=xhr.ontimeout=function(){done(0,{});};xhr.send(JSON.stringify(data));}
+ var announcements=window.createWorkspaceAnnouncements?window.createWorkspaceAnnouncements({store:store,request:request,logo:config.logo}):null;
  function snapshot(){var result={};Object.keys(config.fields).forEach(function(k){var value=String(store.get(k));if(config.fields[k].indexOf(value)>=0)result[k]=value;});return result;}
- function poll(){if(state.paused||state.revoked)return;if(!state.token){enroll();return;}if(busy)return;busy=true;var token=state.token;request('poll',{token:token,applied:state.applied||0,snapshot:snapshot()},function(status,data){busy=false;if(token!==state.token||state.paused)return;if(status===403){access(false);if(data.code==='device_revoked'){state={applied:0,overrides:{},enabled:false};save();enroll();}return;}if(status!==200)return;
+ function poll(){if(state.paused||state.revoked)return;if(!state.token){enroll();return;}if(busy)return;busy=true;var token=state.token;request('poll',{token:token,applied:state.applied||0,snapshot:snapshot()},function(status,data){busy=false;if(token!==state.token||state.paused)return;if(status===403){if(announcements)announcements.update(null,token,state.id,false);access(false);if(data.code==='device_revoked'){state={applied:0,overrides:{},enabled:false};save();enroll();}return;}if(status!==200)return;
   if(data.paired){state.paired=true;state.id=data.id||state.id;state.name=data.name||state.name;delete state.code;
    var changed=JSON.stringify(state.overrides||{})!==JSON.stringify(data.overrides||{});state.overrides=data.overrides||{};save();
    if(changed&&window.workspaceApplyProfile)window.workspaceApplyProfile();
   }
   var activated=state.enabled===false&&data.enabled===true;state.enabled=data.enabled;save();access(data.enabled);if(activated){window.location.reload();return;}
+  if(announcements)announcements.update(data.announcement,token,state.id,data.enabled);
   if(data.paired&&data.revision>(state.applied||0)){
    if(window.workspaceApplyProfile)window.workspaceApplyProfile();else Object.keys(data.values).forEach(function(k){if(config.fields[k]&&config.fields[k].indexOf(data.values[k])>=0)store.set(k,data.values[k]);});
    state.applied=data.revision;save();note('Workspace: настройки применены');
