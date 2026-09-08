@@ -982,16 +982,16 @@ function renderSettings() {
         </div>`;
   $('settings').innerHTML = `<div class="section settings-section">
     <div class="settings-hero" ${support?'hidden':''}>
-      <div><span class="settings-eyebrow">${support?'Поддержка':'Workspace'}</span><h2>${support?'Поддержка':'Система'}</h2><p>${support?'Обращения, доставка сообщений и параметры работы поддержки.':'Состояние сервера, резервные копии, диск и адреса сервисов.'}</p></div>
+      <div><span class="settings-eyebrow">${support?'Поддержка':'Workspace'}</span><h2>${support?'Поддержка':'Система'}</h2><p>${support?'Обращения, доставка сообщений и параметры работы поддержки.':'Состояние сервера, резервные копии и диск.'}</p></div>
     </div>
-    <div class="management-tabs" ${support?'hidden':''} aria-label="Система"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button>${canManage ? '<button type="button" data-management-view="addresses">Домены и адреса</button>' : ''}</div><div id="deployment-info" hidden></div><div id="control-health"></div>
+    <div class="management-tabs" ${support?'hidden':''} aria-label="Система"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button></div><div id="deployment-info" hidden></div><div id="control-health"></div>
     <div class="control-divider" ${support?'hidden':''}></div>
     <div id="settings-config">${settingsContent}</div>
   </div>`;
   renderMaintenance();
   const selectManagementView = view => {
     if(!support)S.systemManagementView = view;
-    if (view === 'addresses' && !canManage) view = 'status';
+    if (!['status','configuration'].includes(view)) view = 'status';
     $('deployment-info').hidden = view !== 'addresses';
     if (view === 'addresses') loadDeploymentInfo();
     $('control-health').hidden = view !== 'status'; $('settings-config').hidden = view !== 'configuration';
