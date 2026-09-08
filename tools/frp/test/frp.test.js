@@ -109,7 +109,11 @@ test('standalone HTTP API requires its own token and validates requests', async 
     assert.equal((await fetch(base + '/api/admin/frp', { headers })).status, 200);
     assert.equal((await fetch(base + '/api/admin/frp/configure', { method: 'POST', headers, body: '{' })).status, 400);
     assert.equal((await fetch(base + '/api/admin/frp/start', { method: 'POST', headers, body: '{}' })).status, 200);
-    assert.equal(calls.length, 1);
+    for (const action of ['generate-installer', 'release-installer']) {
+      assert.equal((await fetch(base + '/api/admin/frp/' + action, { method: 'POST', headers, body: '{}' })).status, 200);
+      assert.equal((await fetch(base + '/api/admin/frp/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
+    }
+    assert.equal(calls.length, 3);
     assert.equal((await fetch(base + '/api/admin/frp/shell', { method: 'POST', headers })).status, 404);
     assert.equal((await fetch(base + '/api/admin/frp/configure', { method: 'POST', headers, body: 'x'.repeat(5000) })).status, 413);
     assert.equal((await fetch(base + '/data/state.json')).status, 404);

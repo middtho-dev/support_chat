@@ -20,10 +20,27 @@
     <input id="frp-search" type="search" placeholder="Поиск по имени, IP или порту" aria-label="Поиск устройств">
     <p>Нажмите имя для входа в веб-интерфейс. Онлайн — устройство подключено к FRP.</p>
     <div class="frp-table"><table><thead><tr><th>Устройство</th><th>IP</th><th>Статус</th><th>Порты</th><th>Соединения</th><th>Последний раз в сети</th></tr></thead><tbody id="frp-devices"></tbody></table></div>
-    <details id="frp-example"><summary>Подключить устройство — пример frpc.toml</summary><p>На устройстве нужен клиент frpc. Замените имя на уникальное, localPort — на порт сервиса устройства, remotePort — на свободный порт сервера. Для нескольких сервисов добавьте блоки [[proxies]].</p><button id="frp-copy" type="button">Скопировать конфигурацию</button><pre id="frp-config"></pre><p>Конфигурация содержит секрет подключения. Указанный в настройках домен должен указывать на этот сервер; порт подключения и используемые порты туннелей должны быть разрешены в firewall.</p></details>
+    <section class="frp-installer" aria-labelledby="frp-installer-title"><h3 id="frp-installer-title">Подключить роутер OpenWrt</h3><p>Скачайте установочный файл и запустите его на Windows 10/11 в сети роутера. Он установит FRPC и интерфейс LuCI через opkg или apk, затем настроит доступ к веб-интерфейсу на 127.0.0.1:80.</p>
+    <form id="frp-installer-form"><div class="frp-installer-grid"><label>Внешний порт<div class="frp-port-picker"><input id="frp-installer-port" type="number" min="20000" max="23000" required><button id="frp-random-port" class="ghost" type="button" aria-label="Выбрать другой свободный порт">Другой</button></div><small>20000–23000. Занятые и выданные порты исключаются.</small></label><label>IP роутера<input id="frp-router-ip" value="192.168.1.1" required maxlength="45" autocomplete="off" spellcheck="false"><small>Адрес роутера в сети компьютера.</small></label><label>Пароль SSH · root<input id="frp-router-password" type="password" required maxlength="512" autocomplete="new-password"><small>Пароль включается в файл, но не сохраняется в настройках.</small></label></div><details><summary>Дополнительно</summary><label>Порт SSH<input id="frp-router-ssh-port" type="number" min="1" max="65535" value="22" required></label></details><p id="frp-installer-route"></p><button id="frp-generate" type="submit">Сгенерировать .bat</button><p id="frp-installer-result" role="status"></p><p>На компьютере нужен интернет. При первом SSH-подключении проверьте отпечаток ключа роутера. Настройки останутся доступны в LuCI; существующий конфиг будет сохранён в резервную копию. Файл содержит пароль — передавайте его только владельцу роутера и удалите после установки.</p></form>
+    <details><summary>Выданные установочные файлы <span id="frp-reservation-count"></span></summary><p>Порт резервируется при генерации. Освобождайте только порт неиспользованного файла: после освобождения старый файл нельзя запускать. Порты известных устройств остаются занятыми.</p><div id="frp-reservations"></div></details></section>
   </div>`;
-  function example() {
-    return current ? `serverAddr = ${JSON.stringify(current.host)}\nserverPort = ${current.port}${current.compatibilityMode ? "" : `\nauth.method = "token"\nauth.token = ${JSON.stringify(current.token)}\ntransport.tls.enable = true`}\n\n[[proxies]]\nname = "router-01-ssh"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = 22\nremotePort = ${current.allowedRanges[0]?.start ?? "PORT_REQUIRED"}\n` : '';
+  let downloadUrl = null;
+  function clearDownload() {
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    downloadUrl = null;
+    $('frp-installer-result').textContent = '';
+    $('frp-router-password').value = '';
+  }
+  function renderInstaller() {
+    if (!$('frp-installer-port').value && current.installerPort) $('frp-installer-port').value = current.installerPort;
+    $('frp-installer-route').textContent = `${current.host}:${$('frp-installer-port').value || '—'} → 127.0.0.1:80 · FRP ${current.host}:${current.port}`;
+    $('frp-installer-form').querySelectorAll('input,button').forEach(el => { el.disabled = pending || current.busy; });
+    $('frp-generate').disabled = pending || current.busy || !current.installerPort;
+    $('frp-random-port').disabled = pending || current.busy || !current.installerPort;
+    const reservations = current.installerReservations || [];
+    $('frp-reservation-count').textContent = `(${reservations.length})`;
+    $('frp-reservations').innerHTML = reservations.map(r => `<div class="frp-reservation"><span><strong>${esc(r.port)}</strong> · ${esc(r.ip)}<small>${esc(new Date(r.createdAt).toLocaleString('ru-RU'))}</small></span><button class="ghost" type="button" data-release-port="${esc(r.port)}" ${pending ? 'disabled' : ''}>Освободить</button></div>`).join('') || '<p>Пока нет выданных файлов.</p>';
+    if (!current.installerPort) $('frp-installer-route').textContent = 'Нет свободных разрешённых портов 20000–23000. Проверьте диапазон сервера и выданные файлы.';
   }
   function link(proxy, label) {
     const url = window.FrpLinks.deviceUrl(current?.host, proxy);
@@ -50,7 +67,7 @@
     $('frp-toggle').dataset.frpAction=running?'stop':'start';$('frp-toggle').textContent=running?'Выключить':'Включить';$('frp-toggle').className=running?'danger':'';$('frp-toggle').disabled=locked||!current.installed;
     $('frp-settings').querySelectorAll('input,button,select').forEach(el => { el.disabled = locked; });
     if (updateFields) { for (const key of ['compatibilityMode', 'host', 'port', 'bindAddr', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit']) $('frp-' + key).value = Array.isArray(current[key]) ? current[key].join(',') : current[key]; $('frp-newToken').value = ''; }
-    $('frp-config').textContent = $('frp-example').open ? example() : '';
+    renderInstaller();
     renderDevices();
   }
   async function request(action, body) {
@@ -88,8 +105,36 @@
   $('frp-settings').addEventListener('submit', event => { event.preventDefault(); action('configure', Object.fromEntries(['compatibilityMode', 'host', 'port', 'bindAddr', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit', 'newToken'].map(key => [key, $('frp-' + key).value]))); });
   $('frp-refresh').addEventListener('click', load);
   $('frp-search').addEventListener('input', renderDevices);
-  $('frp-example').addEventListener('toggle', () => { $('frp-config').textContent = $('frp-example').open ? example() : ''; });
-  $('frp-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(example()); toast('Конфигурация скопирована', 'ok'); } catch { toast('Выделите и скопируйте конфигурацию вручную', 'err'); } });
+  $('frp-installer-port').addEventListener('input', () => { if (current) renderInstaller(); });
+  $('frp-random-port').addEventListener('click', async () => {
+    if (pending) return;
+    const token = S.token, g = generation;
+    $('frp-random-port').disabled = true;
+    try { const data = await request(); if (token !== S.token || g !== generation) return; current = data; $('frp-installer-port').value = current.installerPort || ''; render(); }
+    catch (e) { if (token === S.token && g === generation) { toast(e.message, 'err'); render(); } }
+  });
+  $('frp-reservations').addEventListener('click', event => {
+    const button = event.target.closest('[data-release-port]');
+    if (button && confirm('Освободить порт? Старый установочный файл после этого нельзя использовать.')) action('release-installer', { port: Number(button.dataset.releasePort) });
+  });
+  $('frp-installer-form').addEventListener('submit', async event => {
+    event.preventDefault(); if (pending || !current) return;
+    const body = { port: Number($('frp-installer-port').value), ip: $('frp-router-ip').value.trim(), password: $('frp-router-password').value, sshPort: Number($('frp-router-ssh-port').value) };
+    clearDownload(); generation++; loading = false; pending = true; render();
+    const token = S.token, g = generation;
+    $('frp-installer-result').textContent = 'Проверяем порт и создаём файл…';
+    try {
+      const data = await request('generate-installer', body);
+      if (token !== S.token || g !== generation) return;
+      current = data.status;
+      downloadUrl = URL.createObjectURL(new Blob([data.file], { type: 'application/octet-stream' }));
+      const anchor = document.createElement('a'); anchor.href = downloadUrl; anchor.download = data.filename; anchor.textContent = `Скачать ${data.filename}`;
+      $('frp-installer-result').replaceChildren(anchor); anchor.click();
+      $('frp-installer-port').value = current.installerPort || '';
+      toast('Файл готов. Порт зарезервирован.', 'ok');
+    } catch (e) { if (token === S.token && g === generation) $('frp-installer-result').textContent = e.message; }
+    finally { body.password = ''; if (token === S.token && g === generation) { pending = false; render(); } }
+  });
   if (!integration) {
   $('login').addEventListener('submit', async event => {
     event.preventDefault();
@@ -101,13 +146,13 @@
     } catch (e) { S.token = null; $('login-error').textContent = e.message; }
   });
   $('logout').addEventListener('click', () => {
-    S.token = null; current = null; $('frp-config').textContent = ''; $('frp-devices').textContent = '';
+    generation++; pending = false; loading = false; S.token = null; current = null; clearDownload(); $('frp-installer-port').value = ''; $('frp-reservations').textContent = '';  $('frp-devices').textContent = '';
     panel.hidden = true; $('login').hidden = false; $('logout').hidden = true;
   });
   }
   window.FrpPanel = {
     open: load,
-    reset: () => { generation++; loading = false; pending = false; current = null; $('frp-config').textContent = ''; $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
+    reset: () => { generation++; loading = false; pending = false; current = null; clearDownload(); $('frp-installer-port').value = ''; $('frp-reservations').textContent = '';  $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
   };
   panel.addEventListener('click', event => {
     const anchor = event.target.closest('[data-device-link]');

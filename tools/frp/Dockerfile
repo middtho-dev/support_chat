@@ -1,6 +1,7 @@
 FROM node:20-alpine
 WORKDIR /app
-COPY config.js manager.js server.js ./
+COPY config.js manager.js server.js installer.js ./
+COPY installer ./installer
 COPY public ./public
 RUN mkdir /app/data && chown -R node:node /app
 USER node
