@@ -457,7 +457,7 @@ function setView(view) {
   const support=S.view==='chat'||AdminShell.modules.find(m=>m.id===S.view)?.parent==='chat';
   const parent=support?'chat':S.view;
   document.body.classList.toggle('support-active',support);
-  const supportNav=$('support-nav');document.querySelector('.navbtn[data-view=chat]')?.after(supportNav);supportNav.hidden=!support;
+  const supportNav=$('support-nav');if(!matchMedia('(max-width:560px)').matches)document.querySelector('.navbtn[data-view=chat]')?.after(supportNav);supportNav.hidden=!support;
   if(support){supportNav.innerHTML=[['chat','Обращения'],['support-queue','Очередь доставки'],['templates','Шаблоны'],['support-status','Состояние'],...(S.permissions.canManageSettings?[['support-settings','Настройки']]:[])].map(([id,label])=>`<button class="${S.view===id?'on':''}" data-support-view="${id}" type="button" aria-current="${S.view===id?'page':'false'}">${label}</button>`).join('');supportNav.querySelectorAll('button').forEach(b=>b.onclick=()=>setView(b.dataset.supportView));supportNav.querySelector('.on')?.scrollIntoView({block:'nearest',inline:'nearest'});}
   $('support-queue').classList.toggle('on',S.view==='support-queue');
   if(S.view==='support-queue')window.SupportQueue?.open();else window.SupportQueue?.pause();
@@ -954,7 +954,8 @@ function settingsCards(s, topicModeControl) {
 function renderSettings() {
   const support=S.view==='support-settings'||S.view==='support-status';
   S.settingsScope=support?'support':'system';
-  const opened = new Set(Array.from($('settings').querySelectorAll('details[open]'),d=>d.querySelector('summary')?.textContent));
+  const disclosureKey = d => { const summary=d.querySelector(':scope > summary')?.cloneNode(true);summary?.querySelectorAll('.summary-count').forEach(n=>n.remove());return summary?.textContent.trim(); };
+  const opened = new Set(Array.from($('settings').querySelectorAll('details[open]'),disclosureKey));
   const scrollTop = $('settings').scrollTop;
   const s = S.settings || {};
   const canManage = !!S.permissions.canManageSettings;
@@ -1000,7 +1001,7 @@ function renderSettings() {
   document.querySelectorAll('[data-management-view]').forEach(b => b.addEventListener('click', () => selectManagementView(b.dataset.managementView)));
   selectManagementView(support?(S.view==='support-settings'?'configuration':'status'):(S.systemManagementView||'status'));
   if (canManage && S.settings) bindSettingsUi();
-  $('settings').querySelectorAll('details').forEach(d=>{if(opened.has(d.querySelector('summary')?.textContent))d.open=true;});
+  $('settings').querySelectorAll('details').forEach(d=>{if(opened.has(disclosureKey(d)))d.open=true;});
   $('settings').scrollTop=scrollTop;
   const draft=S.settingsDrafts?.[S.settingsScope];if(draft){for(const item of draft){const el=$(item.id);if(el){el.value=item.value;el.checked=item.checked;}}applySettingsDependencies();updateSettingsDirtyState();}
 }

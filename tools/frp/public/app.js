@@ -24,6 +24,34 @@
     <form id="frp-installer-form"><div class="frp-installer-credentials"><label>Имя устройства<input id="frp-installer-name" required maxlength="80" placeholder="Например, Дом · роутер" autocomplete="off"><small>Так устройство будет называться здесь, в панели.</small></label><label>Пароль SSH · root<input id="frp-installer-password" type="password" required maxlength="512" autocomplete="new-password"><small>Включается в файл установки, на сервере не сохраняется.</small></label></div><details><summary>Адрес назначения</summary><div class="frp-installer-credentials"><label>IP назначения<input id="frp-local-ip" value="127.0.0.1" required maxlength="45"><small>Адрес сервиса, доступный с роутера.</small></label><label>Порт назначения<input id="frp-local-port" type="number" min="1" max="65535" value="80" required><small>80 — веб-интерфейс роутера по HTTP.</small></label></div></details><p>Порт назначается во время установки из диапазона 20000–23000. Учитываются активные и отключённые устройства, служебные порты и другие установки.</p><button id="frp-generate" type="submit">Создать установщик .bat</button><p id="frp-installer-result" role="status"></p><p>Запускайте файл на ПК в сети роутера. Файл содержит пароль SSH — передавайте его только владельцу роутера и удалите после установки. FRPC устанавливается через opkg/apk, настройки доступны в LuCI. Файл действует 7 дней и подходит для одного роутера.</p></form>
     </details><dialog id="frp-device-dialog"><form id="frp-device-form"><h3>Устройство</h3><label>Имя<input id="frp-device-name" required maxlength="80"></label><label>Порт веб-интерфейса<select id="frp-device-web"></select><small>По этому порту устройство открывается из панели.</small></label><div class="frp-actions"><button type="submit">Сохранить</button><button id="frp-device-cancel" type="button" class="ghost">Отмена</button></div><p id="frp-device-error" role="alert"></p></form></dialog>
   </div>`;
+  const wrap = panel.querySelector('.frp-wrap');
+  const tabs = document.createElement('nav'); tabs.className = 'frp-tabs'; tabs.setAttribute('aria-label', 'Разделы FRP');
+  const devicesPane = document.createElement('section');
+  function tabSection(selector) {
+    const old = panel.querySelector(selector), node = document.createElement('section');
+    node.className = old.className;
+    const summary = old.querySelector(':scope > summary'), heading = document.createElement('h3');
+    heading.id = summary.id; heading.textContent = summary.textContent; summary.replaceWith(heading);
+    node.append(...old.childNodes); old.replaceWith(node); return node;
+  }
+  const settingsPane = tabSection('.frp-settings-details');
+  const installerPane = tabSection('.frp-installer');
+  let next = settingsPane.nextElementSibling;
+  while (next && next !== installerPane) { const node = next; next = node.nextElementSibling; devicesPane.append(node); }
+  settingsPane.before(tabs, devicesPane);
+  const panes = {devices: devicesPane, installer: installerPane, server: settingsPane};
+  const actions = wrap.querySelector(':scope > .frp-actions');
+  function selectFrpTab(key) {
+    Object.entries(panes).forEach(([name, node]) => { node.hidden = name !== key; });
+    if (panes[key].tagName === 'DETAILS') panes[key].open = true;
+    actions.hidden = key !== 'server';
+    tabs.querySelectorAll('button').forEach(button => { const active = button.dataset.frpTab === key; button.classList.toggle('on', active); button.setAttribute('aria-pressed', String(active)); });
+    panel.scrollTop = 0;
+  }
+  for (const [key, label] of [['devices','Устройства'],['installer','Подключить роутер'],['server','Сервер']]) {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.frpTab = key; button.onclick = () => selectFrpTab(key); tabs.append(button);
+  }
+  selectFrpTab('devices');
   let downloadUrl = null;
   function clearDownload() {
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
