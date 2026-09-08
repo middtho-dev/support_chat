@@ -30,14 +30,23 @@ class AdvancedTests(unittest.TestCase):
         for value in [{'source':'bad'},{'screensaver':False},{'token':'secret'}]:
             with self.assertRaises(ValueError):advanced.apply_client({}, {}, {'mode':'always','values':value},'https://x.org')
 
-    def test_home_preferences_validate_and_keep_details_device_scoped(self):
+    def test_home_preferences_validate_for_common_and_device_profiles(self):
         fields={f['key']:f for f in advanced.client_settings({})['fields']}
         self.assertTrue(fields['workspace_header_profile']['global'])
-        self.assertFalse(fields['workspace_header_clock']['global'])
+        self.assertTrue(fields['workspace_header_clock']['global'])
         self.assertEqual(fields['interface_size']['group'],'Главный экран')
         values={'workspace_header_profile':'false','interface_size':'bigger','poster_size':'w500'}
         self.assertEqual(advanced.apply_client({}, {}, {'mode':'always','values':values},'https://example.org')['WorkspaceUI']['values'],values)
         with self.assertRaises(ValueError):advanced.apply_client({}, {}, {'mode':'always','values':{'interface_size':'huge'}},'https://example.org')
+
+    def test_home_presets_are_valid_and_preserve_unrelated_configuration(self):
+        for preset in advanced.client_settings({})['presets']:
+            values={'parser_use':'true', **preset['values']}
+            result=advanced.apply_client({'token':'keep'}, {}, {'mode':'always','values':values}, 'https://example.org')
+            self.assertEqual(result['WorkspaceUI']['values'],values)
+            self.assertEqual(result['token'],'keep')
+        with self.assertRaises(ValueError):
+            advanced.apply_client({}, {}, {'mode':'always','values':{'workspace_home_accent':'red;display:none'}}, 'https://example.org')
 
     def test_torrent_actions_are_targeted_and_removal_verified(self):
         torrent={'hash':'a'*40,'title':'test','data':'secret','poster':'secret'}

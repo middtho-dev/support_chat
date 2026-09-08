@@ -187,3 +187,18 @@ and interval eligibility. Cancellation stops future shows; an already visible
 notice remains until closed. Arrow keys scroll long text, Enter/Back closes.
 This overlay covers the Lampa web UI, not a separate native external player.
 No arbitrary HTML, links or JavaScript are accepted as announcement content.
+
+## Home presets and notice layout
+
+The Main screen tab edits shared home and header preferences; device forms offer
+the same KV9, Cinema, Compact and TV presets. Presets fill a draft and require Save.
+They preserve unrelated settings; device overrides keep priority. KV9 uses a dark
+cyan palette with quiet navigation and hidden CUB profile entry points. Native
+scale/background/start-page preferences may require restarting Lampa. Workspace
+accent, navigation surfaces, corners and reduced motion update when policy arrives.
+Choose the native option or release management to remove Workspace styling.
+
+Announcements use a centered logo, title, scrollable text and button over a translucent
+backdrop. Desktop/TV cards use 78vw by 77vh (about 60% of screen area); narrow and
+short screens adapt to keep the close action reachable. The overlay covers the web
+interface; separate native players are outside the DOM.
