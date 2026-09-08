@@ -1,3 +1,4 @@
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -79,7 +80,7 @@ class DeviceTests(unittest.TestCase):
     def test_duplicate_controls_migrate_without_losing_overrides(self):
         r=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1')
         alias=devices.advanced.discovered_key('m','movie');key='workspace_menu_movie'
-        with devices.database(self.root) as conn:
+        with closing(devices.database(self.root)) as conn, conn:
             conn.execute('UPDATE devices SET desired=? WHERE id=?',(devices.json.dumps({alias:'false',key:'true'}),r['id']))
         self.assertEqual(self.poll(r['token'])['overrides'],{key:'false'})
         devices.manage(self.root,{'action':'configure','id':r['id'],'values':{key:'true'},'reload':False})
