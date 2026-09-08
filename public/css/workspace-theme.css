@@ -126,3 +126,6 @@ body.support-active .workspace{grid-row:3}
 @media(max-width:560px){body.support-active .app{grid-template-rows:58px 56px minmax(0,1fr)}.support-nav{padding:7px 10px}.support-nav button{font-size:12px;padding:8px 12px}body.support-active .main,body.support-active .side{top:114px!important}.queue-item{padding:16px}.queue-meta{grid-template-columns:1fr}.queue-item-heading{align-items:flex-start;flex-direction:column}.queue-actions button{flex:1}.queue-pagination{font-size:12px}}
 body.tg-mini.support-active .app{grid-template-rows:calc(58px + var(--tg-top-ui)) 56px minmax(0,1fr)!important}
 body.tg-mini.support-active .main,body.tg-mini.support-active .side{top:calc(114px + var(--tg-top-ui))!important}
+
+#cache-reset-btn{white-space:nowrap;min-height:40px}
+@media(max-width:600px){#cache-reset-btn{font-size:11px;padding:8px}body.ticket-open .top>#cache-reset-btn{display:none}}
