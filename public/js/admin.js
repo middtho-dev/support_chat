@@ -140,10 +140,10 @@ async function resetWorkspaceCache() {
 function initTelegramMiniApp() {
   if (!IS_TG_MINI) return;
   document.body.classList.add('tg-mini');
-  document.title = 'KV9 · Панель управления';
-  document.querySelector('.auth-card h1').textContent = 'KV9 Workspace';
+  document.title = 'KV9RU · Панель управления';
+  document.querySelector('.auth-card h1').textContent = 'KV9RU Workspace';
   document.querySelector('.auth-card p').textContent = 'Вход с помощью Telegram';
-  document.querySelector('.top h1').textContent = 'KV9 Workspace';
+  document.querySelector('.top h1').textContent = 'KV9RU Workspace';
   document.querySelector('.top .brand p').textContent = 'Telegram Mini App';
   $('tok').style.display = 'none';
   $('lbtn').style.display = 'none';
@@ -277,7 +277,7 @@ function bindStaticUi() {
   $('back').addEventListener('click', leaveCurrentTicket);
   $('cv-toggle').addEventListener('click', toggleTicketStatus);
   $('mobile-ticket-back').addEventListener('click', leaveCurrentTicket);
-  $('mobile-ticket-card').addEventListener('click', () => window.adminOpenTicketCard?.());
+  $('mobile-ticket-card').addEventListener('click', event => window.adminSendCustomerControl?.(event));
   $('mobile-ticket-toggle').addEventListener('click', toggleTicketStatus);
   document.addEventListener('click', event => { if (!event.target.closest('.pop') && event.target !== $('quick')) document.querySelectorAll('.pop').forEach(p => p.remove()); });
   window.addEventListener('beforeunload', event => {
@@ -457,7 +457,7 @@ function setView(view) {
   const support=S.view==='chat'||AdminShell.modules.find(m=>m.id===S.view)?.parent==='chat';
   const parent=support?'chat':S.view;
   document.body.classList.toggle('support-active',support);
-  const supportNav=$('support-nav');supportNav.hidden=!support;
+  const supportNav=$('support-nav');document.querySelector('.navbtn[data-view=chat]')?.after(supportNav);supportNav.hidden=!support;
   if(support){supportNav.innerHTML=[['chat','Обращения'],['support-queue','Очередь доставки'],['templates','Шаблоны'],['support-status','Состояние'],...(S.permissions.canManageSettings?[['support-settings','Настройки']]:[])].map(([id,label])=>`<button class="${S.view===id?'on':''}" data-support-view="${id}" type="button" aria-current="${S.view===id?'page':'false'}">${label}</button>`).join('');supportNav.querySelectorAll('button').forEach(b=>b.onclick=()=>setView(b.dataset.supportView));supportNav.querySelector('.on')?.scrollIntoView({block:'nearest',inline:'nearest'});}
   $('support-queue').classList.toggle('on',S.view==='support-queue');
   if(S.view==='support-queue')window.SupportQueue?.open();else window.SupportQueue?.pause();

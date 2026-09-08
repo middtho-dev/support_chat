@@ -4,11 +4,11 @@
     if (!proxy || proxy.type !== 'tcp' || !Number.isInteger(Number(proxy.port)) || proxy.port < 1 || proxy.port > 65535) return null;
     if (typeof host !== 'string' || !/^[a-zA-Z0-9.:-]+$/.test(host)) return null;
     const hostname = host.includes(':') ? `[${host}]` : host;
-    const protocol = /ssh/i.test(proxy.name) ? 'ssh' : /https/i.test(proxy.name) ? 'https' : 'http';
+    const protocol = proxy.web === true ? 'http' : /ssh/i.test(proxy.name) ? 'ssh' : /https/i.test(proxy.name) ? 'https' : 'http';
     try { return new URL(`${protocol}://${hostname}:${proxy.port}/`).href; } catch { return null; }
   }
   function primaryProxy(proxies) {
-    return proxies.find(p => p.type === 'tcp' && p.online && /luci|web|http/i.test(p.name));
+    return proxies.find(p => p.type === 'tcp' && p.online && p.web === true) || proxies.find(p => p.type === 'tcp' && p.online && p.web !== false && /luci|web|http/i.test(p.name));
   }
   function groupDevices(proxies = [], clients = []) {
     const groups = new Map();

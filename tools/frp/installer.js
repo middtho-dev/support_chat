@@ -10,9 +10,9 @@ function availablePorts(state, ranges, exclusions = []) {
 }
 function suggestPort(ports) { return ports.length ? ports[crypto.randomInt(ports.length)] : null; }
 const quote = value => "'" + String(value).replaceAll("'", "'\\''") + "'";
-function routerScript(state, port) {
-  const values = { SERVER: quote(state.host), SERVER_PORT: quote(state.port), TOKEN: quote(state.compatibilityMode ? '' : state.token), PORT: quote(port) };
-  return fs.readFileSync(path.join(__dirname, 'installer/router.sh'), 'utf8').replace(/\r\n/g, '\n').replace(/@@(SERVER|SERVER_PORT|TOKEN|PORT)@@/g, (_, key) => values[key]);
+function routerScript(state, port, target = {}) {
+  const values = { SERVER: quote(state.host), SERVER_PORT: quote(state.port), TOKEN: quote(state.compatibilityMode ? '' : state.token), PORT: quote(port), LOCAL_IP: quote(target.localIP || '127.0.0.1'), LOCAL_PORT: quote(target.localPort || 80) };
+  return fs.readFileSync(path.join(__dirname, 'installer/router.sh'), 'utf8').replace(/\r\n/g, '\n').replace(/@@(SERVER|SERVER_PORT|TOKEN|PORT|LOCAL_IP|LOCAL_PORT)@@/g, (_, key) => values[key]);
 }
 function buildInstaller(config) {
   const payload = Buffer.from(JSON.stringify(config)).toString('base64');

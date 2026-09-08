@@ -19,10 +19,10 @@
     <p id="frp-exclusions"></p></details><h3>Устройства <span id="frp-count"></span></h3>
     <input id="frp-search" type="search" placeholder="Поиск по имени, IP или порту" aria-label="Поиск устройств">
     <p>Нажмите имя для входа в веб-интерфейс. Онлайн — устройство подключено к FRP.</p>
-    <div class="frp-table"><table><thead><tr><th>Устройство</th><th>IP</th><th>Статус</th><th>Порты</th><th>Соединения</th><th>Последний раз в сети</th></tr></thead><tbody id="frp-devices"></tbody></table></div>
-    <section class="frp-installer" aria-labelledby="frp-installer-title"><h3 id="frp-installer-title">Подключить роутер OpenWrt</h3><p>Создайте файл для одного устройства. При запуске на Windows он определит шлюз и получит свободный порт от сервера.</p>
-    <form id="frp-installer-form"><div class="frp-installer-credentials"><label>Имя устройства<input id="frp-installer-name" required maxlength="80" placeholder="Например, Дом · роутер" autocomplete="off"><small>Так устройство будет называться здесь, в панели.</small></label><label>Пароль SSH · root<input id="frp-installer-password" type="password" required maxlength="512" autocomplete="new-password"><small>Включается в файл установки, на сервере не сохраняется.</small></label></div><p>Порт назначается во время установки из диапазона 20000–23000. Учитываются активные и отключённые устройства, служебные порты и другие установки.</p><button id="frp-generate" type="submit">Создать установщик .bat</button><p id="frp-installer-result" role="status"></p><p>Запускайте файл на ПК в сети роутера. Файл содержит пароль SSH — передавайте его только владельцу роутера и удалите после установки. FRPC устанавливается через opkg/apk, настройки доступны в LuCI. Файл действует 7 дней и подходит для одного роутера.</p></form>
-    <details><summary>Файлы установки <span id="frp-reservation-count"></span></summary><p>Отзыв запрещает дальнейшее использование файла, но не отключает уже настроенный роутер. Выданный порт остаётся закреплён за устройством.</p><div id="frp-reservations"></div></details></section>
+    <div class="frp-table"><table><thead><tr><th>Устройство</th><th>IP</th><th>Статус</th><th>Порты</th><th>Соединения</th><th>Последний раз в сети</th><th>Управление</th></tr></thead><tbody id="frp-devices"></tbody></table></div><div id="frp-mobile-devices" class="frp-mobile-devices"></div>
+    <details class="frp-installer"><summary id="frp-installer-title">Подключить роутер OpenWrt</summary><p>Создайте файл для одного устройства. При запуске на Windows он определит шлюз и получит свободный порт от сервера.</p>
+    <form id="frp-installer-form"><div class="frp-installer-credentials"><label>Имя устройства<input id="frp-installer-name" required maxlength="80" placeholder="Например, Дом · роутер" autocomplete="off"><small>Так устройство будет называться здесь, в панели.</small></label><label>Пароль SSH · root<input id="frp-installer-password" type="password" required maxlength="512" autocomplete="new-password"><small>Включается в файл установки, на сервере не сохраняется.</small></label></div><details><summary>Адрес назначения</summary><div class="frp-installer-credentials"><label>IP назначения<input id="frp-local-ip" value="127.0.0.1" required maxlength="45"><small>Адрес сервиса, доступный с роутера.</small></label><label>Порт назначения<input id="frp-local-port" type="number" min="1" max="65535" value="80" required><small>80 — веб-интерфейс роутера по HTTP.</small></label></div></details><p>Порт назначается во время установки из диапазона 20000–23000. Учитываются активные и отключённые устройства, служебные порты и другие установки.</p><button id="frp-generate" type="submit">Создать установщик .bat</button><p id="frp-installer-result" role="status"></p><p>Запускайте файл на ПК в сети роутера. Файл содержит пароль SSH — передавайте его только владельцу роутера и удалите после установки. FRPC устанавливается через opkg/apk, настройки доступны в LuCI. Файл действует 7 дней и подходит для одного роутера.</p></form>
+    </details><dialog id="frp-device-dialog"><form id="frp-device-form"><h3>Устройство</h3><label>Имя<input id="frp-device-name" required maxlength="80"></label><label>Порт веб-интерфейса<select id="frp-device-web"></select><small>По этому порту устройство открывается из панели.</small></label><div class="frp-actions"><button type="submit">Сохранить</button><button id="frp-device-cancel" type="button" class="ghost">Отмена</button></div><p id="frp-device-error" role="alert"></p></form></dialog>
   </div>`;
   let downloadUrl = null;
   function clearDownload() {
@@ -34,11 +34,17 @@
   }
   function renderInstaller() {
     $('frp-installer-form').querySelectorAll('input,button').forEach(el => { el.disabled = pending || current.busy; });
-    const records = current.enrollments || [];
-    $('frp-reservation-count').textContent = `(${records.length})`;
-    const html = records.map(r => `<div class="frp-reservation"><span><strong>${esc(r.name)}</strong><small>${r.port ? `Порт ${esc(r.port)}` : 'Порт ещё не выдан'} · ${r.revoked ? 'Файл отозван' : Date.parse(r.expiresAt) < Date.now() ? 'Срок истёк' : r.completedAt ? 'Устройство подключено' : r.port ? 'Ожидает подключения' : 'Ожидает запуска'}</small><small>Создан ${esc(new Date(r.createdAt).toLocaleString('ru-RU'))}</small></span>${!r.revoked ? `<button class="ghost" type="button" data-revoke-installer="${esc(r.id)}" ${pending ? 'disabled' : ''}>Отозвать</button>` : ''}</div>`).join('') || '<p>Файлы ещё не создавались.</p>';
-    if (!$('frp-reservations').contains(document.activeElement)) $('frp-reservations').innerHTML = html;
   }
+  let editingKey = null;
+  function openDevice(key) {
+    const device = window.FrpLinks.groupDevices(current?.devices, current?.clients).find(d => d.key === key);
+    if (!device) return;
+    editingKey = key; $('frp-device-name').value = device.name;
+    $('frp-device-web').innerHTML = '<option value="0">Автоматически</option>' + device.ports.filter(p => p.type === 'tcp').map(p => `<option value="${esc(p.port)}">${esc(p.port)} · ${esc(p.name)}</option>`).join('');
+    $('frp-device-web').value = device.ports.find(p => p.web)?.port || 0;
+    $('frp-device-error').textContent = ''; $('frp-device-dialog').showModal();
+  }
+
   function link(proxy, label) {
     const url = window.FrpLinks.deviceUrl(current?.host, proxy);
     return url ? `<a data-device-link href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>` : esc(label);
@@ -47,8 +53,12 @@
     const devices = window.FrpLinks.groupDevices(current?.devices, current?.clients);
     const search = $('frp-search').value.toLowerCase();
     $('frp-count').textContent = `(${devices.filter(d => d.online).length} онлайн / ${devices.length} всего)`;
-    const rows = devices.filter(d => `${d.name} ${d.ip} ${d.ports.map(p => `${p.name} ${p.port}`).join(' ')}`.toLowerCase().includes(search))
-      .map(d => `<tr><td>${link(d.primary, d.name)}${!d.primary ? '<br><small>Нет активного веб-туннеля</small>' : ''}</td><td data-label="IP-адрес">${esc(d.ip || '—')}</td><td data-label="Состояние">${d.stale ? 'Нет данных' : d.online ? '🟢 Онлайн' : 'Отключено'}</td><td data-label="Порты">${d.ports.map(p => `<span title="${esc(p.name)}">${esc(p.port ?? '—')}/${esc(p.type)}${/luci|web|http/i.test(p.name) ? ' · Веб' : /ssh/i.test(p.name) ? ' · SSH' : ''}${!p.online ? ' · отключён' : ''}</span>`).join('<br>') || 'Без туннелей'}</td><td data-label="Соединения">${d.online ? esc(d.connections) : '—'}</td><td data-label="Последняя активность">${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('ru-RU')) : '—'}</td></tr>`).join('') || '<tr><td colspan="6">Устройства не найдены</td></tr>';
+    const filtered = devices.filter(d => `${d.name} ${d.ip} ${d.ports.map(p => `${p.name} ${p.port}`).join(' ')}`.toLowerCase().includes(search));
+    const controls = d => `<button type="button" class="ghost" data-edit-device="${esc(d.key)}">Изменить</button><button type="button" class="danger" data-delete-device="${esc(d.key)}">Удалить</button>`;
+    const rows = filtered.map(d => `<tr><td>${link(d.primary, d.name)}${!d.primary ? '<br><small>Нет активного веб-туннеля</small>' : ''}</td><td data-label="IP-адрес">${esc(d.ip || '—')}</td><td data-label="Состояние">${d.stale ? 'Нет данных' : d.online ? '🟢 Онлайн' : 'Отключено'}</td><td data-label="Порты">${d.ports.map(p => `<span title="${esc(p.name)}">${esc(p.port ?? '—')}/${esc(p.type)}${/luci|web|http/i.test(p.name) ? ' · Веб' : /ssh/i.test(p.name) ? ' · SSH' : ''}${!p.online ? ' · отключён' : ''}</span>`).join('<br>') || 'Без туннелей'}</td><td data-label="Соединения">${d.online ? esc(d.connections) : '—'}</td><td data-label="Последняя активность">${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('ru-RU')) : '—'}</td><td><div class="frp-device-actions">${controls(d)}</div></td></tr>`).join('') || '<tr><td colspan="7">Устройства не найдены</td></tr>';
+    const mobile = $('frp-mobile-devices');
+    const opened = new Set([...mobile.querySelectorAll('details[open]')].map(el => el.dataset.deviceKey));
+    if (!mobile.contains(document.activeElement)) mobile.innerHTML = filtered.map(d => `<details data-device-key="${esc(d.key)}" ${opened.has(d.key) ? 'open' : ''}><summary><span>${esc(d.name)}</span><small>${d.stale ? 'Нет данных' : d.online ? '● Онлайн' : '○ Офлайн'}</small></summary><div class="frp-device-info"><span>IP: ${esc(d.ip || '—')}</span><span>Порты: ${esc(d.ports.map(p => `${p.port}/${p.type}`).join(', '))}</span><span>Соединения: ${esc(d.connections)}</span><span>${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString('ru-RU')) : 'Нет активности'}</span>${d.primary ? link(d.primary, 'Открыть веб-интерфейс') : ''}<div class="frp-device-actions">${controls(d)}</div></div></details>`).join('') || '<p>Устройства не найдены</p>';
     const table=$('frp-devices');if(table.innerHTML!==rows&&!table.contains(document.activeElement))table.innerHTML=rows;
   }
   function render(updateFields = false) {
@@ -102,13 +112,21 @@
   $('frp-settings').addEventListener('submit', event => { event.preventDefault(); action('configure', Object.fromEntries(['compatibilityMode', 'host', 'port', 'bindAddr', 'portStart', 'portEnd', 'reservedPorts', 'refreshSeconds', 'historyLimit', 'newToken'].map(key => [key, $('frp-' + key).value]))); });
   $('frp-refresh').addEventListener('click', load);
   $('frp-search').addEventListener('input', renderDevices);
-  $('frp-reservations').addEventListener('click', event => {
-    const button = event.target.closest('[data-revoke-installer]');
-    if (button && confirm('Отозвать файл установки? Настроенный роутер продолжит работать.')) action('revoke-installer', { id: button.dataset.revokeInstaller });
+  panel.addEventListener('click', event => {
+    const edit = event.target.closest('[data-edit-device]');
+    const remove = event.target.closest('[data-delete-device]');
+    if (edit && !pending) openDevice(edit.dataset.editDevice);
+    if (remove && !pending && confirm('Удалить устройство из списка панели? Подключение и туннели продолжат работать.')) action('delete-device', { key: remove.dataset.deleteDevice });
   });
+  $('frp-device-cancel').onclick = () => $('frp-device-dialog').close();
+  $('frp-device-form').onsubmit = async event => {
+    event.preventDefault(); if (pending) return;
+    const key = editingKey; await action('update-device', { key, name: $('frp-device-name').value, webPort: Number($('frp-device-web').value) });
+    if (current?.error) $('frp-device-error').textContent = current.error; else $('frp-device-dialog').close();
+  };
   $('frp-installer-form').addEventListener('submit', async event => {
     event.preventDefault(); if (pending || !current) return;
-    const body = { name: $('frp-installer-name').value.trim(), password: $('frp-installer-password').value, enrollmentUrl: new URL('/api/frp/enroll', location.origin).href };
+    const body = { name: $('frp-installer-name').value.trim(), password: $('frp-installer-password').value, localIP: $('frp-local-ip').value.trim(), localPort: Number($('frp-local-port').value), enrollmentUrl: new URL('/api/frp/enroll', location.origin).href };
     clearDownload(); generation++; loading = false; pending = true; render();
     const token = S.token, g = generation;
     $('frp-installer-result').textContent = 'Создаём файл установки…';
@@ -135,13 +153,13 @@
     } catch (e) { S.token = null; $('login-error').textContent = e.message; }
   });
   $('logout').addEventListener('click', () => {
-    generation++; pending = false; loading = false; S.token = null; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-reservations').textContent = '';  $('frp-devices').textContent = '';
+    generation++; pending = false; loading = false; S.token = null; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-mobile-devices').textContent = ''; $('frp-device-dialog').close();  $('frp-devices').textContent = '';
     panel.hidden = true; $('login').hidden = false; $('logout').hidden = true;
   });
   }
   window.FrpPanel = {
     open: load,
-    reset: () => { generation++; loading = false; pending = false; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-reservations').textContent = '';  $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
+    reset: () => { generation++; loading = false; pending = false; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-mobile-devices').textContent = ''; $('frp-device-dialog').close();  $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
   };
   panel.addEventListener('click', event => {
     const anchor = event.target.closest('[data-device-link]');

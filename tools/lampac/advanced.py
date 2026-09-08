@@ -64,19 +64,19 @@ CLIENT.update({'workspace_header_'+k:(v,None) for k,v in HEADER.items()})
 CLIENT.update({'interface_size':('Масштаб интерфейса',{'small':'Компактный','normal':'Обычный','bigger':'Крупный'}),
  'poster_size':('Качество постеров',{'w200':'Экономное','w300':'Обычное','w500':'Высокое'})})
 HOME_STYLE = {
- 'workspace_home_accent': ('Цвет акцента', {'native':'Как в Lampa','cyan':'KV9 · голубой','violet':'Фиолетовый','amber':'Янтарный','mint':'Мятный'}),
+ 'workspace_home_accent': ('Цвет акцента', {'native':'Как в Lampa','cyan':'KV9RU · голубой','violet':'Фиолетовый','amber':'Янтарный','mint':'Мятный'}),
  'workspace_home_surface': ('Подложка верхней панели и меню', {'native':'Как в Lampa','glass':'Полупрозрачная','solid':'Тёмная'}),
  'workspace_home_corners': ('Скругление панелей', {'native':'Как в Lampa','soft':'Мягкое','square':'Прямое'}),
  'workspace_home_motion': ('Движение интерфейса', {'native':'Как в Lampa','reduced':'Минимум анимации'})}
 CLIENT.update(HOME_STYLE)
-CLIENT['workspace_kv9_theme']=('Фирменная тема KV9',None)
+CLIENT['workspace_kv9_theme']=('Фирменная тема KV9RU',None)
 # Native component names come from Lampa Settings; unknown plugin sections use "other".
 SETTINGS_SECTIONS = {'all':'Все настройки', 'account':'Аккаунт CUB', 'interface':'Интерфейс',
  'player':'Плеер', 'parser':'Поиск торрентов', 'server':'TorrServer', 'tmdb':'TMDB',
  'plugins':'Плагины', 'parental_control':'Родительский контроль', 'more':'Дополнительно',
  'workspace_device':'Workspace · информация', 'other':'Разделы других плагинов'}
 CLIENT.update({'workspace_settings_'+k:(v,None) for k,v in SETTINGS_SECTIONS.items()})
-CLIENT['workspace_kv9_ambient']=('Анимированный фон KV9',None)
+CLIENT['workspace_kv9_ambient']=('Анимированный фон KV9RU',None)
 def discovered_key(kind, identity):
     a,b=2166136261,2246822519
     for char in identity:
@@ -100,15 +100,15 @@ PREFERENCE_HELP = {
  'source':('Каталог','Источник названий, постеров и описаний фильмов: TMDB или CUB. Не выбирает источник воспроизведения.'),
  'start_page':('Каталог','Раздел, открываемый при запуске Lampa. «Последняя» возвращает к предыдущему разделу.'),
  'adult_content_view':('Каталог','Разрешает показывать взрослый контент в поддерживающих этот параметр каталогах. Не включает серверный модуль 18+.'),
- 'screensaver':('Заставка','Показывает заставку при бездействии; не заменяет анимированный фон KV9.'),
+ 'screensaver':('Заставка','Показывает заставку при бездействии; не заменяет анимированный фон KV9RU.'),
  'screensaver_type':('Заставка','Источник изображений или видео заставки. Работает только при включённой заставке.'),
  'screensaver_time':('Заставка','Количество минут бездействия до запуска заставки.'),
- 'background':('Штатное оформление Lampa','Показывает фон, который выбирает сама Lampa. В каталоге при активном фоне KV9 он временно скрыт; внутри фильма сохраняется.'),
- 'background_type':('Штатное оформление Lampa','Вид штатного фона Lampa. Применяется при включённом фоне; не меняет фон KV9.'),
- 'black_style':('Штатное оформление Lampa','Чёрная схема штатного интерфейса. Тема KV9 имеет приоритет; это значение сохраняется при её выключении.'),
- 'glass_style':('Штатное оформление Lampa','Прозрачные подложки штатного интерфейса. Тема KV9 задаёт собственные цвета панелей.'),
+ 'background':('Штатное оформление Lampa','Показывает фон, который выбирает сама Lampa. В каталоге при активном фоне KV9RU он временно скрыт; внутри фильма сохраняется.'),
+ 'background_type':('Штатное оформление Lampa','Вид штатного фона Lampa. Применяется при включённом фоне; не меняет фон KV9RU.'),
+ 'black_style':('Штатное оформление Lampa','Чёрная схема штатного интерфейса. Тема KV9RU имеет приоритет; это значение сохраняется при её выключении.'),
+ 'glass_style':('Штатное оформление Lampa','Прозрачные подложки штатного интерфейса. Тема KV9RU задаёт собственные цвета панелей.'),
  'light_version':('Производительность','Упрощённый интерфейс Lampa для слабых устройств. Может менять расположение и доступность декоративных элементов.'),
- 'animation':('Движение и звук','Анимации переходов самой Lampa. Анимированный фон KV9 управляется отдельно.'),
+ 'animation':('Движение и звук','Анимации переходов самой Lampa. Анимированный фон KV9RU управляется отдельно.'),
  'advanced_animation':('Движение и звук','Дополнительные эффекты Lampa. Могут увеличить нагрузку на слабых телевизорах.'),
  'interface_sound_play':('Движение и звук','Звуковые сигналы при перемещении по интерфейсу; не меняет громкость фильма.'),
  'helper':('Интерфейс','Подсказки по управлению с пульта и клавиатуры в поддерживаемых экранах.'),
@@ -144,9 +144,9 @@ PREFERENCE_HELP = {
 
 def preference_meta(key):
     if key=='workspace_kv9_theme':
-        return {'group':'Тема KV9','description':'Фирменные цвета, скругления и контрастное выделение. Выключение возвращает штатное оформление Lampa.','global':True}
+        return {'group':'Тема KV9RU','description':'Фирменные цвета, скругления и контрастное выделение. Выключение возвращает штатное оформление Lampa.','global':True}
     if key=='workspace_kv9_ambient':
-        return {'group':'Тема KV9','description':'Медленно движущийся бирюзовый фон каталога и меню. Внутри фильма и во время воспроизведения скрывается. Работает с темой KV9; при системном уменьшении движения остаётся статичным.','global':True,'default':'true'}
+        return {'group':'Тема KV9RU','description':'Медленно движущийся бирюзовый фон каталога и меню. Внутри фильма и во время воспроизведения скрывается. Работает с темой KV9RU; при системном уменьшении движения остаётся статичным.','global':True,'default':'true'}
     if key.startswith('workspace_header_'):
         return {'group':'Видимость · Верхняя панель','description':'Показывать «'+HEADER[key.removeprefix('workspace_header_')]+'» в верхней панели. Не удаляет данные и не включает отсутствующие функции.','global':True,'visibility':True}
     if key.startswith('workspace_settings_'):
@@ -291,7 +291,7 @@ def valid_preference(key,value):
 def client_settings(config, controls=None):
     current=config.get('WorkspaceUI',{})
     fields=[{'key':k,'label':v[0],'options':v[1] or {'true':'Включено','false':'Выключено'}, **preference_meta(k)} for k,v in CLIENT.items() if k not in HOME_STYLE]+[{'key':c['key'],'label':c['label'],'group':{'Пункты левого меню':'Видимость · Левое меню','Разделы настроек':'Видимость · Разделы настроек'}.get(c['group'],c['group'].replace('Пункты: ','Видимость · ')),'options':{'true':'Доступен','false':'Скрыт'},'description':((c.get('description','')+' ') if c.get('description') else '')+('Показывает отдельный пункт меню; сам плагин продолжает работать.' if c['key'].startswith('workspace_ui_m_') else 'Доступность пункта в Lampa, а не его значение. Явное включение разрешает его даже внутри скрытого раздела.'),'global':True,'visibility':True} for c in (controls or []) if c['key'] not in CONTROL_ALIASES]
-    groups=['Тема KV9','Интерфейс','Каталог','Карточки каталога','Страница фильма','Движение и звук','Штатное оформление Lampa','Производительность','Заставка','Плеер','Субтитры','Поиск торрентов','Торренты · клиент','Сеть клиента','Видимость · Верхняя панель','Видимость · Левое меню','Видимость · Разделы настроек']
+    groups=['Тема KV9RU','Интерфейс','Каталог','Карточки каталога','Страница фильма','Движение и звук','Штатное оформление Lampa','Производительность','Заставка','Плеер','Субтитры','Поиск торрентов','Торренты · клиент','Сеть клиента','Видимость · Верхняя панель','Видимость · Левое меню','Видимость · Разделы настроек']
     fields.sort(key=lambda f:(groups.index(f['group']) if f['group'] in groups else len(groups),f['group']))
     return {'mode':current.get('mode','disabled'),'values':normalize_preferences(current.get('values',{})),'fields':fields}
 

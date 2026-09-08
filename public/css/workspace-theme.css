@@ -129,3 +129,64 @@ body.tg-mini.support-active .main,body.tg-mini.support-active .side{top:calc(114
 
 #cache-reset-btn{white-space:nowrap;min-height:40px}
 @media(max-width:600px){#cache-reset-btn{font-size:11px;padding:8px}body.ticket-open .top>#cache-reset-btn{display:none}}
+
+/* Compact shared layout. Local support navigation stays inside the rail. */
+:root{--rail-width:174px}
+body{font-size:13px}
+.panel{padding:20px}.page-heading,.settings-hero{margin-bottom:16px}
+.page-heading h2,.settings-hero h2,.frp-wrap>h2,.section>h2{font-size:22px}
+.page-heading p,.settings-hero p{font-size:13px}
+.rail{padding:12px 8px;gap:4px}.navbtn{height:38px;flex-basis:38px;padding:0 10px;font-size:12px;border-radius:8px}
+.ghost,.save,.add,.danger,.okbtn,.frp-actions button{min-height:34px;padding:7px 11px;border-radius:8px;font-size:12px}
+.card,.voice-section .card,.service-card,.settings-card{border-radius:10px}
+.service-card{padding:14px;min-height:0}.service-card ul,.service-heading{min-height:0}.service-card footer{margin-top:12px}
+.overview-stats{gap:10px}.overview-stats>div{padding:12px}.overview-freshness{margin-bottom:12px}
+.voice-section details>summary,.frp-wrap details>summary{min-height:30px;gap:8px;font-size:12px}
+.settings-card>summary{min-height:52px;padding:12px}.settings-card-body{padding:14px}
+.voice-actions{display:flex;flex-wrap:wrap;gap:8px}.voice-actions>button{width:auto;min-height:34px}
+.voice-preview button,#voice-save,#set-save{min-width:0}
+.voice-job,.queue-item{padding:12px;margin:8px 0}.voice-field>small,.voice-field .field-help{font-size:11px}
+.management-tabs button,.voice-tabs button,.settings-filters button{min-height:34px;padding:7px 10px;font-size:12px}
+.support-nav{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:0 0 4px 22px;margin:0;border:0;background:transparent;overflow:visible;flex:none}
+.support-nav[hidden]{display:none!important}.support-nav button{min-height:30px;padding:5px 8px;font-size:11px;text-align:left;border-radius:6px}
+body.support-active .app{grid-template-rows:64px minmax(0,1fr)}body.support-active .workspace{grid-row:2}
+body.tg-mini.support-active .app{grid-template-rows:calc(58px + var(--tg-top-ui)) minmax(0,1fr)!important}
+.side-head{padding:12px}.metrics{gap:6px}.metric{padding:9px}.metric b{font-size:19px}.metric span{font-size:10px}
+.read-all{margin:6px 0;min-height:32px}.ticket{padding:11px 12px}.chat-head{padding:10px 14px}.ticket-meta{padding:6px 14px;min-height:32px}
+#meta-card-open{padding:5px 9px;min-height:30px;font-size:11px;white-space:nowrap}.meta-summary{gap:6px;min-width:0}
+#frp .frp-wrap>.frp-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+#frp .frp-actions button{min-height:34px;padding:7px 11px;border-radius:8px}
+#frp details{padding:12px 14px;border-radius:10px;margin:12px 0}#frp .frp-settings-details{border-radius:10px}
+#frp input,#frp select{min-height:36px;padding:7px 10px;font-size:13px}#frp p{font-size:12px;margin:10px 0}
+#frp h2{font-size:22px}#frp h3{font-size:15px;margin:18px 0 10px}#frp td,#frp th{padding:10px 12px;font-size:12px}
+#frp .frp-device-actions{display:flex;gap:6px;flex-wrap:wrap}#frp .frp-device-actions button{padding:5px 8px;min-height:30px;font-size:11px}
+#frp-device-dialog{width:min(420px,calc(100vw - 24px));max-height:85dvh;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:18px}
+#frp-device-dialog::backdrop{background:#0009}#frp-device-form{display:grid;gap:14px}
+.frp-mobile-devices{display:none}
+@media(min-width:561px) and (max-width:1100px){:root{--rail-width:90px}.navbtn{height:50px;flex-basis:50px;padding:4px;font-size:10px}.support-nav{padding:0}.support-nav button{white-space:normal;text-align:center;font-size:10px}}
+@media(min-width:561px) and (max-width:980px){body.support-active .main,body.support-active .side{top:64px}body.tg-mini.support-active .main,body.tg-mini.support-active .side{top:calc(58px + var(--tg-top-ui))!important}}
+@media(max-width:600px){#frp .frp-table{display:none}.frp-mobile-devices{display:block}#frp .frp-mobile-devices details{padding:0;margin:6px 0}#frp .frp-mobile-devices summary{min-height:42px;padding:9px 11px;gap:8px}#frp .frp-mobile-devices summary>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}#frp .frp-mobile-devices summary>small{font-size:10px;white-space:nowrap}#frp .frp-mobile-devices summary::after{font-size:16px;margin:0}#frp .frp-device-info{display:grid;gap:8px;padding:4px 12px 12px;font-size:12px}#frp .frp-device-actions button{min-height:36px}#frp .frp-actions>button{flex:0 1 auto}}
+@media(max-width:560px){
+ .panel,body.tg-mini .panel{padding:14px 10px!important}.page-heading h2,.settings-hero h2,.section>h2{font-size:20px}
+ .rail{padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px))}.navbtn{height:54px;flex:0 0 70px;padding:4px;gap:3px;font-size:10px}
+ .support-nav{position:fixed;top:58px;left:0;right:0;height:38px;flex-direction:row;padding:3px 8px;gap:4px;overflow-x:auto;background:var(--panel);border-bottom:1px solid var(--line);z-index:22}
+ .support-nav button{white-space:nowrap;min-height:30px;font-size:11px;padding:5px 8px}
+ body.support-active .app{grid-template-rows:58px minmax(0,1fr)}
+ body.support-active .main,body.support-active .side{top:96px!important}
+ body.tg-mini.support-active .support-nav{top:calc(58px + var(--tg-top-ui))}
+ body.tg-mini.support-active .main,body.tg-mini.support-active .side{top:calc(96px + var(--tg-top-ui))!important}
+ body.ticket-open .support-nav{display:none}body.ticket-open.support-active .main{top:58px!important}body.tg-mini.ticket-open.support-active .main{top:calc(58px + var(--tg-top-ui))!important}
+ .service-grid{gap:10px}.service-card{padding:12px;min-height:0}.service-card ul,.service-heading{min-height:0}.service-card footer{display:flex;gap:6px}
+ .voice-section details,.settings-card{margin:8px 0}.voice-actions>button{min-height:38px}.voice-toggle{padding:10px 0}.settings-card>summary{min-height:46px}
+ input:not([type=checkbox]):not([type=radio]),select,#frp input,#frp select{font-size:16px;min-height:38px}
+ #mobile-ticket-card{min-width:34px;padding:6px;font-size:13px}.mobile-ticket-copy{min-width:0}
+ .maintenance-title>button{flex:0 0 auto}.overview-heading>button{min-width:0;flex:0 0 auto}
+}
+#lampac .card,#voice .card{padding:12px 14px;margin:10px 0;min-height:0;border-radius:10px}
+#lampac .card>h3,#voice .card>h3{margin:0 0 10px;font-size:14px}
+#lampac details>summary,#voice details>summary{padding:3px 0;min-height:28px;font-size:12px}
+#lampac .lc-pref-row{padding:10px 0;gap:10px}#lampac .lc-pref-row strong{font-size:12px}#lampac .lc-help{font-size:11px;margin:5px 0}
+#lampac .lc-tabs{gap:6px;margin-bottom:12px}#lampac .lc-tabs button{min-height:34px;font-size:12px;padding:6px 10px}
+#lampac .voice-actions,#voice .voice-actions{margin:10px 0 0;gap:6px}#lampac .lc-list{gap:10px}
+#lampac .lc-pref-family{padding:0 12px;margin:10px 0}#voice .voice-grid{gap:12px;margin-top:12px}
+@media(max-width:560px){.top h1{font-size:13px;white-space:nowrap}.top .logo{width:32px;height:32px}.top .brand{gap:8px}.top{padding-inline:10px}#cache-reset-btn{font-size:10px;padding:6px;min-height:32px}#logout-btn{font-size:11px;padding:6px 9px;min-height:32px}#lampac .lc-tabs,.voice-tabs{flex-wrap:nowrap;overflow-x:auto;max-width:100%;padding-bottom:4px}#lampac .lc-tabs button,.voice-tabs button{flex:none;white-space:nowrap}#lampac .card,#voice .card{padding:12px}#lampac .voice-actions button,#voice .voice-actions button{min-height:36px;padding:6px 9px;font-size:11px}}
