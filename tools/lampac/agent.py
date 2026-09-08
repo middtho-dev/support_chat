@@ -247,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, devices.listing(ROOT))
             elif self.path.endswith('/advanced'):
                 config = merge(read_config('current.conf'), read_config('init.conf'))
-                self.reply(200, {'fields': advanced.fields(config), 'client': advanced.client_settings(config)})
+                self.reply(200, {'fields': advanced.fields(config), 'client': advanced.client_settings(config, devices.control_listing(ROOT))})
             elif self.path.endswith('/torrents'):
                 self.reply(200, {'torrents': advanced.torrents(torr_request)})
             elif self.path.endswith('/clients'):
@@ -266,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ['/workspace-device/register', '/workspace-device/enroll', '/workspace-device/poll', '/workspace-device/announcement-ack']:
             try:
                 length = int(self.headers.get('Content-Length', '0'))
-                if not 0 < length <= 8192:
+                if not 0 < length <= (1048576 if self.path.endswith('/poll') else 8192):
                     raise ValueError('Некорректный размер запроса')
                 body=json.loads(self.rfile.read(length))
                 if not isinstance(body,dict):
@@ -276,6 +276,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP',''))
                 if self.path.endswith('/poll'):
                     policy = read_config('init.conf').get('WorkspaceUI', {})
+                    result['uiValues'] = {k:v for k,v in policy.get('values',{}).items() if (advanced.dynamic_key(k) or k.startswith(('workspace_settings_','workspace_menu_'))) and policy.get('mode') != 'disabled'}
                     result['kv9Theme'] = policy.get('mode') != 'disabled' and policy.get('values', {}).get('workspace_kv9_theme') == 'true'
                 return self.reply(200, result)
             except PermissionError:

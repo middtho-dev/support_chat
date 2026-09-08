@@ -198,16 +198,22 @@ def apply_fields(config, effective, values):
         cursor[parts[-1]]=value
     return result
 
-def client_settings(config):
+def dynamic_key(key):
+    return isinstance(key,str) and re.fullmatch(r'workspace_ui_[ism]_[a-f0-9]{16}',key) is not None
+
+def valid_preference(key,value):
+    return isinstance(value,str) and (value in {'true','false'} if dynamic_key(key) else key in CLIENT and value in (CLIENT[key][1] or {'true':1,'false':1}))
+
+def client_settings(config, controls=None):
     current=config.get('WorkspaceUI',{})
     return {'mode':current.get('mode','disabled'), 'values':current.get('values',{}),
-            'fields':[{'key':k,'label':v[0],'options':v[1] or {'true':'Включено','false':'Выключено'}, **preference_meta(k)} for k,v in CLIENT.items() if k not in HOME_STYLE]}
+            'fields':[{'key':k,'label':v[0],'options':v[1] or {'true':'Включено','false':'Выключено'}, **preference_meta(k)} for k,v in CLIENT.items() if k not in HOME_STYLE]+[{'key':c['key'],'label':c['label'],'group':c['group'],'options':{'true':'Доступен','false':'Скрыт'},'description':'Управление этим пунктом. Явное включение разрешает пункт даже внутри скрытого раздела.','global':True} for c in (controls or [])]}
 
 def apply_client(config, effective, body, public_url):
     if set(body) != {'mode','values'} or body['mode'] not in ('disabled','revision','always') or not isinstance(body['values'],dict):
         raise ValueError('Некорректная политика клиента')
     for key,value in body['values'].items():
-        if key not in CLIENT or not isinstance(value,str) or value not in (CLIENT[key][1] or {'true':1,'false':1}):
+        if not valid_preference(key,value):
             raise ValueError('Недопустимое значение клиента')
     result=copy.deepcopy(config)
     result['WorkspaceUI']={**body,'revision':str(time.time_ns())}
@@ -222,7 +228,7 @@ def apply_client(config, effective, body, public_url):
 def client_script(config):
     policy=config.get('WorkspaceUI',{'mode':'disabled','values':{},'revision':'0'})
     # JSON is data, never interpolated into an executable string literal.
-    return (Path(__file__).parent/'client-profile.js').read_text(encoding='utf-8').replace('POLICY',json.dumps(policy,ensure_ascii=True))
+    return (Path(__file__).parent/'ui-controls.js').read_text(encoding='utf-8') + '\n' + (Path(__file__).parent/'client-profile.js').read_text(encoding='utf-8').replace('POLICY',json.dumps(policy,ensure_ascii=True))
 
 def torrents(request):
     raw=request({'action':'list'},'/torrents')

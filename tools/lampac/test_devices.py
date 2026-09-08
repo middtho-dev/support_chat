@@ -58,6 +58,24 @@ class DeviceTests(unittest.TestCase):
         save({},['screensaver'])
         self.assertEqual(self.poll(r['token'],3)['overrides'],{'internal_torrclient':'true'})
 
+    def test_individual_ui_controls_roundtrip_and_revoke(self):
+        r=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1')
+        key='workspace_ui_i_0123456789abcdef'
+        controls=[{'key':key,'label':'Очистить кеш','group':'Пункты: Хранилище'}]
+        devices.public(self.root,'poll',{'token':r['token'],'applied':0,'snapshot':{},'controls':controls},'203.0.113.1')
+        self.assertEqual(devices.control_listing(self.root),controls)
+        self.assertTrue(any(f['key']==key for f in devices.listing(self.root)['fields']))
+        devices.manage(self.root,{'action':'configure','id':r['id'],'values':{key:'true'},'reload':False})
+        self.assertEqual(self.poll(r['token'],1)['overrides'][key],'true')
+        devices.manage(self.root,{'action':'configure','id':r['id'],'values':{},'inherit':[key],'reload':False})
+        self.assertNotIn(key,self.poll(r['token'])['overrides'])
+        with self.assertRaises(ValueError):
+            devices.public(self.root,'poll',{'token':r['token'],'applied':0,'snapshot':{},'controls':[dict(controls[0],key='account_password')]},'203.0.113.1')
+        self.assertEqual(devices.control_listing(self.root),controls)
+        with self.assertRaises(ValueError):devices.values({key:'arbitrary'})
+        devices.manage(self.root,{'action':'revoke','id':r['id']})
+        self.assertEqual(devices.control_listing(self.root),[])
+
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.root=Path(self.directory.name)
     def tearDown(self):self.directory.cleanup()
