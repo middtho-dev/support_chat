@@ -755,6 +755,7 @@ async function forwardMessage(ticket, message, opts = {}) {
   const tid = ticket.telegram_topic_id;
   const targetOpts = tid ? { message_thread_id: tid } : {};
   if (message.telegram_message_id || forwardingMessages.has(message.id)) return message.telegram_message_id || null;
+  if(db.deliveryHeld.get('operator',String(message.id)))return null;
   forwardingMessages.add(message.id);
   try {
     let sent;
@@ -967,6 +968,8 @@ async function cleanupOldTopics() {
 }
 
 module.exports = {
+  queueBusy: (kind,id)=>kind==='operator'&&forwardingMessages.has(String(id)),
+  wakeDelivery: ()=>{setTimeout(()=>processDeliveryQueue(),1);},
   init,
   createTopic,
   forwardMessage,

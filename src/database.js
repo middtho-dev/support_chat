@@ -294,7 +294,13 @@ for (const [k, v] of Object.entries(defaultSettings)) {
   insertDefaultSetting.run(k, v);
 }
 
+db.exec(`CREATE TABLE IF NOT EXISTS telegram_delivery_holds (
+  kind TEXT NOT NULL, item_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(kind,item_id)
+)`);
+
 module.exports = {
+  deliveryHeld: db.prepare('SELECT 1 FROM telegram_delivery_holds WHERE kind=? AND item_id=?'),
   // Tickets
   createTicket: db.prepare(`
     INSERT INTO tickets (id, user_name, session_token, status)
@@ -388,6 +394,7 @@ module.exports = {
   getPendingTelegramIncomingMessages: db.prepare(`
     SELECT * FROM telegram_incoming_message_queue
     WHERE next_retry_at <= CURRENT_TIMESTAMP
+      AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='incoming' AND h.item_id=chat_id||':'||message_id)
     ORDER BY created_at ASC
     LIMIT ?
   `),
@@ -715,6 +722,7 @@ module.exports = {
     WHERE m.sender != 'system'
       AND COALESCE(m.is_auto, 0) = 0
       AND m.telegram_message_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='operator' AND h.item_id=m.id)
       AND COALESCE(t.telegram_topic_deleted, 0) = 0
       AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY m.created_at ASC
@@ -728,6 +736,7 @@ module.exports = {
     WHERE m.sender != 'system'
       AND COALESCE(m.is_auto, 0) = 0
       AND m.telegram_message_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='operator' AND h.item_id=m.id)
       AND t.status = 'open'
       AND t.assigned_operator_id IS NOT NULL
       AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
@@ -759,6 +768,7 @@ module.exports = {
       AND t.status = 'open'
       AND t.telegram_customer_chat_id IS NOT NULL
       AND m.telegram_customer_message_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='customer' AND h.item_id=m.id)
       AND (m.telegram_customer_next_retry_at IS NULL
         OR m.telegram_customer_next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY m.created_at ASC
@@ -774,6 +784,7 @@ module.exports = {
       AND t.status = 'open'
       AND t.telegram_customer_chat_id IS NOT NULL
       AND m.telegram_customer_message_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='customer' AND h.item_id=m.id)
     ORDER BY m.created_at ASC, m.rowid ASC
     LIMIT 1
   `),

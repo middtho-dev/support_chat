@@ -2912,6 +2912,7 @@ function queueIncomingMessage(msg, { persist = true } = {}) {
     // for the same chat. Do not execute it after that live update succeeded.
     if (!persist && chatId && messageId &&
         !db.getTelegramIncomingMessage.get(chatId, messageId)) return;
+    if(db.deliveryHeld.get('incoming',chatId+':'+messageId))return;
     try {
       const result = await handleIncomingMessageWithRetry(msg);
       if (chatId && messageId) {
@@ -3268,6 +3269,7 @@ async function deliverCustomerReplyNow(ticket, message, chatId) {
     return null;
   }
   const saved = db.getMessageById.get(message.id) || message;
+  if(db.deliveryHeld.get('customer',String(saved.id)))return null;
   if (saved.telegram_customer_message_id || customerDeliveryMessages.has(saved.id)) {
     return saved.telegram_customer_message_id || null;
   }
@@ -3337,6 +3339,7 @@ function deliverCustomerReply(ticket, message) {
 }
 
 async function forwardMessage(ticket, message, options = {}) {
+  if(db.deliveryHeld.get('operator',String(message.id)))return null;
   const settings = cfg();
   if (!tgEnabled()) return null;
   if (message.sender === 'user' && !settings.telegramForwardUserMessages) return null;
@@ -3379,6 +3382,7 @@ async function forwardMessage(ticket, message, options = {}) {
   if (!thread) thread = await ensurePrivateThread(fresh, operator);
   if (!thread) return null;
 
+  if(db.deliveryHeld.get('operator',String(message.id)))return null;
   forwardingMessages.add(message.id);
   const deliveryStartedAt = Date.now();
   try {
@@ -3901,6 +3905,7 @@ function status(now = new Date()) {
         AND m.sender != 'system'
         AND COALESCE(m.is_auto, 0) = 0
         AND m.telegram_message_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='operator' AND h.item_id=m.id)
     `).get();
     pendingMessages = Number(pending?.count || 0);
     if (pending?.oldest) {
@@ -3916,6 +3921,8 @@ function status(now = new Date()) {
       WHERE m.sender = 'support'
         AND t.source = 'telegram'
         AND m.telegram_customer_message_id IS NULL
+        AND t.status='open' AND t.telegram_customer_chat_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='customer' AND h.item_id=m.id)
     `).get();
     pendingCustomerReplies = Number(pendingCustomers?.count || 0);
     if (pendingCustomers?.oldest) {
@@ -3926,7 +3933,8 @@ function status(now = new Date()) {
     }
     const pendingIncoming = db.db.prepare(`
       SELECT COUNT(*) AS count, MIN(created_at) AS oldest
-      FROM telegram_incoming_message_queue
+      FROM telegram_incoming_message_queue q
+      WHERE NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='incoming' AND h.item_id=q.chat_id||':'||q.message_id)
     `).get();
     pendingIncomingMessages = Number(pendingIncoming?.count || 0);
     if (pendingIncoming?.oldest) {
@@ -4081,6 +4089,8 @@ async function createTopic(ticketId) {
 }
 
 module.exports = {
+  queueBusy: (kind,id) => kind==='incoming' ? incomingMessageQueues.has(String(id).split(':')[0]) : kind==='customer' ? customerDeliveryMessages.has(String(id)) : forwardingMessages.has(String(id)),
+  wakeDelivery: () => {scheduleDeliveryQueue(1);setTimeout(()=>processIncomingRetryQueue(),1);},
   init,
   createTopic,
   forwardMessage,

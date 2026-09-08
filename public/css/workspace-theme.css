@@ -109,3 +109,20 @@ input[type=checkbox]{accent-color:var(--blue)}
 @media(max-width:560px){.rail{justify-content:flex-start;gap:4px;scroll-padding-inline:4px}.navbtn{flex:0 0 74px;min-width:74px;max-width:74px;font-size:10px}.navbtn.on,.navbtn.on svg,.navbtn.on span{color:#050b10}.navbtn span{white-space:nowrap}}
 @media(min-width:1350px){.service-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.service-card{padding:20px;min-height:280px}.service-card ul{min-height:98px;margin:12px 0}.service-heading{min-height:64px}.service-card footer{gap:8px}}
 @media(max-width:560px){.settings-savebar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:10px;margin-inline:0;padding:12px}.settings-savebar>div{grid-column:1/-1;width:100%;min-width:0}.settings-savebar b{font-size:12px}.settings-savebar span{font-size:11px;white-space:normal}.settings-savebar button,#set-save{width:100%;min-width:0;margin:0}.settings-savebar.on{bottom:0}}
+/* Tools own their settings. Support has one local navigation, not extra rail entries. */
+.support-nav{display:flex;gap:8px;align-items:center;padding:7px 24px 7px calc(var(--rail-width) + 24px);background:var(--panel);border-bottom:1px solid var(--line);grid-row:2;min-width:0;overflow-x:auto}
+.support-nav button{min-height:40px;white-space:nowrap;border-radius:10px;background:transparent;color:var(--muted);padding:8px 16px}
+.support-nav button.on{background:var(--blue);color:#050b10}
+body.support-active .app{grid-template-rows:64px 56px minmax(0,1fr)}
+body.support-active .workspace{grid-row:3}
+.queue-note{color:var(--muted);line-height:1.65;max-width:900px}
+.queue-item{border:1px solid var(--line);border-radius:16px;padding:20px;margin:14px 0;background:var(--panel)}
+.queue-item-heading{display:flex;gap:12px;align-items:center;justify-content:space-between}.queue-item h3{margin:0;font-size:16px}.queue-item-heading>span{color:var(--blue);font-size:12px}
+.queue-preview{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;padding:12px;background:var(--bg);border-radius:10px}
+.queue-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;font-size:12px}.queue-meta dt{color:var(--muted)}.queue-meta dd{margin:4px 0;overflow-wrap:anywhere}
+.queue-actions,.queue-pagination{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.queue-pagination{justify-content:space-between;margin:18px 0}.queue-empty{padding:24px}#queue-error{color:var(--red);min-height:20px}
+#frp .frp-wrap>.frp-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(min-width:561px) and (max-width:980px){body.support-active .main,body.support-active .side{top:120px}}
+@media(max-width:560px){body.support-active .app{grid-template-rows:58px 56px minmax(0,1fr)}.support-nav{padding:7px 10px}.support-nav button{font-size:12px;padding:8px 12px}body.support-active .main,body.support-active .side{top:114px!important}.queue-item{padding:16px}.queue-meta{grid-template-columns:1fr}.queue-item-heading{align-items:flex-start;flex-direction:column}.queue-actions button{flex:1}.queue-pagination{font-size:12px}}
+body.tg-mini.support-active .app{grid-template-rows:calc(58px + var(--tg-top-ui)) 56px minmax(0,1fr)!important}
+body.tg-mini.support-active .main,body.tg-mini.support-active .side{top:calc(114px + var(--tg-top-ui))!important}

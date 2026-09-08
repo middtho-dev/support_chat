@@ -94,7 +94,7 @@ async function init() {
   renderTemplates();
   renderMaintenance();
   setInterval(renderRelativeTimes, 30000);
-  setInterval(() => { if (S.view === 'settings' && S.token && !document.hidden) loadMaintenance(); }, 20000);
+  setInterval(() => { if (['settings','support-settings','support-status'].includes(S.view) && S.token && !document.hidden) loadMaintenance(); }, 20000);
   if (IS_TG_MINI) {
     SafeStorage.session.removeItem('admin_token');
     clearMiniAppCache();
@@ -266,7 +266,7 @@ function login() { const token = $('tok').value.trim(); if (!token) return; S.to
 function logout() {
   SafeStorage.session.removeItem('admin_token');
   S.token = null; AdminShell.reset(); socket.disconnect();
-  Object.assign(S, { tickets: [], current: null, messages: [], settings: null, operators: [], maintenance: null, systemHealth: null, settingsDirty: false, settingsSaving: false, file: null, pendingReply: null, permissions: { canManageSettings: false } });
+  Object.assign(S, { tickets: [], current: null, messages: [], settings: null, operators: [], maintenance: null, systemHealth: null, settingsDirty: false, settingsSaving: false, settingsDrafts:{}, settingsScope:null, file: null, pendingReply: null, permissions: { canManageSettings: false } });
   window.supportAdminSettings = null; window.adminResetTicketCard?.(); window.FrpPanel?.reset();
   clearInterval(miniRefreshTimer); miniRefreshTimer = null;
   document.querySelectorAll('.pop').forEach(p => p.remove());
@@ -312,7 +312,7 @@ socket.on('admin_settings_updated', s => {
   }
   S.settings = s || {};
   window.supportAdminSettings = S.settings;
-  if (S.view === 'settings') renderSettings();
+  if (['settings','support-settings','support-status'].includes(S.view)) renderSettings();
 });
 socket.on('admin_settings_forbidden', () => {
   S.permissions = { ...S.permissions, canManageSettings: false };
@@ -398,7 +398,7 @@ socket.on('operational_alert', ({ message, details }) => toast(`${message}${deta
 socket.on('ticket_reminder', ({ waitingMinutes }) => toast(`Оператору отправлено напоминание: клиент ждёт ${waitingMinutes} мин`));
 socket.on('maintenance_updated', status => {
   S.maintenance = status;
-  if (S.view === 'settings') renderMaintenance();
+  if (['settings','support-settings','support-status'].includes(S.view)) renderMaintenance();
 });
 
 socket.on('admin_user_typing', ({ ticketId }) => {
@@ -424,14 +424,24 @@ function setFilter(filter) {
 }
 
 function setView(view) {
+  const previousScope=S.settingsScope;
+  const nextScope=view==='support-settings'?'support':'system';
+  if(previousScope && previousScope!==nextScope && S.settingsDirty){S.settingsDrafts ||= {};S.settingsDrafts[previousScope]=Array.from(document.querySelectorAll('#settings-grid input[id],#settings-grid textarea[id],#settings-grid select[id]'),el=>({id:el.id,value:el.value,checked:el.checked}));}
   S.view = view === 'health' ? 'settings' : (AdminShell.modules.some(m => m.id === view) ? view : 'home');
   if (AdminShell.modules.find(m => m.id === S.view)?.manager && S.token && !S.permissions.canManageSettings) S.view = 'home';
+  const support=S.view==='chat'||AdminShell.modules.find(m=>m.id===S.view)?.parent==='chat';
+  const parent=support?'chat':S.view;
+  document.body.classList.toggle('support-active',support);
+  const supportNav=$('support-nav');supportNav.hidden=!support;
+  if(support){supportNav.innerHTML=[['chat','Обращения'],['support-queue','Очередь доставки'],['templates','Шаблоны'],['support-status','Состояние'],...(S.permissions.canManageSettings?[['support-settings','Настройки']]:[])].map(([id,label])=>`<button class="${S.view===id?'on':''}" data-support-view="${id}" type="button" aria-current="${S.view===id?'page':'false'}">${label}</button>`).join('');supportNav.querySelectorAll('button').forEach(b=>b.onclick=()=>setView(b.dataset.supportView));supportNav.querySelector('.on')?.scrollIntoView({block:'nearest',inline:'nearest'});}
+  $('support-queue').classList.toggle('on',S.view==='support-queue');
+  if(S.view==='support-queue')window.SupportQueue?.open();else window.SupportQueue?.pause();
   $('home').classList.toggle('on', S.view === 'home');
   document.body.classList.toggle('tool-active', S.view !== 'chat');
   AdminShell.render(S);
   tgImpact('light');
-  document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === S.view));
-  $('settings').classList.toggle('on', S.view === 'settings');
+  document.querySelectorAll('.navbtn').forEach(btn => btn.classList.toggle('on', btn.dataset.view === parent));
+  $('settings').classList.toggle('on', ['settings','support-settings','support-status'].includes(S.view));
   $('templates').classList.toggle('on', S.view === 'templates');
   $('frp').classList.toggle('on', S.view === 'frp');
   $('lampac').classList.toggle('on', S.view === 'lampac');
@@ -440,7 +450,7 @@ function setView(view) {
   if (S.view === 'voice') window.VoicePanel?.open();
   else window.VoicePanel?.pause();
   document.body.classList.remove('frp-active');
-  document.querySelectorAll('.navbtn').forEach(b => { if (b.dataset.view === S.view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  document.querySelectorAll('.navbtn').forEach(b => { if (b.dataset.view === parent) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   if (S.view === 'frp') window.FrpPanel?.open();
 
   if (S.view === 'chat') {
@@ -455,11 +465,11 @@ function setView(view) {
     $('chat').style.display = 'none';
     $('main').classList.add('open');
   }
-  if (S.view === 'settings') {
-    if (!S.settingsDirty) renderSettings();
+  if (['settings','support-settings','support-status'].includes(S.view)) {
+    if (!S.settingsDirty || previousScope!==nextScope || S.view==='support-status') renderSettings();
     loadMaintenance();
   }
-  if (S.view === 'settings' && S.permissions.canManageSettings) requestOperators();
+  if (S.view === 'support-settings' && S.permissions.canManageSettings) requestOperators();
   updateTelegramBackButton();
 }
 
@@ -662,38 +672,6 @@ function val(id) { return $(id)?.value ?? ''; }
 function num(id) { return Number(val(id)); }
 function checked(id) { return !!$(id)?.checked; }
 
-function renderSettingsLegacy() {
-  const s = S.settings || {};
-  const topicModeControl = s.telegramMode === 'private'
-    ? '<p class="muted">Приватная тема создаётся автоматически после назначения тикета. Для этого у бота должен быть включён Threaded Mode.</p>'
-    : check('set-tg-create-topics','Создавать темы тикетов в группе',s.telegramCreateTopics);
-  $('settings').innerHTML = `<div class="section"><h2>Настройки проекта</h2><p>Все параметры применяются сразу после сохранения. Переменные .env вроде токена бота и ADMIN_TOKEN остаются на сервере.</p>
-  <div class="grid">
-    <div class="card"><h3>Чат и график</h3>${input('set-support-name','Имя поддержки в чате',s.supportName || 'Поддержка KV9RU')}${input('set-tz','Часовой пояс',s.timezone || 'Europe/Moscow')}${input('set-work-start','Начало рабочего часа',s.workStartHour ?? 8,'number','min="0" max="23"')}${input('set-work-end','Конец рабочего часа',s.workEndHour ?? 23,'number','min="1" max="24"')}${check('set-offhours-enabled','Показывать предупреждение вне графика',s.offhoursEnabled)}${area('set-banner-text','Баннер перед вводом имени вне графика',s.offhoursBannerText || '')}${area('set-reject-text','Резервный текст предупреждения вне графика',s.offhoursRejectText || '')}</div>
-    <div class="card"><h3>Приветствия и ожидание</h3>${check('set-welcome-enabled','Включить цепочку приветствий',s.welcomeEnabled)}${check('set-welcome-1-enabled','Отправлять первое приветствие',s.welcomeText1Enabled ?? true)}${input('set-welcome-delay-1','Задержка первого приветствия, мс',s.welcomeDelayFirstMs ?? 1200,'number','min="0" max="30000"')}${area('set-welcome-1','Первое приветствие',s.welcomeText1 || '',3)}${check('set-welcome-2-enabled','Отправлять второе приветствие',s.welcomeText2Enabled ?? true)}${input('set-welcome-delay-2','Задержка второго приветствия, мс',s.welcomeDelaySecondMs ?? 2800,'number','min="0" max="60000"')}${area('set-welcome-2','Второе приветствие',s.welcomeText2 || '',4)}${check('set-welcome-3-enabled','Отправлять третье дополнительное сообщение',s.welcomeText3Enabled)}${input('set-welcome-delay-3','Задержка третьего сообщения, мс',s.welcomeDelayThirdMs ?? 6500,'number','min="0" max="120000"')}${area('set-welcome-3','Третье дополнительное сообщение',s.welcomeText3 || '',4)}${check('set-operator-wait-enabled','Сообщать клиенту, если оператор задерживается',s.operatorWaitEnabled)}${input('set-operator-wait-delay','Задержка сообщения об ожидании, мс',s.operatorWaitDelayMs ?? 180000,'number','min="10000" max="3600000"')}${area('set-operator-wait-text','Сообщение при долгом ожидании оператора',s.operatorWaitText || '',4)}${input('set-rate','Лимит сообщений в минуту',s.messageRateLimitPerMinute ?? 20,'number','min="1" max="300"')}${input('set-upload','Максимальный файл, МБ',s.uploadMaxMb ?? 50,'number','min="1" max="50"')}</div>
-    <div class="card"><h3>Автозакрытие</h3>${check('set-inactivity-enabled','Включить предупреждение и автозакрытие',s.inactivityEnabled)}${input('set-inactivity-warn','Предупредить через, минут',s.inactivityWarnMinutes ?? 45,'number','min="1" max="1440"')}${input('set-inactivity-close','Закрыть через, минут',s.inactivityCloseMinutes ?? 60,'number','min="2" max="2880"')}${area('set-inactivity-warning','Сообщение-предупреждение в чат',s.inactivityWarningText || '',3)}${area('set-inactivity-close-text','Сообщение автозакрытия в чат',s.inactivityCloseText || '',3)}</div>
-    <div class="card"><h3>Надёжность и хранение</h3><p class="muted">Параметры применяются без перезапуска. Путь к отдельному хранилищу резервных копий задаётся на сервере.</p>${check('set-backup-enabled','Автоматически создавать резервные копии',s.backupEnabled ?? true)}${input('set-backup-interval','Интервал резервного копирования, часов',s.backupIntervalHours ?? 24,'number','min="1" max="720"')}${input('set-backup-retention','Количество копий базы',s.backupRetention ?? 7,'number','min="1" max="365"')}${check('set-backup-uploads','Копировать загруженные файлы',s.backupUploadsEnabled ?? true)}${check('set-upload-cleanup','Автоматически очищать осиротевшие файлы',s.uploadCleanupEnabled ?? true)}${input('set-upload-cleanup-interval','Проверять файлы каждые, часов',s.uploadCleanupIntervalHours ?? 6,'number','min="1" max="720"')}${input('set-upload-orphan-grace','Не удалять новые файлы в течение, часов',s.uploadOrphanGraceHours ?? 24,'number','min="1" max="8760"')}${check('set-disk-monitoring','Следить за заполнением диска',s.diskMonitoringEnabled ?? true)}${input('set-disk-warning','Предупреждать при заполнении, %',s.diskWarnPercent ?? 75,'number','min="1" max="98"')}${input('set-disk-critical','Критический уровень, %',s.diskCriticalPercent ?? 90,'number','min="2" max="100"')}${check('set-operational-alerts','Присылать системные уведомления об ошибках',s.operationalAlertsEnabled ?? true)}${input('set-operational-alert-cooldown','Не повторять одинаковое уведомление, минут',s.operationalAlertCooldownMinutes ?? 15,'number','min="1" max="1440"')}</div>
-    <div class="card"><h3>Telegram: личный бот</h3><p class="muted">Режим: ${esc(s.telegramMode === 'private' ? 'личные чаты операторов' : 'совместимость с группой')}. Если зарегистрирован один активный оператор, новые тикеты назначаются ему автоматически.</p>${check('set-tg-enabled','Включить Telegram-интеграцию',s.telegramEnabled)}${topicModeControl}${check('set-tg-forward-user','Пересылать сообщения клиента оператору',s.telegramForwardUserMessages)}${check('set-tg-forward-admin','Показывать ответы из админки в теме',s.telegramForwardAdminMessages)}${check('set-tg-forward-operator','Принимать ответы оператора из Telegram',s.telegramForwardOperatorMessages)}${check('set-tg-reminders','Напоминать со звуком, пока оператор не ответил',s.telegramUnansweredReminderEnabled ?? true)}${input('set-tg-reminder-first','Первое напоминание через, минут',s.telegramUnansweredReminderMinutes ?? 3,'number','min="1" max="1440"')}${input('set-tg-reminder-repeat','Повторять напоминание каждые, минут',s.telegramUnansweredRepeatMinutes ?? 5,'number','min="1" max="1440"')}${check('set-tg-delete-renames','Удалять сервисные сообщения Telegram',s.telegramDeleteRenameNotices)}${check('set-tg-pin','Закреплять rich-карточку тикета',s.telegramPinNewTicketMessage)}${check('set-tg-close-topic','Закрывать приватную тему вместе с тикетом',s.telegramCloseTopicOnClose)}${check('set-tg-cleanup','Удалять старые закрытые темы',s.telegramCleanupClosedTopics)}${input('set-tg-cleanup-hours','Удалять закрытые темы через, часов (0 — сразу)',s.telegramCleanupClosedHours ?? 24,'number','min="0" max="720"')}</div>
-    <div class="card"><h3>Telegram: приватные темы и кнопки</h3>${input('set-topic-template','Шаблон названия темы',s.telegramTopicNameTemplate || '{emoji} {name} • {date}')}${input('set-emoji-new','Эмодзи нового тикета',s.telegramNewEmoji || '❗')}${input('set-emoji-open','Эмодзи в работе',s.telegramOpenEmoji || '🔵')}${input('set-emoji-wait','Эмодзи ждет ответа',s.telegramWaitEmoji || '🔔')}${input('set-emoji-closed','Эмодзи закрыто',s.telegramClosedEmoji || '🗑️')}${input('set-close-btn','Текст кнопки закрытия',s.telegramCloseButtonText || '🗑️ Закрыть тикет')}${select('set-close-btn-style','Цвет кнопки закрытия',s.telegramCloseButtonStyle || 'danger',[{value:'danger',label:'Красная'},{value:'success',label:'Зеленая'},{value:'primary',label:'Синяя'},{value:'',label:'Стандартная'}])}${input('set-close-btn-emoji-id','ID анимированного emoji закрытия',s.telegramCloseButtonEmojiId || '')}</div>
-    <div class="card"><h3>Telegram: тексты</h3>${area('set-tg-new-ticket','Карточка нового тикета (legacy)',s.telegramNewTicketText || '',5)}${area('set-tg-closed-user','Закрыто пользователем',s.telegramClosedByUserText || '',2)}${area('set-tg-closed-support','Закрыто оператором',s.telegramClosedBySupportText || '',2)}${area('set-tg-autoclose','Автозакрытие в Telegram',s.telegramAutoCloseText || '',3)}${area('set-tg-warn','Предупреждение о неактивности в Telegram',s.telegramWarnInactivityText || '',3)}${area('set-tg-topic-deleted','Ошибка удаленной темы в админке (legacy)',s.telegramTopicDeletedAdminText || '',2)}</div>
-  </div><p style="margin-top:14px">Переменные для шаблонов: {name}, {shortId}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p><button id="set-save" class="save">Сохранить все настройки</button></div>`;
-  $('set-save').addEventListener('click', saveSettings);
-}
-
-function saveSettingsLegacy() {
-  const payload = {
-    supportName: val('set-support-name'), timezone: val('set-tz'), workStartHour: num('set-work-start'), workEndHour: num('set-work-end'), offhoursEnabled: checked('set-offhours-enabled'), offhoursBannerText: val('set-banner-text'), offhoursRejectText: val('set-reject-text'),
-    welcomeEnabled: checked('set-welcome-enabled'), welcomeText1Enabled: checked('set-welcome-1-enabled'), welcomeText2Enabled: checked('set-welcome-2-enabled'), welcomeText3Enabled: checked('set-welcome-3-enabled'), welcomeDelayFirstMs: num('set-welcome-delay-1'), welcomeDelaySecondMs: num('set-welcome-delay-2'), welcomeDelayThirdMs: num('set-welcome-delay-3'), welcomeText1: val('set-welcome-1'), welcomeText2: val('set-welcome-2'), welcomeText3: val('set-welcome-3'), operatorWaitEnabled: checked('set-operator-wait-enabled'), operatorWaitDelayMs: num('set-operator-wait-delay'), operatorWaitText: val('set-operator-wait-text'), messageRateLimitPerMinute: num('set-rate'), uploadMaxMb: num('set-upload'),
-    inactivityEnabled: checked('set-inactivity-enabled'), inactivityWarnMinutes: num('set-inactivity-warn'), inactivityCloseMinutes: num('set-inactivity-close'), inactivityWarningText: val('set-inactivity-warning'), inactivityCloseText: val('set-inactivity-close-text'),
-    backupEnabled: checked('set-backup-enabled'), backupIntervalHours: num('set-backup-interval'), backupRetention: num('set-backup-retention'), backupUploadsEnabled: checked('set-backup-uploads'), uploadCleanupEnabled: checked('set-upload-cleanup'), uploadCleanupIntervalHours: num('set-upload-cleanup-interval'), uploadOrphanGraceHours: num('set-upload-orphan-grace'), diskMonitoringEnabled: checked('set-disk-monitoring'), diskWarnPercent: num('set-disk-warning'), diskCriticalPercent: num('set-disk-critical'), operationalAlertsEnabled: checked('set-operational-alerts'), operationalAlertCooldownMinutes: num('set-operational-alert-cooldown'),
-    telegramEnabled: checked('set-tg-enabled'), telegramCreateTopics: S.settings?.telegramMode === 'private' ? true : checked('set-tg-create-topics'), telegramAutoAssignSingleOperator: true, telegramForwardUserMessages: checked('set-tg-forward-user'), telegramForwardAdminMessages: checked('set-tg-forward-admin'), telegramForwardOperatorMessages: checked('set-tg-forward-operator'), telegramUnansweredReminderEnabled: checked('set-tg-reminders'), telegramUnansweredReminderMinutes: num('set-tg-reminder-first'), telegramUnansweredRepeatMinutes: num('set-tg-reminder-repeat'), telegramDeleteRenameNotices: checked('set-tg-delete-renames'), telegramPinNewTicketMessage: checked('set-tg-pin'), telegramCloseTopicOnClose: checked('set-tg-close-topic'), telegramCleanupClosedTopics: checked('set-tg-cleanup'), telegramCleanupClosedHours: num('set-tg-cleanup-hours'),
-    telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'),
-    telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
-  };
-  socket.emit('admin_update_settings', payload);
-  toast('Настройки сохранены', 'ok');
-}
-
 function richSettingsSection(title, description, body, open = true) {
   return `<details class="rich-settings-section" ${open ? 'open' : ''}><summary><span>${esc(title)}</span><small>${esc(description)}</small></summary><div class="rich-settings-section-body">${body}</div></details>`;
 }
@@ -785,25 +763,22 @@ function settingsCards(s, topicModeControl) {
       'amber',
       'закрытие неактивность таймер'
     ),
-    settingCard(
-      'system',
-      'Надёжность и хранение',
-      'Резервные копии, очистка, диск и системные сигналы.',
+    settingCard('system','Резервные копии','Расписание копирования базы и хранение копий.',
       check('set-backup-enabled','Автоматически создавать резервные копии',s.backupEnabled ?? true) +
       input('set-backup-interval','Интервал резервного копирования, часов',s.backupIntervalHours ?? 24,'number','min="1" max="720"') +
       input('set-backup-retention','Количество копий базы',s.backupRetention ?? 7,'number','min="1" max="365"') +
-      check('set-backup-uploads','Копировать загруженные файлы',s.backupUploadsEnabled ?? true) +
+      check('set-backup-uploads','Копировать загруженные файлы',s.backupUploadsEnabled ?? true),'green'),
+    settingCard('system','Очистка файлов','Удалять только вложения, не связанные с сообщениями, после защитного периода.',
       check('set-upload-cleanup','Автоматически очищать осиротевшие файлы',s.uploadCleanupEnabled ?? true) +
       input('set-upload-cleanup-interval','Проверять файлы каждые, часов',s.uploadCleanupIntervalHours ?? 6,'number','min="1" max="720"') +
-      input('set-upload-orphan-grace','Не удалять новые файлы в течение, часов',s.uploadOrphanGraceHours ?? 24,'number','min="1" max="8760"') +
+      input('set-upload-orphan-grace','Не удалять новые файлы в течение, часов',s.uploadOrphanGraceHours ?? 24,'number','min="1" max="8760"'),'green'),
+    settingCard('system','Контроль диска','Пороги заполнения диска для предупреждений и ошибок.',
       check('set-disk-monitoring','Следить за заполнением диска',s.diskMonitoringEnabled ?? true) +
       input('set-disk-warning','Предупреждать при заполнении, %',s.diskWarnPercent ?? 75,'number','min="1" max="98"') +
-      input('set-disk-critical','Критический уровень, %',s.diskCriticalPercent ?? 90,'number','min="2" max="100"') +
+      input('set-disk-critical','Критический уровень, %',s.diskCriticalPercent ?? 90,'number','min="2" max="100"'),'green'),
+    settingCard('system','Системные уведомления','Сообщать об ошибках сервисов и ограничивать повторные уведомления.',
       check('set-operational-alerts','Присылать системные уведомления об ошибках',s.operationalAlertsEnabled ?? true) +
-      input('set-operational-alert-cooldown','Не повторять одинаковое уведомление, минут',s.operationalAlertCooldownMinutes ?? 15,'number','min="1" max="1440"'),
-      'green',
-      'backup резерв диск очистка уведомления'
-    ),
+      input('set-operational-alert-cooldown','Не повторять одинаковое уведомление, минут',s.operationalAlertCooldownMinutes ?? 15,'number','min="1" max="1440"'),'green'),
     settingCard(
       'telegram',
       'Telegram для клиентов',
@@ -847,7 +822,7 @@ function settingsCards(s, topicModeControl) {
     ),
     settingCard(
       'telegram',
-      'Темы и кнопки',
+      'Темы и статусы Telegram',
       'Названия, статусы и внешний вид действий в Telegram.',
       input('set-topic-template','Шаблон названия темы',s.telegramTopicNameTemplate || '{emoji} {name} • {date}') +
       input('set-emoji-new','Эмодзи нового тикета',s.telegramNewEmoji || '❗') +
@@ -862,7 +837,7 @@ function settingsCards(s, topicModeControl) {
     ),
     settingCard(
       'telegram',
-      'Rich-диалог оператора',
+      'Оформление диалогов Telegram',
       'Конструктор единого сообщения с историей тикета. После сохранения открытые тикеты перерисуются автоматически. Цвета и произвольные px Telegram не позволяет задавать ботам, остальные поддерживаемые стили доступны ниже.',
       richSettingsSection('Быстрый старт', 'Выберите основу и сразу посмотрите результат.', richPresetControls() + '<div class="settings-note">Шаблоны: {name}, {shortId}, {status}, {total}, {shown}, {hidden}. В подписях доступны {name} и {role}.</div>') +
       richSettingsSection('Появление карточки', 'Нативный эффект Telegram для нового диалога: не влияет на доставку сообщений.',
@@ -952,6 +927,8 @@ function settingsCards(s, topicModeControl) {
 }
 
 function renderSettings() {
+  const support=S.view==='support-settings'||S.view==='support-status';
+  S.settingsScope=support?'support':'system';
   const opened = new Set(Array.from($('settings').querySelectorAll('details[open]'),d=>d.querySelector('summary')?.textContent));
   const scrollTop = $('settings').scrollTop;
   const s = S.settings || {};
@@ -959,35 +936,36 @@ function renderSettings() {
   const topicModeControl = s.telegramMode === 'private'
     ? '<div class="settings-note">Приватная тема создаётся автоматически после назначения. У бота должен быть включён Threaded Mode.</div>'
     : check('set-tg-create-topics','Создавать темы тикетов в группе',s.telegramCreateTopics);
-  const filters = [['all','Все'],['operators','Операторы'],['general','Основные'],['automation','Автоматизация'],['telegram','Telegram'],['system','Система']];
+  const filters = support?[['all','Все'],['operators','Операторы'],['general','Чат и график'],['automation','Автоматизация'],['telegram','Telegram']]:[['all','Все']];
+  if(!filters.some(([id])=>id===S.settingsFilter))S.settingsFilter='all';
   const settingsContent = !canManage
     ? '<div class="card control-access-note"><b>Настройки доступны руководителю</b><p>Состояние системы и очередей можно смотреть всем операторам. Изменение параметров требует отдельного права.</p></div>'
     : !S.settings
       ? '<div class="card maintenance-loading">Загружаю настройки…</div>'
-      : `<div class="control-settings-head"><div><span class="settings-eyebrow">Конфигурация</span><h2>Настройки</h2><p>Изменения применяются только после подтверждения сервером.</p></div><div class="settings-hero-actions"><button id="settings-export" class="ghost">Экспорт</button><button id="settings-test-alert" class="ghost">Тест уведомления</button></div></div>
+      : `<div class="control-settings-head"><div><span class="settings-eyebrow">${support?'Поддержка':'Система'}</span><h2>${support?'Настройки поддержки':'Хранение и обслуживание'}</h2><p>Изменения применяются только после подтверждения сервером.</p></div><div class="settings-hero-actions"><button id="settings-export" class="ghost">Экспорт</button>${support?'':'<button id="settings-test-alert" class="ghost">Тест системного уведомления</button>'}</div></div>
         <div class="settings-toolbar">
           <input id="settings-search" type="search" value="${esc(S.settingsQuery)}" placeholder="Найти настройку…" aria-label="Поиск по настройкам">
-          <div class="settings-filters">${filters.map(([value,label]) => `<button type="button" data-settings-filter="${value}" class="${S.settingsFilter === value ? 'on' : ''}">${label}</button>`).join('')}</div>
+          <div class="settings-filters" ${support?'':'hidden'}>${filters.map(([value,label]) => `<button type="button" data-settings-filter="${value}" class="${S.settingsFilter === value ? 'on' : ''}">${label}</button>`).join('')}</div>
         </div>
-        <div id="settings-grid" class="grid settings-grid">${settingsCards(s, topicModeControl).join('')}</div>
+        <div id="settings-grid" class="grid settings-grid">${settingsCards(s, topicModeControl).filter(html=>support?!html.includes('data-settings-category="system"'):html.includes('data-settings-category="system"')).join('')}</div>
         <div id="settings-empty" class="settings-empty">По этому запросу настроек нет.</div>
-        <p class="settings-variables">Переменные шаблонов: {name}, {shortId}, {status}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
+        <p class="settings-variables" ${support?'':'hidden'}>Переменные шаблонов: {name}, {shortId}, {status}, {reason}, {date}, {dateTime}, {emoji}, {minutes}, {warnMinutes}, {remainingMinutes}.</p>
         <div class="settings-savebar">
           <div><b id="settings-save-state">Изменений нет</b><span id="settings-save-time">${S.settingsLastSavedAt ? `Сохранено ${esc(fmtStatusDate(S.settingsLastSavedAt))}` : 'Настройки загружены с сервера'}</span></div>
           <button id="settings-discard" class="ghost" disabled>Отменить</button>
           <button id="set-save" class="save" disabled>Сохранить настройки</button>
         </div>`;
   $('settings').innerHTML = `<div class="section settings-section">
-    <div class="settings-hero">
-      <div><span class="settings-eyebrow">Единый центр</span><h2>Управление и состояние</h2><p>Живые показатели, Telegram, доставка, хранение и настройки собраны на одной странице.</p></div>
+    <div class="settings-hero" ${support?'hidden':''}>
+      <div><span class="settings-eyebrow">${support?'Поддержка':'Workspace'}</span><h2>${support?'Поддержка':'Система'}</h2><p>${support?'Обращения, доставка сообщений и параметры работы поддержки.':'Состояние сервера, резервные копии, диск и адреса сервисов.'}</p></div>
     </div>
-    <div class="management-tabs" aria-label="Раздел управления"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button>${canManage ? '<button type="button" data-management-view="addresses">Домены и адреса</button>' : ''}</div><div id="deployment-info" hidden></div><div id="control-health"></div>
-    <div class="control-divider"></div>
+    <div class="management-tabs" ${support?'hidden':''} aria-label="Система"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button>${canManage ? '<button type="button" data-management-view="addresses">Домены и адреса</button>' : ''}</div><div id="deployment-info" hidden></div><div id="control-health"></div>
+    <div class="control-divider" ${support?'hidden':''}></div>
     <div id="settings-config">${settingsContent}</div>
   </div>`;
   renderMaintenance();
   const selectManagementView = view => {
-    S.managementView = view;
+    if(!support)S.systemManagementView = view;
     if (view === 'addresses' && !canManage) view = 'status';
     $('deployment-info').hidden = view !== 'addresses';
     if (view === 'addresses') loadDeploymentInfo();
@@ -995,14 +973,15 @@ function renderSettings() {
     document.querySelectorAll('[data-management-view]').forEach(b => { b.classList.toggle('on', b.dataset.managementView === view); b.setAttribute('aria-pressed', String(b.dataset.managementView === view)); });
   };
   document.querySelectorAll('[data-management-view]').forEach(b => b.addEventListener('click', () => selectManagementView(b.dataset.managementView)));
-  selectManagementView(S.managementView || 'status');
+  selectManagementView(support?(S.view==='support-settings'?'configuration':'status'):(S.systemManagementView||'status'));
   if (canManage && S.settings) bindSettingsUi();
   $('settings').querySelectorAll('details').forEach(d=>{if(opened.has(d.querySelector('summary')?.textContent))d.open=true;});
   $('settings').scrollTop=scrollTop;
+  const draft=S.settingsDrafts?.[S.settingsScope];if(draft){for(const item of draft){const el=$(item.id);if(el){el.value=item.value;el.checked=item.checked;}}applySettingsDependencies();updateSettingsDirtyState();}
 }
 
 function settingsPayload() {
-  return {
+  const payload = {
     supportName: val('set-support-name'), timezone: val('set-tz'), workStartHour: num('set-work-start'), workEndHour: num('set-work-end'), offhoursEnabled: checked('set-offhours-enabled'), offhoursBannerText: val('set-banner-text'), offhoursRejectText: val('set-reject-text'),
     welcomeEnabled: checked('set-welcome-enabled'), welcomeText1Enabled: checked('set-welcome-1-enabled'), welcomeText2Enabled: checked('set-welcome-2-enabled'), welcomeText3Enabled: checked('set-welcome-3-enabled'), welcomeDelayFirstMs: num('set-welcome-delay-1'), welcomeDelaySecondMs: num('set-welcome-delay-2'), welcomeDelayThirdMs: num('set-welcome-delay-3'), welcomeText1: val('set-welcome-1'), welcomeText2: val('set-welcome-2'), welcomeText3: val('set-welcome-3'), operatorWaitEnabled: checked('set-operator-wait-enabled'), operatorWaitDelayMs: num('set-operator-wait-delay'), operatorWaitText: val('set-operator-wait-text'), messageRateLimitPerMinute: num('set-rate'), uploadMaxMb: num('set-upload'),
     inactivityEnabled: checked('set-inactivity-enabled'), inactivityWarnMinutes: num('set-inactivity-warn'), inactivityCloseMinutes: num('set-inactivity-close'), inactivityWarningText: val('set-inactivity-warning'), inactivityCloseText: val('set-inactivity-close-text'),
@@ -1013,6 +992,8 @@ function settingsPayload() {
     telegramTopicNameTemplate: val('set-topic-template'), telegramNewEmoji: val('set-emoji-new'), telegramOpenEmoji: val('set-emoji-open'), telegramWaitEmoji: val('set-emoji-wait'), telegramClosedEmoji: val('set-emoji-closed'), telegramCloseButtonText: val('set-close-btn'), telegramCloseButtonStyle: val('set-close-btn-style'), telegramCloseButtonEmojiId: val('set-close-btn-emoji-id'),
     telegramNewTicketText: val('set-tg-new-ticket'), telegramClosedByUserText: val('set-tg-closed-user'), telegramClosedBySupportText: val('set-tg-closed-support'), telegramAutoCloseText: val('set-tg-autoclose'), telegramWarnInactivityText: val('set-tg-warn'), telegramTopicDeletedAdminText: val('set-tg-topic-deleted')
   };
+  const fields={"supportName": "set-support-name", "timezone": "set-tz", "workStartHour": "set-work-start", "workEndHour": "set-work-end", "offhoursEnabled": "set-offhours-enabled", "offhoursBannerText": "set-banner-text", "offhoursRejectText": "set-reject-text", "welcomeEnabled": "set-welcome-enabled", "welcomeText1Enabled": "set-welcome-1-enabled", "welcomeText2Enabled": "set-welcome-2-enabled", "welcomeText3Enabled": "set-welcome-3-enabled", "welcomeDelayFirstMs": "set-welcome-delay-1", "welcomeDelaySecondMs": "set-welcome-delay-2", "welcomeDelayThirdMs": "set-welcome-delay-3", "welcomeText1": "set-welcome-1", "welcomeText2": "set-welcome-2", "welcomeText3": "set-welcome-3", "operatorWaitEnabled": "set-operator-wait-enabled", "operatorWaitDelayMs": "set-operator-wait-delay", "operatorWaitText": "set-operator-wait-text", "messageRateLimitPerMinute": "set-rate", "uploadMaxMb": "set-upload", "inactivityEnabled": "set-inactivity-enabled", "inactivityWarnMinutes": "set-inactivity-warn", "inactivityCloseMinutes": "set-inactivity-close", "inactivityWarningText": "set-inactivity-warning", "inactivityCloseText": "set-inactivity-close-text", "backupEnabled": "set-backup-enabled", "backupIntervalHours": "set-backup-interval", "backupRetention": "set-backup-retention", "backupUploadsEnabled": "set-backup-uploads", "uploadCleanupEnabled": "set-upload-cleanup", "uploadCleanupIntervalHours": "set-upload-cleanup-interval", "uploadOrphanGraceHours": "set-upload-orphan-grace", "diskMonitoringEnabled": "set-disk-monitoring", "diskWarnPercent": "set-disk-warning", "diskCriticalPercent": "set-disk-critical", "operationalAlertsEnabled": "set-operational-alerts", "operationalAlertCooldownMinutes": "set-operational-alert-cooldown", "telegramEnabled": "set-tg-enabled", "telegramAutoAssignSingleOperator": "set-tg-auto-assign", "telegramForwardUserMessages": "set-tg-forward-user", "telegramForwardAdminMessages": "set-tg-forward-admin", "telegramForwardOperatorMessages": "set-tg-forward-operator", "telegramUnansweredReminderEnabled": "set-tg-reminders", "telegramUnansweredReminderMinutes": "set-tg-reminder-first", "telegramUnansweredRepeatMinutes": "set-tg-reminder-repeat", "telegramDeleteRenameNotices": "set-tg-delete-renames", "telegramPinNewTicketMessage": "set-tg-pin", "telegramCloseTopicOnClose": "set-tg-close-topic", "telegramCleanupClosedTopics": "set-tg-cleanup", "telegramCleanupClosedHours": "set-tg-cleanup-hours", "telegramCustomerEnabled": "set-tg-customer-enabled", "telegramCustomerFilesEnabled": "set-tg-customer-files", "telegramCustomerDeliverReplies": "set-tg-customer-replies", "telegramCustomerNewTicketText": "set-tg-customer-new", "telegramCustomerClosedText": "set-tg-customer-closed", "telegramCustomerClosedByUserText": "set-tg-customer-closed-user", "telegramCustomerClosedBySupportText": "set-tg-customer-closed-support", "telegramCustomerClosedBySystemText": "set-tg-customer-closed-system", "telegramCustomerClosePromptText": "set-tg-customer-close-prompt", "telegramCustomerCloseButtonText": "set-tg-customer-close-btn", "telegramCustomerNewButtonText": "set-tg-customer-new-btn", "telegramCustomerSendCloseButtonText": "set-tg-customer-send-close-btn", "telegramRichTranscriptTitle": "set-tg-rich-title", "telegramRichTranscriptSubtitle": "set-tg-rich-subtitle", "telegramRichTranscriptMaxMessages": "set-tg-rich-max-messages", "telegramRichTranscriptMessageMaxChars": "set-tg-rich-max-chars", "telegramRichTranscriptShowAuthor": "set-tg-rich-author", "telegramRichTranscriptAuthorMode": "set-tg-rich-author-mode", "telegramRichTranscriptGroupWindowMinutes": "set-tg-rich-group-window", "telegramRichTranscriptGroupContinuation": "set-tg-rich-group-continuation", "telegramRichTranscriptGroupSpacing": "set-tg-rich-group-spacing", "telegramRichTranscriptShowTime": "set-tg-rich-time", "telegramRichTranscriptSeparator": "set-tg-rich-separator", "telegramRichTranscriptShowHeader": "set-tg-rich-show-header", "telegramRichTranscriptShowSubtitle": "set-tg-rich-show-subtitle", "telegramRichTranscriptTitleSize": "set-tg-rich-title-size", "telegramRichTranscriptTitleStyle": "set-tg-rich-title-style", "telegramRichTranscriptSubtitleStyle": "set-tg-rich-subtitle-style", "telegramRichTranscriptMessageLayout": "set-tg-rich-layout", "telegramRichTranscriptMessageSize": "set-tg-rich-message-size", "telegramRichTranscriptMessageHeaderStyle": "set-tg-rich-message-header-style", "telegramRichTranscriptTimestampFormat": "set-tg-rich-time-format", "telegramRichTranscriptDensity": "set-tg-rich-density", "telegramRichTranscriptOrder": "set-tg-rich-order", "telegramRichTranscriptUserLabel": "set-tg-rich-user-label", "telegramRichTranscriptOperatorLabel": "set-tg-rich-operator-label", "telegramRichTranscriptShowMediaLabel": "set-tg-rich-media-label", "telegramRichTranscriptShowOmittedNotice": "set-tg-rich-omitted", "telegramRichTranscriptFooter": "set-tg-rich-footer", "telegramRichTranscriptEmptyText": "set-tg-rich-empty", "telegramRichTranscriptEntryEffect": "set-tg-rich-entry-effect", "telegramRichTranscriptEntryEffectDelayMs": "set-tg-rich-entry-effect-delay", "telegramRichTranscriptEntryEffectText": "set-tg-rich-entry-effect-text", "telegramTopicNameTemplate": "set-topic-template", "telegramNewEmoji": "set-emoji-new", "telegramOpenEmoji": "set-emoji-open", "telegramWaitEmoji": "set-emoji-wait", "telegramClosedEmoji": "set-emoji-closed", "telegramCloseButtonText": "set-close-btn", "telegramCloseButtonStyle": "set-close-btn-style", "telegramCloseButtonEmojiId": "set-close-btn-emoji-id", "telegramNewTicketText": "set-tg-new-ticket", "telegramClosedByUserText": "set-tg-closed-user", "telegramClosedBySupportText": "set-tg-closed-support", "telegramAutoCloseText": "set-tg-autoclose", "telegramWarnInactivityText": "set-tg-warn", "telegramTopicDeletedAdminText": "set-tg-topic-deleted", "telegramCreateTopics": "set-tg-create-topics"};
+  return Object.fromEntries(Object.entries(payload).filter(([key])=>$(fields[key])));
 }
 
 function setDependentControls(masterId, controlIds) {
@@ -1086,7 +1067,7 @@ function requestOperators() {
     const operators = result.operators || [];
     if(JSON.stringify(operators) === JSON.stringify(S.operators))return;
     S.operators = operators;
-    if (S.view === 'settings' && !S.settingsDirty && !$('settings-config')?.contains(document.activeElement)) renderSettings();
+    if (['settings','support-settings','support-status'].includes(S.view) && !S.settingsDirty && !$('settings-config')?.contains(document.activeElement)) renderSettings();
   });
 }
 
@@ -1134,7 +1115,7 @@ function saveManagedOperator(row) {
       if (index >= 0) S.operators[index] = saved;
       else S.operators.push(saved);
       S.operators.sort((a, b) => Number(b.active) - Number(a.active) || String(a.displayName).localeCompare(String(b.displayName), 'ru'));
-      if (S.view === 'settings' && !S.settingsDirty) renderSettings();
+      if (['settings','support-settings','support-status'].includes(S.view) && !S.settingsDirty) renderSettings();
     }
     toast('Права оператора сохранены', 'ok');
     requestOperators();
@@ -1170,7 +1151,7 @@ function bindSettingsUi() {
     applyRichPreset(button.dataset.richPreset);
   }));
   $('set-save')?.addEventListener('click', saveSettings);
-  $('settings-discard')?.addEventListener('click', renderSettings);
+  $('settings-discard')?.addEventListener('click', ()=>{if(S.settingsDrafts)delete S.settingsDrafts[S.settingsScope];renderSettings();});
   $('settings-export')?.addEventListener('click', exportSettings);
   $('settings-test-alert')?.addEventListener('click', testOperationalAlert);
   document.querySelectorAll('[data-operator-save]').forEach(button => button.addEventListener('click', () => {
@@ -1203,15 +1184,19 @@ function saveSettings() {
   const payload = settingsPayload();
   const error = validateSettings(payload);
   if (error) return toast(error, 'err');
+  const savedScope=S.settingsScope, savedToken=S.token;
   S.settingsSaving = true;
   updateSettingsDirtyState();
   socket.timeout(12000).emit('admin_update_settings', payload, (timeoutError, result) => {
+    if(savedToken!==S.token)return;
     S.settingsSaving = false;
     if (timeoutError || !result?.ok) {
       updateSettingsDirtyState();
       return toast(result?.error || 'Сервер не подтвердил сохранение', 'err');
     }
-    S.settings = result.settings || payload;
+    if(S.settingsScope!==savedScope && S.settingsDirty){S.settingsDrafts ||= {};S.settingsDrafts[S.settingsScope]=Array.from(document.querySelectorAll('#settings-grid input[id],#settings-grid textarea[id],#settings-grid select[id]'),el=>({id:el.id,value:el.value,checked:el.checked}));}
+    if(S.settingsDrafts)delete S.settingsDrafts[savedScope];
+    S.settings = result.settings || {...S.settings,...payload};
     window.supportAdminSettings = S.settings;
     S.settingsLastSavedAt = result.savedAt || new Date().toISOString();
     renderSettings();
@@ -1291,10 +1276,10 @@ async function loadMaintenance() {
     S.systemHealth = health;
     renderMaintenance();
   } catch (error) {
-    if (S.view === 'settings' && token === S.token) toast(error.message || 'Не удалось получить состояние системы', 'err');
+    if (['settings','support-settings','support-status'].includes(S.view) && token === S.token) toast(error.message || 'Не удалось получить состояние системы', 'err');
   } finally {if(maintenanceLoading === token) maintenanceLoading = null;}
 }
-document.addEventListener('visibilitychange',()=>{if(!document.hidden && S.view === 'settings')loadMaintenance();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden && ['settings','support-settings','support-status'].includes(S.view))loadMaintenance();});
 
 const maintenancePending = new Set();
 async function runMaintenanceAction(action) {
@@ -1368,8 +1353,8 @@ function renderMaintenance() {
       </div>
       ${realtime.lastError ? `<div class="health-error">${esc(realtime.lastError)}</div>` : ''}
     </div>
-    <div class="card">
-      <h3>Telegram и доставка</h3>
+    <div class="card" data-status-owner="support">
+      <h3>Telegram и доставка</h3><button id="support-queue-open" class="ghost">Открыть очередь доставки</button>
       <div class="maintenance-summary">
         <div class="health-stat ${telegramClass}"><span>Бот</span><b>${telegramLabel}</b><small>${esc(tg?.botUsername ? `@${tg.botUsername}` : tg?.mode || '—')}</small></div>
         <div class="health-stat ${telegramBacklog ? 'warning' : 'ok'}"><span>Очередь</span><b>${telegramBacklog}</b><small>входящие ${Number(tgDelivery.pendingIncomingMessages || 0)} · оператору ${Number(tgDelivery.pendingMessages || 0)} · клиенту ${Number(tgDelivery.pendingCustomerReplies || 0)}</small></div>
@@ -1418,9 +1403,13 @@ function renderMaintenance() {
       </div>
     </div>
   </div>`;
+  const supportStatus=S.view==='support-status';
+  root.querySelectorAll('.control-health-block>div').forEach(el=>{if(!el.classList.contains('maintenance-title'))el.hidden=supportStatus?el.dataset.statusOwner!=='support':el.dataset.statusOwner==='support';});
+  const heading=root.querySelector('.maintenance-title h2'),description=root.querySelector('.maintenance-title p');if(supportStatus){heading.textContent='Telegram поддержки';description.textContent='Доставка сообщений и подключение бота. Конкретные сообщения и действия доступны в очереди доставки.';}
   for(const old of buttons){const next=$(old.id);if(next){old.disabled=next.disabled;old.textContent=next.textContent;next.replaceWith(old);}}
   for(const action of maintenancePending){const button=$('maintenance-'+action);if(button)button.disabled=true;}
   if(focusedId)$(focusedId)?.focus({preventScroll:true});
+  if($('support-queue-open'))$('support-queue-open').onclick=()=>setView('support-queue');
   if($('maintenance-refresh'))$('maintenance-refresh').onclick=loadMaintenance;
   if($('maintenance-backup'))$('maintenance-backup').onclick=()=>runMaintenanceAction('backup');
   if($('maintenance-cleanup'))$('maintenance-cleanup').onclick=()=>runMaintenanceAction('cleanup');
@@ -1438,7 +1427,7 @@ async function loadDeploymentInfo() {
     const row = (name, value) => `<div class="address-row"><span>${esc(name)}</span><code>${esc(value || 'Не задано')}</code></div>`;
     root.innerHTML = `<div class="maintenance-title"><div><h2>Домены и адреса</h2><p>Адреса из настроек сервера и текущие ответы DNS. Эта страница не меняет записи у регистратора.</p></div><button class="ghost" id="addresses-refresh">Проверить DNS</button></div>
       <div class="grid maintenance-grid"><section class="card"><h3>Сервер и панель</h3>${row('IPv4 для A-записей', d.ipv4)}${row('IPv6 для AAAA-записей', d.ipv6)}${row('Панель и поддержка', d.publicUrl)}${row('Telegram Mini App', d.miniapp)}${row('Репозиторий', d.repository)}${row('Lampac', d.lampac)}</section>
-      <section class="card"><h3>Устройства FRP</h3>${d.frp ? row('Адрес подключения', d.frp.host + ':' + d.frp.port) + row('Порты устройств', d.frp.portStart + '–' + d.frp.portEnd) + row('Исключения диапазона', (d.frp.reservedPorts || []).join(', ')) : '<p>FRP недоступен: проверьте раздел «Устройства».</p>'}<p>При переносе сервера меняйте DNS домена подключения. В конфигурациях устройств домен и порты остаются прежними.</p></section></div>
+      <section class="card"><h3>FRP</h3>${d.frp ? row('Адрес подключения', d.frp.host + ':' + d.frp.port) + row('Порты устройств', d.frp.portStart + '–' + d.frp.portEnd) + row('Исключения диапазона', (d.frp.reservedPorts || []).join(', ')) : '<p>FRP недоступен: проверьте раздел «FRP».</p>'}<p>При переносе сервера меняйте DNS домена подключения. В конфигурациях устройств домен и порты остаются прежними.</p></section></div>
       <h3>Записи DNS</h3><div class="grid maintenance-grid">${d.records.map(r => `<section class="card"><h3>${esc(r.host)}</h3>${row('A сейчас', r.a === null ? 'Не удалось проверить' : r.a.join(', ') || 'Записи нет')}${row('A должно быть', d.ipv4)}${row('AAAA сейчас', r.aaaa === null ? 'Не удалось проверить' : r.aaaa.join(', ') || 'Записи нет')}<p>${esc(!d.ipv4 ? 'Укажите PUBLIC_SERVER_IPV4 в .env сервера.' : r.a === null ? 'Повторите проверку DNS позже.' : r.a.length === 1 && r.a[0] === d.ipv4 ? 'A-запись соответствует серверу.' : 'A-запись отличается. При прямом подключении замените её на IPv4 выше; при использовании CDN адреса могут отличаться.')}</p>${r.aaaa?.length && !d.ipv6 ? '<p>На сервере не указан публичный IPv6. Проверьте AAAA: старая запись может отправлять часть посетителей на прежний сервер.</p>' : ''}</section>`).join('')}</div>
       <details class="card"><summary>Внутренние адреса и перенос</summary>${row('Чат', d.internal.chat)}${row('FRP API', d.internal.frp)}${row('Аудиобот API', d.internal.voice)}<p>Внутренние адреса не публикуются в DNS. IPv4/IPv6 задаются в .env: PUBLIC_SERVER_IPV4 и PUBLIC_SERVER_IPV6; адрес панели — PUBLIC_URL; Mini App — TELEGRAM_WEBAPP_URL. После изменения перезапустите сервис. Домен и диапазон FRP меняются в разделе «Устройства».</p><p>Перед сменой A/AAAA перенесите базу, вложения, ключи, сертификаты и настройки. После изменения проверьте HTTPS, Mini App и подключения устройств. На время обновления DNS сохраняйте доступ к старому серверу.</p></details>`;
     $('addresses-refresh').onclick = loadDeploymentInfo;
