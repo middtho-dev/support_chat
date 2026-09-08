@@ -360,6 +360,7 @@ app.get('/js/frp-device-links.js', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '../tools/frp/public/device-links.js'));
 });
+app.use('/api/frp/enroll', require('./frp-proxy').createFrpEnrollmentProxy());
 app.use('/api/admin/frp', createFrpProxy({ authorize: token => ({
   authenticated: isAdminToken(token),
   canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings

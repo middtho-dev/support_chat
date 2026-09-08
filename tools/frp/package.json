@@ -5,7 +5,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check config.js && node --check server.js && node --check manager.js && node --check installer.js && node --check public/app.js",
+    "check": "node --check config.js && node --check server.js && node --check manager.js && node --check installer.js && node --check enrollment.js && node --check public/app.js",
     "test": "node --test test"
   }
 }

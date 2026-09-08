@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const net = require('net');
 const { execFileSync } = require('child_process');
-const { availablePorts, validateRouter, routerScript, buildInstaller } = require('../installer');
+const { availablePorts, routerScript, buildInstaller } = require('../installer');
 const { createFrp } = require('../manager');
 const state = { host: 'router.example.org', port: 7100, token: 'token-with-quote\'and-$shell', compatibilityMode: false };
 
@@ -17,38 +17,13 @@ test('installer allocation excludes offline devices, reservations, service ports
   assert.deepEqual(availablePorts({}, [{ start: 1000, end: 19999 }]), []);
 });
 
-test('router input is validated and secrets are data, never Windows shell commands', () => {
-  for (const ip of ['-proxycmd evil', '192.168.1.1 & calc', 'http://192.168.1.1', 'router']) assert.throws(() => validateRouter({ ip, password: 'valid' }));
-  for (const password of ['', 'x\ny', 'x\0y']) assert.throws(() => validateRouter({ ip: '::1', password }));
-  assert.throws(() => validateRouter({ ip: '::1', password: 'x', sshPort: 65536 }));
-  const password = 'Пароль & %PATH% " $(bad) ` !';
-  const file = buildInstaller(state, 21065, { ip: '192.168.1.1', password });
-  assert.ok(!file.includes(password)); assert.ok(!file.includes(state.token));
+test('installer contains only a scoped capability, name and URL, encoded password but no assigned port', () => {
+  const config = { name: 'Кухня & %PATH% " $(bad)', token: 'a'.repeat(64), password: 'secret & %PATH%', endpoint: 'https://example.org/api/frp/enroll' };
+  const file = buildInstaller(config);
+  assert.ok(!file.includes(config.name));
   const payload = JSON.parse(Buffer.from(file.match(/FromBase64String\('([^']+)'\)/)[1], 'base64').toString());
-  assert.equal(payload.password, password); assert.equal(payload.sshPort, 22);
-  const script = Buffer.from(payload.script, 'base64').toString();
-  assert.match(script, /server='router.example.org'/); assert.match(script, /port='21065'/);
-  assert.match(script, /local_port=80/); assert.match(script, /apk add frpc luci-app-frpc/); assert.match(script, /opkg install frpc luci-app-frpc/);
-  assert.ok(!routerScript({ ...state, compatibilityMode: true }, 21065).includes(state.token));
-});
-
-test('port reservation is atomic, persistent and contains no SSH credentials', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'frp-installer-'));
-  let manager = createFrp({ directory });
-  try {
-    const port = (await manager.status()).installerPort;
-    const results = await Promise.allSettled([1, 2].map(() => manager.action('generate-installer', { port, ip: '192.168.1.1', password: 'private-router-password' })));
-    assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
-    assert.ok(!fs.readFileSync(path.join(directory, 'state.json'), 'utf8').includes('private-router-password'));
-    await manager.shutdown(); manager = createFrp({ directory });
-    await assert.rejects(manager.action('generate-installer', { port, ip: '192.168.1.1', password: 'x' }), /занят/);
-    await manager.action('release-installer', { port });
-    assert.equal((await manager.status()).installerReservations.length, 0);
-    const listener = net.createServer();
-    await new Promise(resolve => listener.listen(port, '0.0.0.0', resolve));
-    try { await assert.rejects(manager.action('generate-installer', { port, ip: '192.168.1.1', password: 'x' }), /сервисом/); }
-    finally { await new Promise(resolve => listener.close(resolve)); }
-  } finally { await manager.shutdown(); fs.rmSync(directory, { recursive: true, force: true }); }
+  assert.deepEqual(payload, config);
+  assert.ok(!file.includes(config.password)); assert.ok(!('port' in payload));
 });
 
 for (const pm of ['opkg', 'apk']) for (const failure of [false, true]) test(`OpenWrt script ${pm}: ${failure ? 'rollback on restart failure' : 'package install and LuCI configuration'}`, { skip: process.platform === 'win32' }, () => {
@@ -65,7 +40,7 @@ for (const pm of ['opkg', 'apk']) for (const failure of [false, true]) test(`Ope
   const scriptPath = path.join(dir, 'router.sh'); fs.writeFileSync(scriptPath, script);
   try {
     execFileSync('sh', ['-n', scriptPath]);
-    const remoteCommand = fs.readFileSync(path.join(__dirname, '../installer/windows.ps1'), 'utf8').replace(/\r\n/g, '\n').match(/\$remoteCommand = @'\n([\s\S]*?)\n'@/)[1];
+    const remoteCommand = fs.readFileSync(path.join(__dirname, '../installer/windows.ps1'), 'utf8').replace(/\r\n/g, '\n').match(/\$remoteCommand = @"\n([\s\S]*?)\n"@/)[1].replaceAll('`$', '$');
     const run = () => execFileSync('sh', ['-c', remoteCommand], { input: script.replace(/\n/g, '\r\n'), env: { ...process.env, PATH: bin + ':/usr/bin:/bin' }, encoding: 'utf8', stdio: 'pipe' });
     if (failure) assert.throws(run); else assert.match(run(), /FRPC is running/);
     const log = fs.readFileSync(path.join(dir, 'uci-log'), 'utf8');
