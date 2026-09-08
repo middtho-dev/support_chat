@@ -17,6 +17,7 @@ def database(root):
     conn=sqlite3.connect(directory/'devices.db',timeout=3)
     conn.row_factory=sqlite3.Row
     conn.execute('CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, credential TEXT UNIQUE, code TEXT UNIQUE, expires REAL, paired INTEGER DEFAULT 0, name TEXT, ip TEXT, last REAL, desired TEXT DEFAULT \'{}\', revision INTEGER DEFAULT 0, applied INTEGER DEFAULT 0, snapshot TEXT DEFAULT \'{}\', reload INTEGER DEFAULT 0)')
+    conn.execute('CREATE TABLE IF NOT EXISTS ui_controls (device TEXT,key TEXT,label TEXT,group_name TEXT,PRIMARY KEY(device,key))')
     conn.execute('CREATE TABLE IF NOT EXISTS limits (key TEXT PRIMARY KEY, start REAL, attempts INTEGER)')
     conn.execute('CREATE TABLE IF NOT EXISTS announcements (id TEXT PRIMARY KEY,title TEXT,message TEXT,button TEXT,repeats INTEGER,interval_seconds INTEGER,created REAL,cancelled INTEGER DEFAULT 0)')
     conn.execute('CREATE TABLE IF NOT EXISTS announcement_deliveries (announcement TEXT,device TEXT,shown INTEGER DEFAULT 0,last REAL DEFAULT 0,PRIMARY KEY(announcement,device))')
@@ -42,10 +43,10 @@ def limit(conn,key,maximum):
     conn.execute('DELETE FROM limits WHERE start<?',(now-600,))
 
 def values(body):
-    if not isinstance(body,dict) or len(body)>len(advanced.CLIENT):
+    if not isinstance(body,dict) or len(body)>len(advanced.CLIENT)+500:
         raise ValueError('Некорректные настройки устройства')
     for key,value in body.items():
-        if key not in advanced.CLIENT or not isinstance(value,str) or value not in (advanced.CLIENT[key][1] or {'true':1,'false':1}):
+        if not advanced.valid_preference(key,value):
             raise ValueError('Недоступный параметр устройства')
     return body
 
@@ -94,13 +95,20 @@ def public(root,action,body,ip):
             limit(conn,'ack:'+row['id'],30)
             conn.execute('UPDATE announcement_deliveries SET shown=?,last=? WHERE device=? AND announcement=? AND shown=? AND EXISTS (SELECT 1 FROM announcements a WHERE a.id=announcement AND a.cancelled=0 AND a.repeats>=? AND (shown=0 OR last+a.interval_seconds<=?))',(body['occurrence'],time.time(),row['id'],body['id'],body['occurrence']-1,body['occurrence'],time.time()))
             return {'ok':True}
-        if action!='poll' or set(body)!={'token','applied','snapshot'} or not isinstance(body['token'],str) or not 32<=len(body['token'])<=100 or type(body['applied']) is not int:
+        if action!='poll' or set(body) not in ({'token','applied','snapshot'},{'token','applied','snapshot','controls'}) or not isinstance(body['token'],str) or not 32<=len(body['token'])<=100 or type(body['applied']) is not int:
             raise ValueError('Некорректный запрос устройства')
         snapshot=values(body['snapshot'])
         row=conn.execute('SELECT * FROM devices WHERE credential=?',(digest(body['token']),)).fetchone()
         if not row:
             raise PermissionError('Привязка истекла или отозвана')
         limit(conn,'poll:'+row['id'],30)
+        if 'controls' in body:
+            controls=body['controls']
+            if not isinstance(controls,list) or len(controls)>500:raise ValueError('Некорректный список пунктов')
+            for item in controls:
+                if not isinstance(item,dict) or set(item)!={'key','label','group'} or not advanced.dynamic_key(item['key']) or any(not isinstance(item[k],str) or not 1<=len(item[k])<=120 or any(ord(c)<32 for c in item[k]) for k in ['label','group']):raise ValueError('Некорректный пункт интерфейса')
+            conn.execute('DELETE FROM ui_controls WHERE device=?',(row['id'],))
+            conn.executemany('INSERT OR REPLACE INTO ui_controls VALUES (?,?,?,?)',[(row['id'],c['key'],c['label'],c['group']) for c in controls])
         applied=row['applied']
         if body['applied']==row['revision']:
             applied=body['applied']
@@ -113,12 +121,16 @@ def public(root,action,body,ip):
                 'values':json.loads(row['desired']) if row['paired'] and applied<row['revision'] else {},
                 'reload':bool(row['reload']) if row['paired'] and applied<row['revision'] else False}
 
+def control_listing(root):
+    with closing(database(root)) as conn:
+        return [dict(key=r['key'],label=r['label'],group=r['group_name']) for r in conn.execute('SELECT key,MIN(label) AS label,MIN(group_name) AS group_name FROM ui_controls GROUP BY key ORDER BY group_name,label LIMIT 1000')]
+
 def listing(root):
     with closing(database(root)) as conn:
         return {'announcements':[dict(r) for r in conn.execute('SELECT a.*,COUNT(d.device) AS recipients,COALESCE(SUM(d.shown),0) AS shown FROM announcements a LEFT JOIN announcement_deliveries d ON d.announcement=a.id GROUP BY a.id ORDER BY a.created DESC LIMIT 50')], 'devices':[{**{k:row[k] for k in ['id','name','ip','last','revision','applied','enabled']},
                             'snapshot':json.loads(row['snapshot']),'desired':json.loads(row['desired'])}
                            for row in conn.execute('SELECT * FROM devices WHERE paired=1 ORDER BY last DESC')],
-                'fields':advanced.client_settings({})['fields']}
+                'fields':advanced.client_settings({},control_listing(root))['fields']}
 
 def manage(root,body):
     if not isinstance(body,dict):
@@ -146,6 +158,7 @@ def manage(root,body):
             raise ValueError('Устройство не найдено')
         if action=='revoke' and set(body)=={'action','id'}:
             conn.execute('DELETE FROM devices WHERE id=?',(row['id'],))
+            conn.execute('DELETE FROM ui_controls WHERE device=?',(row['id'],))
         elif action=='rename' and set(body)=={'action','id','name'} and isinstance(body['name'],str) and 1<=len(body['name'].strip())<=80 and not any(ord(c)<32 for c in body['name']):
             conn.execute('UPDATE devices SET name=? WHERE id=?',(body['name'].strip(),row['id']))
         elif action=='access' and set(body)=={'action','id','enabled'} and type(body['enabled']) is bool:
@@ -153,7 +166,7 @@ def manage(root,body):
         elif action=='configure' and set(body) in ({'action','id','values','reload'},{'action','id','values','reload','inherit'}) and type(body['reload']) is bool:
             patch=values(body['values'])
             inherit=body.get('inherit',[])
-            if not isinstance(inherit,list) or any(not isinstance(k,str) or k not in advanced.CLIENT for k in inherit) or set(inherit)&set(patch):
+            if not isinstance(inherit,list) or any(not isinstance(k,str) or (k not in advanced.CLIENT and not advanced.dynamic_key(k)) for k in inherit) or set(inherit)&set(patch):
                 raise ValueError('Некорректное наследование параметров')
             if row['applied']<row['revision']:
                 raise ValueError('Дождитесь подтверждения предыдущей команды от ТВ')

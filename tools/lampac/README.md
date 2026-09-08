@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py, devices.py, client-profile.js device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, client-profile.js, ui-controls.js, device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -205,3 +205,5 @@ seconds). Reload Lampa once after deploying the new plugin version. Global profi
 mode disabled turns off the shared theme; explicit per-device settings still apply.
 
 Announcements retain their centered layout and translucent 60%-area window.
+
+Individual settings and sidebar entries are discovered by `ui-controls.js` from the installed Lampa templates, SettingsApi and live menu, then reported with the authenticated device poll. Reload Lampa once after installing an updated client script to populate Workspace controls. An explicitly enabled item remains reachable inside a disabled settings section; device overrides take priority over shared values. Unknown plugin controls are visibility preferences only, never server configuration keys.
