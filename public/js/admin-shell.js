@@ -11,7 +11,7 @@ window.AdminShell = (() => {
     { id: 'support-settings',label:'Настройки поддержки',parent:'chat',manager:true },
     { id: 'support-queue',label:'Очередь доставки',parent:'chat' },
     { id: 'support-status',label:'Состояние поддержки',parent:'chat' },
-    { id: 'settings', label: 'Система', description: 'Состояние сервера, диск, резервные копии и адреса.', icon: 'M4 7h16M4 17h16M8 4v6M16 14v6' }
+    { id: 'settings', label: 'Система', description: 'Состояние сервера, диск и резервные копии.', icon: 'M4 7h16M4 17h16M8 4v6M16 14v6' }
   ];
   const icon = m => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${m.icon}"/></svg>`;
   document.querySelector('.rail').innerHTML = modules.filter(m=>!m.parent).map(m => `<button type="button" class="navbtn" data-view="${m.id}" aria-label="${m.label}" title="${m.label}" ${m.manager ? 'hidden' : ''}>${icon(m)}<span>${m.label}</span></button>`).join('');
