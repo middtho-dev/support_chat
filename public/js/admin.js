@@ -94,7 +94,7 @@ async function init() {
   renderTemplates();
   renderMaintenance();
   setInterval(renderRelativeTimes, 30000);
-  setInterval(() => { if (S.view === 'settings' && S.token) loadMaintenance(); }, 20000);
+  setInterval(() => { if (S.view === 'settings' && S.token && !document.hidden) loadMaintenance(); }, 20000);
   if (IS_TG_MINI) {
     SafeStorage.session.removeItem('admin_token');
     clearMiniAppCache();
@@ -622,7 +622,7 @@ function showTemplatePicker(event) { event.stopPropagation(); document.querySele
 
 function input(id, label, value, type = 'text', attrs = '') { return `<div class="field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value ?? '')}" ${attrs}></div>`; }
 function area(id, label, value, rows = 3) { return `<div class="field"><label for="${id}">${label}</label><textarea id="${id}" rows="${rows}">${esc(value ?? '')}</textarea></div>`; }
-function check(id, label, value) { return `<label class="check setting-toggle"><input id="${id}" type="checkbox" ${value ? 'checked' : ''}><span>${label}</span></label>`; }
+function check(id, label, value) { return `<label class="check setting-toggle"><input id="${id}" type="checkbox" role="switch" ${value ? 'checked' : ''}><span>${label}</span></label>`; }
 function select(id, label, value, options) { return `<div class="field"><label for="${id}">${label}</label><select id="${id}">${options.map(opt => `<option value="${esc(opt.value)}" ${opt.value === value ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')}</select></div>`; }
 function settingCard(category, title, description, content, accent = 'blue', keywords = '') {
   return `<details class="card settings-card" data-settings-category="${esc(category)}" data-settings-keywords="${esc(keywords)}">
@@ -952,6 +952,8 @@ function settingsCards(s, topicModeControl) {
 }
 
 function renderSettings() {
+  const opened = new Set(Array.from($('settings').querySelectorAll('details[open]'),d=>d.querySelector('summary')?.textContent));
+  const scrollTop = $('settings').scrollTop;
   const s = S.settings || {};
   const canManage = !!S.permissions.canManageSettings;
   const topicModeControl = s.telegramMode === 'private'
@@ -995,6 +997,8 @@ function renderSettings() {
   document.querySelectorAll('[data-management-view]').forEach(b => b.addEventListener('click', () => selectManagementView(b.dataset.managementView)));
   selectManagementView(S.managementView || 'status');
   if (canManage && S.settings) bindSettingsUi();
+  $('settings').querySelectorAll('details').forEach(d=>{if(opened.has(d.querySelector('summary')?.textContent))d.open=true;});
+  $('settings').scrollTop=scrollTop;
 }
 
 function settingsPayload() {
@@ -1079,8 +1083,10 @@ function updateSettingsDirtyState() {
 function requestOperators() {
   socket.timeout(12000).emit('admin_get_operators', {}, (timeoutError, result) => {
     if (timeoutError || !result?.ok) return;
-    S.operators = result.operators || [];
-    if (S.view === 'settings' && !S.settingsDirty) renderSettings();
+    const operators = result.operators || [];
+    if(JSON.stringify(operators) === JSON.stringify(S.operators))return;
+    S.operators = operators;
+    if (S.view === 'settings' && !S.settingsDirty && !$('settings-config')?.contains(document.activeElement)) renderSettings();
   });
 }
 
@@ -1241,8 +1247,8 @@ function testOperationalAlert() {
   });
 }
 
-function renderTemplates() { $('templates').innerHTML = `<div class="section"><h2>Шаблоны ответов</h2><p>Готовые ответы сохраняются в этом браузере. В диалоге откройте кнопку «Шаблоны».</p><div class="card"><div id="tpl-list" class="template-list"></div><button id="tpl-add" class="add">Добавить шаблон</button><button id="tpl-reset" class="ghost" style="margin-left:8px">Вернуть стандартные</button></div></div>`; renderTemplateRows(); $('tpl-add').addEventListener('click', () => { S.templates.push({ label: 'Новый', text: '' }); saveTemplates(); renderTemplateRows(); }); $('tpl-reset').addEventListener('click', () => { S.templates = DEFAULT_TEMPLATES.map(t => ({ ...t })); saveTemplates(); renderTemplateRows(); toast('Шаблоны восстановлены', 'ok'); }); }
-function renderTemplateRows() { const list = $('tpl-list'); if (!list) return; list.innerHTML = S.templates.map((t, i) => `<div class="tpl" data-i="${i}"><input aria-label="Название шаблона" class="tpl-label" value="${esc(t.label)}" placeholder="Название"><textarea class="tpl-text" aria-label="Текст шаблона" placeholder="Текст ответа">${esc(t.text)}</textarea><button aria-label="Удалить шаблон" title="Удалить шаблон">×</button></div>`).join('') || '<div class="empty">Шаблонов нет</div>'; list.querySelectorAll('.tpl').forEach(row => { const i = Number(row.dataset.i); row.querySelector('.tpl-label').addEventListener('input', e => { S.templates[i].label = e.target.value; saveTemplates(); }); row.querySelector('.tpl-text').addEventListener('input', e => { S.templates[i].text = e.target.value; saveTemplates(); }); row.querySelector('button').addEventListener('click', () => { S.templates.splice(i, 1); saveTemplates(); renderTemplateRows(); }); }); }
+function renderTemplates() { $('templates').innerHTML = `<div class="section"><div class="page-heading"><span class="eyebrow">Поддержка</span><h2>Шаблоны ответов</h2><p>Готовые ответы сохраняются в этом браузере. В диалоге откройте кнопку «Шаблоны».</p></div><div class="template-actions"><button id="tpl-add" class="add">Добавить шаблон</button><button id="tpl-reset" class="ghost">Вернуть стандартные</button></div><div id="tpl-list" class="template-list"></div></div>`; renderTemplateRows(); $('tpl-add').addEventListener('click', () => { S.templates.push({ label: 'Новый', text: '' }); saveTemplates(); renderTemplateRows(); $('tpl-list').lastElementChild?.querySelector('input')?.focus(); }); $('tpl-reset').addEventListener('click', () => { S.templates = DEFAULT_TEMPLATES.map(t => ({ ...t })); saveTemplates(); renderTemplateRows(); toast('Шаблоны восстановлены', 'ok'); }); }
+function renderTemplateRows() { const list = $('tpl-list'); if (!list) return; list.innerHTML = S.templates.map((t, i) => `<div class="tpl" data-i="${i}"><label>Название<input aria-label="Название шаблона" class="tpl-label" value="${esc(t.label)}" placeholder="Название"></label><label>Текст ответа<textarea class="tpl-text" aria-label="Текст шаблона" placeholder="Текст ответа">${esc(t.text)}</textarea></label><button aria-label="Удалить шаблон" title="Удалить шаблон">×</button></div>`).join('') || '<div class="empty">Шаблонов нет</div>'; list.querySelectorAll('.tpl').forEach(row => { const i = Number(row.dataset.i); row.querySelector('.tpl-label').addEventListener('input', e => { S.templates[i].label = e.target.value; saveTemplates(); }); row.querySelector('.tpl-text').addEventListener('input', e => { S.templates[i].text = e.target.value; saveTemplates(); }); row.querySelector('button').addEventListener('click', () => { S.templates.splice(i, 1); saveTemplates(); renderTemplateRows(); }); }); }
 
 function fmtBytes(value) {
   const bytes = Number(value || 0);
@@ -1259,17 +1265,23 @@ function fmtStatusDate(value) {
 }
 
 async function adminMaintenanceApi(path, options = {}) {
+  const token = S.token;
   const response = await fetch(path, {
+    signal: AbortSignal.timeout(options.method ? 120000 : 10000), cache: 'no-store',
     ...options,
-    headers: { ...(options.headers || {}), 'X-Admin-Token': S.token }
+    headers: { ...(options.headers || {}), 'X-Admin-Token': token }
   });
   const data = await response.json().catch(() => ({}));
+  if (token !== S.token) throw new Error('Сессия завершена');
   if (!response.ok) throw new Error(data.error || `Ошибка HTTP ${response.status}`);
   return data;
 }
 
+let maintenanceLoading = null;
 async function loadMaintenance() {
-  if (!S.token) return;
+  const token = S.token;
+  if (!token || maintenanceLoading === token) return;
+  maintenanceLoading = token;
   try {
     const [maintenance, health] = await Promise.all([
       adminMaintenanceApi('/api/admin/maintenance'),
@@ -1279,11 +1291,15 @@ async function loadMaintenance() {
     S.systemHealth = health;
     renderMaintenance();
   } catch (error) {
-    if (S.view === 'settings') toast(error.message || 'Не удалось получить состояние системы', 'err');
-  }
+    if (S.view === 'settings' && token === S.token) toast(error.message || 'Не удалось получить состояние системы', 'err');
+  } finally {if(maintenanceLoading === token) maintenanceLoading = null;}
 }
+document.addEventListener('visibilitychange',()=>{if(!document.hidden && S.view === 'settings')loadMaintenance();});
 
+const maintenancePending = new Set();
 async function runMaintenanceAction(action) {
+  if(maintenancePending.has(action))return;
+  maintenancePending.add(action);
   const button = $(`maintenance-${action}`);
   if (button) button.disabled = true;
   try {
@@ -1293,6 +1309,7 @@ async function runMaintenanceAction(action) {
   } catch (error) {
     toast(error.message || 'Операция не выполнена', 'err');
   } finally {
+    maintenancePending.delete(action);
     renderMaintenance();
   }
 }
@@ -1331,6 +1348,8 @@ function renderMaintenance() {
   const reminderTimezone = tgReminders.timezone || S.settings?.timezone || '—';
   const realtime = S.systemHealth?.realtime || {};
   const realtimeTransports = realtime.transports || {};
+  const focusedId = root.contains(document.activeElement) ? document.activeElement.id : null;
+  const buttons = Array.from(root.querySelectorAll('button[id]'));
   root.innerHTML = `<div class="control-health-block">
     <div class="maintenance-title"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Telegram, realtime, очереди, резервные копии и диск обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
@@ -1399,9 +1418,12 @@ function renderMaintenance() {
       </div>
     </div>
   </div>`;
-  $('maintenance-refresh')?.addEventListener('click', loadMaintenance);
-  $('maintenance-backup')?.addEventListener('click', () => runMaintenanceAction('backup'));
-  $('maintenance-cleanup')?.addEventListener('click', () => runMaintenanceAction('cleanup'));
+  for(const old of buttons){const next=$(old.id);if(next){old.disabled=next.disabled;old.textContent=next.textContent;next.replaceWith(old);}}
+  for(const action of maintenancePending){const button=$('maintenance-'+action);if(button)button.disabled=true;}
+  if(focusedId)$(focusedId)?.focus({preventScroll:true});
+  if($('maintenance-refresh'))$('maintenance-refresh').onclick=loadMaintenance;
+  if($('maintenance-backup'))$('maintenance-backup').onclick=()=>runMaintenanceAction('backup');
+  if($('maintenance-cleanup'))$('maintenance-cleanup').onclick=()=>runMaintenanceAction('cleanup');
 }
 
 init();
