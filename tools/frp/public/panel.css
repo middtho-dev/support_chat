@@ -27,3 +27,6 @@
 #frp .frp-installer small{color:var(--muted,#a1aec2);line-height:1.5}#frp .frp-port-picker{display:flex;gap:8px}#frp .frp-port-picker input{flex:1;min-width:0}
 #frp .frp-reservation{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line,#2a3547)}#frp .frp-reservation small{display:block}#frp-installer-result{overflow-wrap:anywhere}
 @media(max-width:800px){#frp .frp-installer-grid{grid-template-columns:1fr}#frp .frp-installer{padding:16px}}
+
+#frp .frp-installer-credentials{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media(max-width:800px){#frp .frp-installer-credentials{grid-template-columns:1fr}}

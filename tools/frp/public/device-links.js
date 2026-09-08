@@ -30,7 +30,7 @@
       const primary = primaryProxy(g.ports);
       const c = g.clients.find(c => c.online) || g.clients[0];
       const values = [...g.ports, ...g.clients];
-      return { ...g, primary, name: baseName(primary?.name || g.ports[0]?.name) || c?.hostname || c?.user || c?.clientID || c?.key,
+      return { ...g, primary, name: g.ports.find(p => p.displayName)?.displayName || baseName(primary?.name || g.ports[0]?.name) || c?.hostname || c?.user || c?.clientID || c?.key,
         ip: c?.ip || '', online: values.some(v => v.online), stale: values.some(v => v.stale),
         lastSeen: values.map(v => v.lastSeen || '').sort().at(-1) || '',
         connections: g.ports.reduce((sum, p) => sum + (Number(p.connections) || 0), 0) };

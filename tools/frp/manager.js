@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const exec = promisify(execFile);
-const { availablePorts, suggestPort, validateRouter, buildInstaller } = require('./installer');
+const { createEnrollment } = require('./enrollment');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const { DEFAULTS, validateConfig, initialConfig } = require('./config');
 
@@ -164,6 +164,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       state.version = version; save();
     } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
   }
+  const enrollment = createEnrollment({ state, save, ranges: rangesFor, refresh, running: () => !!child, monitoringError: () => monitoringError });
   let timer;
   function scheduleRefresh() {
     clearInterval(timer);
@@ -177,9 +178,9 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       return { installed: fs.existsSync(binary), version: state.version || null, running: !!child, busy,
         enabled: state.enabled, ...validateConfig(state), error, monitoringError,
         allowedRanges: rangesFor(), excludedPorts: exclusionsFor(),
-        installerPort: suggestPort(availablePorts(state, rangesFor(), state.usedPorts)),
+        enrollments: enrollment.list(),
         installerReservations: state.installerReservations,
-        devices: state.devices.map(d => ({ ...d, online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
+        devices: state.devices.map(d => ({ ...d, displayName: state.enrollments.find(r => r.port === Number(d.port) && d.name === `kv9_luci_${r.port}`)?.name || '', online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
         clients: state.clients.map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
         token: state.token };
     },
@@ -188,24 +189,14 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       busy = true; error = null;
       try {
         if (action === 'generate-installer') {
-          validateRouter(config);
-          await refresh();
-          if (monitoringError) throw new Error('Не удалось проверить занятые порты: обновите соединение с FRP');
-          const port = Number(config.port);
-          if (!availablePorts(state, rangesFor(), state.usedPorts).includes(port)) throw new Error('Порт занят или запрещён. Выберите свободный порт 20000–23000.');
-          // Also reject ports held by other local services (the panel uses host networking).
-          const listener = require('net').createServer();
-          try { await new Promise((resolve, reject) => { listener.once('error', reject); listener.listen({ port, host: state.bindAddr, exclusive: true }, resolve); }); }
-          catch { throw new Error('Этот порт занят другим сервисом на сервере'); }
-          await new Promise(resolve => listener.close(resolve));
-          const file = buildInstaller(state, port, config);
-          const reservation = { port, ip: config.ip.trim(), createdAt: new Date().toISOString() };
-          state.installerReservations.push(reservation); save();
-          return { file, filename: `kv9-openwrt-${port}.bat`, status: { ...await this.status(), busy: false } };
+          const result = enrollment.issue(config);
+          return { ...result, status: { ...await this.status(), busy: false } };
         }
+        else if (action === 'enroll') return await enrollment.redeem(config);
+        else if (action === 'revoke-installer') enrollment.revoke(config.id);
         else if (action === 'release-installer') {
           const port = Number(config.port);
-          state.installerReservations = state.installerReservations.filter(r => r.port !== port); save();
+          state.installerReservations = state.installerReservations.filter(r => r.port !== port || r.enrollmentId); save();
         }
         else if (action === 'install') await install();
         else if (action === 'start') { await start(); state.enabled = true; save(); }
@@ -228,7 +219,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
             }
           }
         } else throw new Error('Неизвестная операция');
-      } catch (e) { error = e.message; throw e; } finally { busy = false; }
+      } catch (e) { if (action !== 'enroll') error = e.message; throw e; } finally { busy = false; }
       return this.status();
     },
     async shutdown() { closing = true; clearInterval(timer); await stop(); if (refreshing) await refreshing; }
