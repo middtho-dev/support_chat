@@ -113,6 +113,30 @@ function clearMiniAppCache() {
     .catch(() => {});
 }
 
+async function resetWorkspaceCache() {
+  const button = $('cache-reset-btn');
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = 'Обновление…';
+  try {
+    // CacheStorage contains downloaded resources; leave account and UI storage intact.
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(key => caches.delete(key)));
+    }
+    const url = new URL(window.location.href);
+    url.pathname = '/admin';
+    url.searchParams.set('_refresh', Date.now().toString(36));
+    const response = await fetch(url.href, { cache: 'reload', credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Page refresh failed');
+    window.location.replace(url.href);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Сбросить кэш';
+    toast('Не удалось обновить страницу. Проверьте соединение и повторите попытку.', 'err');
+  }
+}
+
 function initTelegramMiniApp() {
   if (!IS_TG_MINI) return;
   document.body.classList.add('tg-mini');
@@ -234,6 +258,7 @@ function updateTelegramBackButton() {
 function bindStaticUi() {
   $('login-form').addEventListener('submit', event => { event.preventDefault(); login(); });
   $('logout-btn').addEventListener('click', logout);
+  $('cache-reset-btn').addEventListener('click', resetWorkspaceCache);
   window.matchMedia('(max-width: 980px)').addEventListener('change', () => {
     if (S.view === 'chat') $('main').classList.toggle('open', !!S.current);
   });
