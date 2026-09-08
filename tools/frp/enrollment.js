@@ -26,11 +26,14 @@ function createEnrollment({ state, save, ranges, refresh, running, monitoringErr
       if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Для регистрации нужен HTTPS-адрес панели');
       if (url.username || url.password || url.search || url.hash || url.pathname !== '/api/frp/enroll') throw new Error('Некорректный адрес регистрации');
       if (state.enrollments.filter(r => !r.revoked && Date.parse(r.expiresAt) > Date.now()).length >= 3001) throw new Error('Слишком много активных файлов. Отзовите неиспользуемые.');
+      const localIP = String(input.localIP || '127.0.0.1').trim();
+      const localPort = Number(input.localPort ?? 80);
+      if (!net.isIP(localIP) || !Number.isInteger(localPort) || localPort < 1 || localPort > 65535) throw new Error('Укажите корректные IP и порт назначения (1–65535)');
       const token = crypto.randomBytes(32).toString('hex');
-      const record = { id: crypto.randomBytes(12).toString('hex'), name, tokenHash: digest(token), createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), port: null };
+      const record = { localIP, localPort, id: crypto.randomBytes(12).toString('hex'), name, tokenHash: digest(token), createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), port: null };
       const file = buildInstaller({ name, token, endpoint: url.href, password: input.password });
       state.enrollments.push(record); save();
-      return { file, filename: `kv9-openwrt-${record.id.slice(0, 8)}.bat` };
+      return { file, filename: `kv9ru-openwrt-${record.id.slice(0, 8)}.bat` };
     },
     revoke(id) {
       const record = state.enrollments.find(r => r.id === id);
@@ -64,7 +67,7 @@ function createEnrollment({ state, save, ranges, refresh, running, monitoringErr
       if (!ranges().some(r => record.port >= r.start && record.port <= r.end)) throw new Error('Выданный порт больше не разрешён настройками FRP');
       const conflict = state.devices.some(d => Number(d.port) === record.port && d.name !== `kv9_luci_${record.port}`);
       if (conflict) throw new Error('Выданный порт занят другим туннелем. Обратитесь к администратору.');
-      return { port: record.port, name: record.name, host: state.host, script: Buffer.from(routerScript(state, record.port)).toString('base64') };
+      return { port: record.port, name: record.name, host: state.host, script: Buffer.from(routerScript(state, record.port, record)).toString('base64') };
     }
   };
 }

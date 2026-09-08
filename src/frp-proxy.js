@@ -8,7 +8,7 @@ function createFrpProxy({ authorize, serviceUrl = process.env.FRP_SERVICE_URL ||
     if (!access.authenticated) return res.status(401).json({ error: 'Требуется вход в админку' });
     if (!access.canManageSettings) return res.status(403).json({ error: 'Нет прав на управление устройствами' });
     const suffix = req.path === '/' ? '' : req.path;
-    if (!((req.method === 'GET' && suffix === '') || (req.method === 'POST' && /^\/(install|start|stop|configure|generate-installer|release-installer|revoke-installer)$/.test(suffix)))) {
+    if (!((req.method === 'GET' && suffix === '') || (req.method === 'POST' && /^\/(install|start|stop|configure|generate-installer|release-installer|revoke-installer|update-device|delete-device)$/.test(suffix)))) {
       return res.status(404).json({ error: 'Неизвестная операция' });
     }
     if (!serviceToken) return res.status(503).json({ error: 'Связь с FRP не настроена: задайте FRP_SERVICE_TOKEN на сервере' });

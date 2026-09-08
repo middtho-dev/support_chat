@@ -39,7 +39,7 @@ function createServer(manager, token) {
     if (!authorized(req.headers['x-admin-token'], token)) return json(401, { error: 'Неверный ключ панели' });
     try {
       if (req.method === 'GET' && url.pathname === '/api/admin/frp') return json(200, await manager.status());
-      const action = url.pathname.match(/^\/api\/admin\/frp\/(install|start|stop|configure|generate-installer|release-installer|revoke-installer)$/)?.[1];
+      const action = url.pathname.match(/^\/api\/admin\/frp\/(install|start|stop|configure|generate-installer|release-installer|revoke-installer|update-device|delete-device)$/)?.[1];
       if (req.method !== 'POST' || !action) return json(404, { error: 'Not found' });
       if (!String(req.headers['content-type']).startsWith('application/json')) return json(415, { error: 'Expected JSON' });
       let body = '';

@@ -19,7 +19,7 @@ function Api($operation) {
     }
 }
 try {
-    $Host.UI.RawUI.WindowTitle = 'KV9 | Подключение OpenWrt'
+    $Host.UI.RawUI.WindowTitle = 'KV9RU | Подключение OpenWrt'
     $Host.UI.RawUI.BackgroundColor = 'Black'
     Clear-Host
     # Classic console font only; Windows Terminal controls its own font.
@@ -30,7 +30,7 @@ try {
         } catch {}
     }
     Write-Host '  ============================================================' -ForegroundColor DarkCyan
-    Write-Host '       KV9   /   OPENWRT' -ForegroundColor Cyan
+    Write-Host '       KV9RU /   OPENWRT' -ForegroundColor Cyan
     Write-Host ('       ' + $config.name) -ForegroundColor White
     Write-Host '  ============================================================' -ForegroundColor DarkCyan
     New-Item -ItemType Directory -Path $temp | Out-Null

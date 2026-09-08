@@ -34,6 +34,8 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
   let dashboardPort = 0;
   let refreshing = null;
   state.clients ||= [];
+  state.deviceLabels ||= {};
+  state.deletedProxies ||= [];
   state.installerReservations ||= [];
   state.usedPorts = [...new Set([...(state.usedPorts || []), ...state.devices.map(d => Number(d.port)).filter(p => p > 0)])];
   const panelPort = Number(process.env.FRP_PANEL_PORT || 7400);
@@ -165,6 +167,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
     } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
   }
   const enrollment = createEnrollment({ state, save, ranges: rangesFor, refresh, running: () => !!child, monitoringError: () => monitoringError });
+  function visibleDevices() { return state.devices.filter(d => !state.deletedProxies.includes(`${d.type}:${d.name}`)); }
   let timer;
   function scheduleRefresh() {
     clearInterval(timer);
@@ -178,10 +181,9 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       return { installed: fs.existsSync(binary), version: state.version || null, running: !!child, busy,
         enabled: state.enabled, ...validateConfig(state), error, monitoringError,
         allowedRanges: rangesFor(), excludedPorts: exclusionsFor(),
-        enrollments: enrollment.list(),
         installerReservations: state.installerReservations,
-        devices: state.devices.map(d => ({ ...d, displayName: state.enrollments.find(r => r.port === Number(d.port) && d.name === `kv9_luci_${r.port}`)?.name || '', online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
-        clients: state.clients.map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
+        devices: visibleDevices().map(d => ({ ...d, web: state.deviceLabels[`${d.type}:${d.name}`]?.web, displayName: state.deviceLabels[`${d.type}:${d.name}`]?.name || state.enrollments.find(r => r.port === Number(d.port) && d.name === `kv9_luci_${r.port}`)?.name || '', online: child && !monitoringError ? d.online : false, stale: !!monitoringError })),
+        clients: state.clients.filter(c => visibleDevices().some(d => d.clientID === c.clientID && (d.user || '') === (c.user || ''))).map(c => ({ ...c, online: child && !monitoringError ? c.online : false, stale: !!monitoringError })),
         token: state.token };
     },
     async action(action, config = {}) {
@@ -191,6 +193,26 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
         if (action === 'generate-installer') {
           const result = enrollment.issue(config);
           return { ...result, status: { ...await this.status(), busy: false } };
+        }
+        else if (action === 'update-device' || action === 'delete-device') {
+          const groups = require('./public/device-links').groupDevices(visibleDevices(), state.clients);
+          const device = groups.find(d => d.key === config.key);
+          if (!device || !device.ports.length) throw new Error('Устройство не найдено');
+          if (action === 'update-device') {
+            const name = String(config.name || '').trim();
+            if (!name || name.length > 80 || /[\x00-\x1f\x7f]/.test(name)) throw new Error('Имя: 1–80 символов');
+            const webPort = Number(config.webPort || 0);
+            if (webPort && !device.ports.some(p => p.type === 'tcp' && Number(p.port) === webPort)) throw new Error('Веб-порт не принадлежит этому устройству');
+            for (const p of device.ports) state.deviceLabels[`${p.type}:${p.name}`] = { name, web: webPort ? p.type === 'tcp' && Number(p.port) === webPort : undefined };
+            for (const record of state.enrollments) if (device.ports.some(p => p.name === `kv9_luci_${record.port}`)) record.name = name;
+            save();
+          } else {
+            for (const p of device.ports) {
+              state.deletedProxies.push(`${p.type}:${p.name}`);
+              delete state.deviceLabels[`${p.type}:${p.name}`];
+            }
+            state.deletedProxies = [...new Set(state.deletedProxies)]; save();
+          }
         }
         else if (action === 'enroll') return await enrollment.redeem(config);
         else if (action === 'revoke-installer') enrollment.revoke(config.id);

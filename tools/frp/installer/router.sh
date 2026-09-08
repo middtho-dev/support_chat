@@ -50,6 +50,8 @@ server=@@SERVER@@
 server_port=@@SERVER_PORT@@
 token=@@TOKEN@@
 port=@@PORT@@
+local_ip=@@LOCAL_IP@@
+local_port=@@LOCAL_PORT@@
 section="kv9_luci_$port"
 # Preserve existing tunnels, but refuse to silently move them to another server.
 old_server=$(uci -q get frpc.common.server_addr || true)
@@ -74,8 +76,8 @@ uci -q delete "frpc.$section" || true
 uci set "frpc.$section=conf"
 uci set "frpc.$section.name=$section"
 uci set "frpc.$section.type=tcp"
-uci set "frpc.$section.local_ip=127.0.0.1"
-uci set "frpc.$section.local_port=80"
+uci set "frpc.$section.local_ip=$local_ip"
+uci set "frpc.$section.local_port=$local_port"
 uci set "frpc.$section.remote_port=$port"
 uci set "frpc.$section.enabled=true"
 uci commit frpc
@@ -85,5 +87,5 @@ echo '[3/3] Enabling and starting FRPC...'
 sleep 3
 /etc/init.d/frpc running >/dev/null 2>&1 || { echo 'ERROR: FRPC did not stay running.'; exit 1; }
 echo "FRPC is running. Backup: $backup"
-echo "Tunnel: $server:$port -> 127.0.0.1:80"
-echo 'LuCI: Services > FRP Client. Confirm online status in the KV9 panel.'
+echo "Tunnel: $server:$port -> $local_ip:$local_port"
+echo 'LuCI: Services > FRP Client. Confirm online status in the KV9RU panel.'

@@ -40,6 +40,6 @@ test('OS listener is excluded, online status verified and revocation preserves a
 });
 test('ticket survives manager restart, secrets are hashed and admin status does not expose capability',async()=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'frp-enroll-'));let manager=createFrp({directory});
- try {const result=await manager.action('generate-installer',{name:'Спальня',password:'router-test-password',enrollmentUrl:'https://example.org/api/frp/enroll'});assert.equal(result.status.enrollments.length,1);assert.equal(result.status.enrollments[0].port,null);assert.equal(result.status.enrollments[0].tokenHash,undefined);await manager.shutdown();manager=createFrp({directory});assert.equal((await manager.status()).enrollments[0].name,'Спальня');}
+ try {const result=await manager.action('generate-installer',{name:'Спальня',password:'router-test-password',enrollmentUrl:'https://example.org/api/frp/enroll'});assert.equal(result.status.enrollments,undefined);assert.equal(JSON.parse(fs.readFileSync(path.join(directory,'state.json'),'utf8')).enrollments[0].port,null);await manager.shutdown();manager=createFrp({directory});assert.equal(JSON.parse(fs.readFileSync(path.join(directory,'state.json'),'utf8')).enrollments[0].name,'Спальня');}
  finally{await manager.shutdown();fs.rmSync(directory,{recursive:true,force:true});}
 });

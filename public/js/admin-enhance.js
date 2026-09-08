@@ -68,8 +68,9 @@
         <span class="meta-separator"></span>
         <span class="meta-fact">Ответ: ${esc(firstResponse ? fmtTime(firstResponse.created_at) : 'нет')}</span>
       </div>
-      <button id="meta-card-open" class="meta-card-open" type="button">Карточка обращения</button>`;
-    $('meta-card-open')?.addEventListener('click', openTicketCard);
+      <button id="meta-card-open" class="meta-card-open" type="button" ${currentTicket.status !== 'open' ? 'disabled' : ''}>Предложить закрыть</button>`;
+    $('meta-card-open')?.addEventListener('click', sendCustomerControl);
+    if ($('mobile-ticket-card')) $('mobile-ticket-card').disabled = currentTicket.status !== 'open';
     renderTicketCardDialog(firstResponse, pending);
   }
 
@@ -161,8 +162,8 @@
     }
   }
 
-  function sendCustomerControl() {
-    const button = $('send-customer-control');
+  function sendCustomerControl(source) {
+    const button = source?.currentTarget || $('send-customer-control');
     if (!activeSocket || !currentTicket || !button) return;
     button.disabled = true;
     button.textContent = 'Отправляю…';
@@ -174,17 +175,19 @@
         if (timeoutError || !result?.ok) {
           button.textContent = result?.error || 'Не удалось отправить';
           setTimeout(() => {
-            if (button.isConnected) button.textContent = customerControlLabel();
+            if (button.isConnected) button.textContent = button.id === 'mobile-ticket-card' ? '✓?' : 'Предложить закрыть';
           }, 2200);
           return;
         }
         button.textContent = 'Предложение отправлено';
         setTimeout(() => {
-          if (button.isConnected) button.textContent = customerControlLabel();
+          if (button.isConnected) button.textContent = button.id === 'mobile-ticket-card' ? '✓?' : 'Предложить закрыть';
         }, 1800);
       }
     );
   }
+
+  window.adminSendCustomerControl = sendCustomerControl;
 
   function openTicketCard() {
     cardReturnFocus = document.activeElement;
