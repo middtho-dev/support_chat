@@ -34,7 +34,7 @@ class AdvancedTests(unittest.TestCase):
         fields={f['key']:f for f in advanced.client_settings({})['fields']}
         self.assertTrue(fields['workspace_header_profile']['global'])
         self.assertTrue(fields['workspace_header_clock']['global'])
-        self.assertEqual(fields['interface_size']['group'],'Главный экран')
+        self.assertEqual(fields['interface_size']['group'],'Интерфейс')
         values={'workspace_header_profile':'false','interface_size':'bigger','poster_size':'w500'}
         self.assertEqual(advanced.apply_client({}, {}, {'mode':'always','values':values},'https://example.org')['WorkspaceUI']['values'],values)
         with self.assertRaises(ValueError):advanced.apply_client({}, {}, {'mode':'always','values':{'interface_size':'huge'}},'https://example.org')
@@ -51,6 +51,21 @@ class AdvancedTests(unittest.TestCase):
             self.assertEqual(result['WorkspaceUI']['values'],values)
         with self.assertRaises(ValueError):
             advanced.apply_client({}, {}, {'mode':'always','values':{'workspace_kv9_theme':'yes'}}, 'https://example.org')
+
+    def test_settings_catalog_has_unique_keys_and_specific_descriptions(self):
+        fields=advanced.client_settings({})['fields']
+        self.assertEqual(len(fields),len({f['key'] for f in fields}))
+        for f in fields:
+            self.assertGreater(len(f['description']),35,f['key'])
+            self.assertNotEqual(f['group'],'Совместимость',f['key'])
+            self.assertTrue(f['global'])
+        alias=advanced.discovered_key('m','movie')
+        result=advanced.client_settings({'WorkspaceUI':{'values':{'workspace_menu_movie':'true',alias:'false'}}},[{'key':alias,'label':'Фильмы','group':'Пункты левого меню'}])
+        self.assertEqual(result['values'],{'workspace_menu_movie':'false'})
+        self.assertNotIn(alias,{f['key'] for f in result['fields']})
+        config={'LampaWeb':{'initPlugins':{k:True for k in advanced.PLUGINS}},'Demo':{'plugin':'demo','enable':True,'displayindex':1}}
+        for k,v in advanced.PROVIDER.items():config['Demo'][k]=False if v[1]=='bool' else 1 if v[1]=='int' else 'https://example.org' if v[1]=='url' else 'example'
+        for f in advanced.fields(config):self.assertGreater(len(f['description']),30,f['path'])
 
     def test_torrent_actions_are_targeted_and_removal_verified(self):
         torrent={'hash':'a'*40,'title':'test','data':'secret','poster':'secret'}

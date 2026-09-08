@@ -244,7 +244,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(script)
             elif self.path.endswith('/devices'):
-                self.reply(200, devices.listing(ROOT))
+                result=devices.listing(ROOT)
+                policy=read_config('init.conf').get('WorkspaceUI',{})
+                result['shared']=advanced.normalize_preferences(policy.get('values',{})) if policy.get('mode')!='disabled' else {}
+                self.reply(200, result)
             elif self.path.endswith('/advanced'):
                 config = merge(read_config('current.conf'), read_config('init.conf'))
                 self.reply(200, {'fields': advanced.fields(config), 'client': advanced.client_settings(config, devices.control_listing(ROOT))})
@@ -276,7 +279,9 @@ class Handler(BaseHTTPRequestHandler):
                 result = devices.public(ROOT, self.path.rsplit('/',1)[1], body, self.headers.get('X-Workspace-IP',''))
                 if self.path.endswith('/poll'):
                     policy = read_config('init.conf').get('WorkspaceUI', {})
+                    policy = {**policy,'values':advanced.normalize_preferences(policy.get('values',{}))}
                     result['uiValues'] = {k:v for k,v in policy.get('values',{}).items() if (advanced.dynamic_key(k) or k.startswith(('workspace_settings_','workspace_menu_'))) and policy.get('mode') != 'disabled'}
+                    result['kv9Ambient'] = policy.get('mode') == 'disabled' or policy.get('values', {}).get('workspace_kv9_ambient') != 'false'
                     result['kv9Theme'] = policy.get('mode') != 'disabled' and policy.get('values', {}).get('workspace_kv9_theme') == 'true'
                 return self.reply(200, result)
             except PermissionError:

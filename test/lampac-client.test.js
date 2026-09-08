@@ -56,16 +56,16 @@ test('settings policy blocks direct navigation and releases sections through inh
  run({workspace_settings_all:'false'});const count=opened.length;context.Lampa.Settings.create('workspace_device');assert.equal(opened.length,count);
 });
 
-test('header profile controls hide CUB entry points and restore without deleting account data',()=>{
+test('header profile, premium and account access can be controlled independently',()=>{
  const data=new Map([['account',{token:'preserve-me'}]]),opened=[];let style;
  const storage={get:(k,f)=>data.has(k)?data.get(k):f,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k)};
  const context={document:{getElementById:()=>style,createElement:()=>({}),head:{appendChild:n=>style=n}},Lampa:{Storage:storage,Settings:{create:n=>opened.push(n),listener:{follow(){}}},Noty:{show(){}}},localStorage:{getItem:k=>data.get(k)??null}};context.window=context;
  const run=values=>vm.runInNewContext(script.replace('POLICY',JSON.stringify({mode:'always',revision:'1',values})),context);
  run({workspace_header_profile:'false',workspace_header_clock:'false'});
- assert.match(style.textContent,/\.head \.open--profile\{display:none/);assert.match(style.textContent,/\.head \.open--premium\{display:none/);
- context.Lampa.Settings.create('account');assert.equal(opened.length,0);assert.equal(data.get('account').token,'preserve-me');
+ assert.match(style.textContent,/\.head \.open--profile\{display:none/);assert.doesNotMatch(style.textContent,/\.head \.open--premium\{display:none/);
+ context.Lampa.Settings.create('account');assert.equal(opened.length,1);assert.equal(data.get('account').token,'preserve-me');
  data.set('workspace_device_access',{overrides:{workspace_header_profile:'true'}});run({workspace_header_profile:'false'});
- assert.doesNotMatch(style.textContent,/open--profile/);context.Lampa.Settings.create('account');assert.deepEqual(opened,['account']);
+ assert.doesNotMatch(style.textContent,/open--profile/);context.Lampa.Settings.create('account');assert.deepEqual(opened,['account','account']);
  run({});assert.equal(data.get('account').token,'preserve-me');
 });
 

@@ -76,6 +76,17 @@ class DeviceTests(unittest.TestCase):
         devices.manage(self.root,{'action':'revoke','id':r['id']})
         self.assertEqual(devices.control_listing(self.root),[])
 
+    def test_duplicate_controls_migrate_without_losing_overrides(self):
+        r=devices.public(self.root,'enroll',{'name':'TV'},'203.0.113.1')
+        alias=devices.advanced.discovered_key('m','movie');key='workspace_menu_movie'
+        with devices.database(self.root) as conn:
+            conn.execute('UPDATE devices SET desired=? WHERE id=?',(devices.json.dumps({alias:'false',key:'true'}),r['id']))
+        self.assertEqual(self.poll(r['token'])['overrides'],{key:'false'})
+        devices.manage(self.root,{'action':'configure','id':r['id'],'values':{key:'true'},'reload':False})
+        self.assertEqual(self.poll(r['token'],1)['overrides'],{key:'true'})
+        devices.manage(self.root,{'action':'configure','id':r['id'],'values':{},'inherit':[key],'reload':False})
+        self.assertEqual(self.poll(r['token'],2)['overrides'],{})
+
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.root=Path(self.directory.name)
     def tearDown(self):self.directory.cleanup()

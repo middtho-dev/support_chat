@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py, devices.py, client-profile.js, ui-controls.js, device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, client-profile.js, ambient.js, ui-controls.js, device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -207,3 +207,14 @@ mode disabled turns off the shared theme; explicit per-device settings still app
 Announcements retain their centered layout and translucent 60%-area window.
 
 Individual settings and sidebar entries are discovered by `ui-controls.js` from the installed Lampa templates, SettingsApi and live menu, then reported with the authenticated device poll. Reload Lampa once after installing an updated client script to populate Workspace controls. An explicitly enabled item remains reachable inside a disabled settings section; device overrides take priority over shared values. Unknown plugin controls are visibility preferences only, never server configuration keys.
+
+
+### Settings catalog audit (September 2026)
+
+The shared Lampa profile has one editor with four collapsible families. Every exposed server field has an explicit description, and every supported client preference is available globally and per device. Visibility controls have their own groups and do not change the value of the underlying native preference. A device shows discovered plugin controls from its own inventory (plus configured values), rather than unrelated devices. Native description text is included when the template or SettingsApi supplies it.
+
+Legacy discovered duplicates of standard menu and settings sections are normalized to their original `workspace_menu_*` / `workspace_settings_*` keys. Existing discovered overrides retain their previous priority on read, and the next save removes the alias. Clearing an override restores inheritance without reviving a hidden legacy alias. Header profile and Premium entries are now independent; hiding the profile icon does not block the account settings section.
+
+`workspace_kv9_ambient` defaults to enabled with the KV9 theme. `ambient.js` uses CSS gradients and transforms; it hides on the `full` activity, player start, player DOM presence, and hidden document. It resumes in the catalog, uses no per-frame JavaScript, and respects reduced-motion preferences. Theme off or a device ambient override releases the native background. Include ambient.js when installing the agent.
+
+Audit sources: installed Lampa 4.56 templates and SettingsApi; the live Workspace field schema; Lampac `Shared/Controllers/BaseController.cs` for distinct streamproxy/useproxystream behavior and cache units; TorrServer `server/settings/btsets.go` for buffer and network units. Configurations outside the agent's validated schema remain untouched.
