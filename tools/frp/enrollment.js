@@ -18,10 +18,10 @@ function createEnrollment({ state, save, ranges, refresh, running, monitoringErr
   }
   return {
     list: () => state.enrollments.map(({ tokenHash, fingerprint, ...r }) => r),
-    issue(input) {
+    issue(input, firmware = false) {
       const name = String(input.name || '').trim();
       if (!name || name.length > 80 || /[\x00-\x1f\x7f]/.test(name)) throw new Error('Имя устройства: 1–80 символов');
-      if (typeof input.password !== 'string' || !input.password.length || input.password.length > 512 || /[\r\n\0]/.test(input.password)) throw new Error('SSH-пароль: 1–512 символов без переноса строки');
+      if (!firmware && (typeof input.password !== 'string' || !input.password.length || input.password.length > 512 || /[\r\n\0]/.test(input.password))) throw new Error('SSH-пароль: 1–512 символов без переноса строки');
       const url = new URL(input.enrollmentUrl);
       if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Для регистрации нужен HTTPS-адрес панели');
       if (url.username || url.password || url.search || url.hash || url.pathname !== '/api/frp/enroll') throw new Error('Некорректный адрес регистрации');
@@ -30,7 +30,8 @@ function createEnrollment({ state, save, ranges, refresh, running, monitoringErr
       const localPort = Number(input.localPort ?? 80);
       if (!net.isIP(localIP) || !Number.isInteger(localPort) || localPort < 1 || localPort > 65535) throw new Error('Укажите корректные IP и порт назначения (1–65535)');
       const token = crypto.randomBytes(32).toString('hex');
-      const record = { localIP, localPort, id: crypto.randomBytes(12).toString('hex'), name, tokenHash: digest(token), createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(), port: null };
+      const record = { localIP, localPort, id: crypto.randomBytes(12).toString('hex'), name, tokenHash: digest(token), createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + (firmware ? 30 : 7) * 86400000).toISOString(), port: null };
+      if (firmware) { state.enrollments.push(record); save(); return { token, endpoint: url.href, expiresAt: record.expiresAt }; }
       const file = buildInstaller({ name, token, endpoint: url.href, password: input.password });
       state.enrollments.push(record); save();
       return { file, filename: `kv9ru-openwrt-${record.id.slice(0, 8)}.bat` };

@@ -32,7 +32,7 @@ test('range beginning at 1000 persists and service exclusions cannot be removed'
     const includes = p => s.allowedRanges.some(r => p >= r.start && p <= r.end);
     assert.equal(s.portStart, 1000);
     for (const p of [1000, 1999, 65535]) assert.ok(includes(p));
-    for (const p of [999, 1500, 2019, 3000, 3001, 7000, 7400]) assert.ok(!includes(p));
+    for (const p of [999, 1500, 2019, 3000, 3001, 7000, 7400, 7700]) assert.ok(!includes(p));
     await assert.rejects(manager.action('configure', { portStart: 999 }));
     await assert.rejects(manager.action('configure', { port: 2019 }), /зарезервирован/);
     await manager.action('configure', { portStart: 1100, portEnd: 1800 });

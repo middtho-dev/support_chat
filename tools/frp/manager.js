@@ -39,7 +39,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
   state.installerReservations ||= [];
   state.usedPorts = [...new Set([...(state.usedPorts || []), ...state.devices.map(d => Number(d.port)).filter(p => p > 0)])];
   const panelPort = Number(process.env.FRP_PANEL_PORT || 7400);
-  const servicePorts = [...new Set([2019, 3000, 3001, Number(process.env.FRP_CHAT_PORT || 3001), panelPort])];
+  const servicePorts = [...new Set([2019, 3000, 3001, Number(process.env.FRP_CHAT_PORT || 3001), Number(process.env.FIRMWARE_SERVICE_PORT || 7700), panelPort])];
   const exclusionsFor = (config = state) => [...new Set([config.port, dashboardPort, ...servicePorts, ...config.reservedPorts])].filter(p => p > 0).sort((a, b) => a - b);
   const rangesFor = (config = state) => allowedRanges(exclusionsFor(config), config.portStart, config.portEnd);
   const save = () => {
@@ -190,6 +190,7 @@ function createFrp({ directory = process.env.FRP_DIR || path.join(__dirname, 'da
       if (busy || closing) throw new Error('Дождитесь завершения текущей операции');
       busy = true; error = null;
       try {
+        if (action === 'issue-firmware') return enrollment.issue(config, true);
         if (action === 'generate-installer') {
           const result = enrollment.issue(config);
           return { ...result, status: { ...await this.status(), busy: false } };

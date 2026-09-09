@@ -39,17 +39,20 @@
   let next = settingsPane.nextElementSibling;
   while (next && next !== installerPane) { const node = next; next = node.nextElementSibling; devicesPane.append(node); }
   settingsPane.before(tabs, devicesPane);
-  const panes = {devices: devicesPane, installer: installerPane, server: settingsPane};
+  const firmwarePane=document.createElement('section');firmwarePane.className='frp-firmware';installerPane.after(firmwarePane);
+  let firmwareUI=null;
+  if(integration){const script=document.createElement('script');script.src='/js/frp-firmware.js';script.onload=()=>{firmwareUI=window.mountFrpFirmware(firmwarePane,()=>S.token);};document.head.append(script);}else firmwarePane.textContent='Подготовка прошивок доступна в общем Workspace.';
+  const panes = {firmware:firmwarePane,devices: devicesPane, installer: installerPane, server: settingsPane};
   const actions = wrap.querySelector(':scope > .frp-actions');
   function selectFrpTab(key) {
-    wrap.querySelector('h2').textContent='FRP · '+({devices:'Устройства',installer:'Подключить роутер',server:'Сервер'}[key]);
+    wrap.querySelector('h2').textContent='FRP · '+({devices:'Устройства',installer:'Подключить роутер',server:'Сервер',firmware:'Прошивка'}[key]);
     Object.entries(panes).forEach(([name, node]) => { node.hidden = name !== key; });
     if (panes[key].tagName === 'DETAILS') panes[key].open = true;
     actions.hidden = key !== 'server';
     tabs.querySelectorAll('button').forEach(button => { const active = button.dataset.frpTab === key; button.classList.toggle('on', active); button.setAttribute('aria-pressed', String(active)); });
     panel.scrollTop = 0;
   }
-  for (const [key, label] of [['devices','Устройства'],['installer','Подключить роутер'],['server','Сервер']]) {
+  for (const [key, label] of [['devices','Устройства'],['installer','Подключить роутер'],['firmware','Прошивка'],['server','Сервер']]) {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.frpTab = key; button.onclick = () => selectFrpTab(key); tabs.append(button);
   }
   selectFrpTab('devices');
@@ -182,13 +185,13 @@
     } catch (e) { S.token = null; $('login-error').textContent = e.message; }
   });
   $('logout').addEventListener('click', () => {
-    generation++; pending = false; loading = false; S.token = null; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-mobile-devices').textContent = ''; $('frp-device-dialog').close();  $('frp-devices').textContent = '';
+    firmwareUI?.reset(); generation++; pending = false; loading = false; S.token = null; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-mobile-devices').textContent = ''; $('frp-device-dialog').close();  $('frp-devices').textContent = '';
     panel.hidden = true; $('login').hidden = false; $('logout').hidden = true;
   });
   }
   window.FrpPanel = {
     open: load,
-    reset: () => { generation++; loading = false; pending = false; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-mobile-devices').textContent = ''; $('frp-device-dialog').close();  $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
+    reset: () => { firmwareUI?.reset(); generation++; loading = false; pending = false; current = null; clearDownload(); $('frp-installer-name').value = ''; $('frp-mobile-devices').textContent = ''; $('frp-device-dialog').close();  $('frp-devices').textContent = ''; $('frp-status').textContent = 'Загрузка…'; }
   };
   panel.addEventListener('click', event => {
     const anchor = event.target.closest('[data-device-link]');
