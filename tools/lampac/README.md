@@ -5,7 +5,7 @@ manager/Mini App authorization and talks to a token-protected loopback Python AP
 The agent runs as `lampac`, not root. Its sudo allowlist controls only lampac.service.
 No Docker socket, arbitrary shell commands, root password or Lampac password reach the browser.
 
-Install agent.py, advanced.py, devices.py, client-profile.js, ambient.js, ui-controls.js, device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
+Install agent.py, advanced.py, devices.py, playback.py, playback-client.js, client-profile.js, ambient.js, ui-controls.js, device-client.js, bootstrap.js, announcements.js and activation.html in /usr/local/lib/lampac-workspace (root-owned), the supplied unit in
 /etc/systemd/system and sudoers in /etc/sudoers.d/lampac-workspace (0440; validate with visudo).
 Create /etc/lampac-workspace.env (root-owned, 0600) with LAMPAC_SERVICE_TOKEN (random 32+
 characters), LAMPAC_DIR=/opt/lampac, LAMPAC_AGENT_PORT=7600 and LAMPAC_PUBLIC_URL=https://lc.kv9.ru.
@@ -218,3 +218,27 @@ Legacy discovered duplicates of standard menu and settings sections are normaliz
 `workspace_kv9_ambient` defaults to enabled with the KV9 theme. `ambient.js` uses CSS gradients and transforms; it hides on the `full` activity, player start, player DOM presence, and hidden document. It resumes in the catalog, uses no per-frame JavaScript, and respects reduced-motion preferences. Theme off or a device ambient override releases the native background. Include ambient.js when installing the agent.
 
 Audit sources: installed Lampa 4.56 templates and SettingsApi; the live Workspace field schema; Lampac `Shared/Controllers/BaseController.cs` for distinct streamproxy/useproxystream behavior and cache units; TorrServer `server/settings/btsets.go` for buffer and network units. Configurations outside the agent's validated schema remain untouched.
+
+## Playback diagnostics
+
+The manager-only Playback tab reads `/api/lampac/playback`. A device-scoped
+`/workspace-device/heartbeat` reports every ten seconds and on player activity,
+independently of settings discovery. It never controls playback. HTML video and
+Lampa Player/PlayerVideo events provide title, source hostname, state, position,
+buffered seconds ahead and a fixed error category; stream URLs, query strings,
+credentials and raw error messages are not sent. Buffer or engine details may be
+unavailable on native players. External players that do not expose Lampa events
+cannot be observed. Background browser suspension is not treated as proof that
+the film has stopped.
+
+Each page has a separate session, limited to eight per device. Only the latest
+snapshot per session is stored; snapshots expire from results after 24 hours and
+are purged on the next heartbeat or diagnostics read. After 90 seconds without a
+heartbeat the UI marks playback unconfirmed. Device status keeps refreshing while
+its forms remain open, without replacing inputs. No stale session is counted as
+playing. TorrServer speed is matched by exact torrent hash and represents the
+whole swarm download, not an individual viewer. Listing does not wake torrents.
+
+Deploy agent.py, devices.py, playback.py, playback-client.js and device-client.js
+together to /usr/local/lib/lampac-workspace and restart only the Workspace agent.
+Existing open Lampa pages must reload once to load the reporting client.

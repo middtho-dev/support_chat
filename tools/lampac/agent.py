@@ -196,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {'error': 'Требуется вход'})
         # Caddy's auth rewrite retains the original query string (e.g. ?v=...).
         self.path = self.path.split('?', 1)[0]
-        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices', '/access', '/client.js', '/bootstrap.html', '/bootstrap.js']:
+        if self.path not in ['/api/lampac', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices', '/api/lampac/playback', '/access', '/client.js', '/bootstrap.html', '/bootstrap.js']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         try:
             if self.path in ('/bootstrap.html','/bootstrap.js'):
@@ -236,13 +236,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200 if allowed else 403, {} if allowed else {'error': 'Доступ к Lampac отключён'})
             elif self.path == '/client.js':
                 client = {'logo':os.environ.get('WORKSPACE_LOGO_URL',os.environ.get('WORKSPACE_SUPPORT_URL','https://helpo.su').rstrip('/')+'/logo.png'), 'activation':activation_page().split('<!--SCREEN-->')[1].split('<!--POLL-->')[0], 'url': PUBLIC_URL.rstrip('/'), 'fields': {k:list(v[1] or {'true':1,'false':1}) for k,v in advanced.CLIENT.items()}}
-                script = (advanced.client_script(read_config('init.conf')) + '\n' + (Path(__file__).parent/'announcements.js').read_text(encoding='utf-8') + '\n' + (Path(__file__).parent/'device-client.js').read_text(encoding='utf-8').replace('DEVICE_CONFIG',json.dumps(client))).encode()
+                script = (advanced.client_script(read_config('init.conf')) + '\n' + (Path(__file__).parent/'announcements.js').read_text(encoding='utf-8') + '\n' + (Path(__file__).parent/'playback-client.js').read_text(encoding='utf-8') + '\n' + (Path(__file__).parent/'device-client.js').read_text(encoding='utf-8').replace('DEVICE_CONFIG',json.dumps(client))).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/javascript; charset=utf-8')
                 self.send_header('Cache-Control', 'no-store')
                 self.send_header('Content-Length', str(len(script)))
                 self.end_headers()
                 self.wfile.write(script)
+            elif self.path.endswith('/playback'):
+                result=devices.playback_listing(ROOT)
+                result['torrentsAvailable']=True
+                try:
+                    torrents={t['hash']:t for t in advanced.torrents(torr_request)}
+                except Exception:
+                    torrents={};result['torrentsAvailable']=False
+                for session in result['sessions']:
+                    torrent=torrents.get(session['hash']) if session['fresh'] else None
+                    session['downloadSpeed']=torrent.get('download_speed') if torrent else None
+                self.reply(200,result)
             elif self.path.endswith('/devices'):
                 result=devices.listing(ROOT)
                 policy=read_config('init.conf').get('WorkspaceUI',{})
@@ -266,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorized():
             return self.reply(401, {'error': 'Требуется вход'})
-        if self.path in ['/workspace-device/register', '/workspace-device/enroll', '/workspace-device/poll', '/workspace-device/announcement-ack']:
+        if self.path in ['/workspace-device/register', '/workspace-device/enroll', '/workspace-device/poll', '/workspace-device/announcement-ack', '/workspace-device/heartbeat']:
             try:
                 length = int(self.headers.get('Content-Length', '0'))
                 if not 0 < length <= (1048576 if self.path.endswith('/poll') else 8192):

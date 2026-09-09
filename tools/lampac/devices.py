@@ -7,6 +7,7 @@ import time
 from http.cookies import SimpleCookie
 from contextlib import closing
 import advanced
+import playback
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
@@ -88,6 +89,16 @@ def public(root,action,body,ip):
             conn.execute('INSERT INTO devices (id,credential,code,expires,name,ip,last,paired,enabled) VALUES (?,?,?,?,?,?,?,?,?)',
                 (identifier,digest(token),None if automatic else digest(code),time.time()+300,body['name'],ip,time.time(),int(automatic),0))
             return {'id':identifier,'token':token,'code':None if automatic else code,'expiresIn':300,'paired':automatic,'enabled':False}
+        if action=='heartbeat':
+            if set(body)!={'token','playback'} or not isinstance(body['token'],str) or not 32<=len(body['token'])<=100:
+                raise ValueError('Некорректный сигнал устройства')
+            row=conn.execute('SELECT id,enabled FROM devices WHERE credential=? AND paired=1',(digest(body['token']),)).fetchone()
+            if not row:raise PermissionError('Доступ отозван')
+            limit(conn,'heartbeat:'+row['id'],40)
+            playback.clean(body['playback'])
+            if row['enabled']:playback.record(conn,row['id'],body['playback'])
+            conn.execute('UPDATE devices SET last=?,ip=? WHERE id=?',(time.time(),ip,row['id']))
+            return {'ok':True,'enabled':bool(row['enabled'])}
         if action=='announcement-ack':
             if set(body)!={'token','id','occurrence'} or not isinstance(body['token'],str) or not isinstance(body['id'],str) or type(body['occurrence']) is not int:
                 raise ValueError('Некорректное подтверждение')
@@ -164,6 +175,8 @@ def manage(root,body):
             raise ValueError('Устройство не найдено')
         if action=='revoke' and set(body)=={'action','id'}:
             conn.execute('DELETE FROM devices WHERE id=?',(row['id'],))
+            playback.schema(conn)
+            conn.execute('DELETE FROM playback WHERE device=?',(row['id'],))
             conn.execute('DELETE FROM ui_controls WHERE device=?',(row['id'],))
             conn.execute('DELETE FROM ui_control_descriptions WHERE device=?',(row['id'],))
         elif action=='rename' and set(body)=={'action','id','name'} and isinstance(body['name'],str) and 1<=len(body['name'].strip())<=80 and not any(ord(c)<32 for c in body['name']):
@@ -198,3 +211,7 @@ def access_allowed(root,cookie_header,allow_unknown=False):
     with closing(database(root)) as conn:
         row=conn.execute('SELECT enabled FROM devices WHERE credential=?',(digest(token.value),)).fetchone()
         return allow_unknown if row is None else bool(row['enabled'])
+
+def playback_listing(root):
+    with closing(database(root)) as conn, conn:
+        return {'sessions':playback.listing(conn),'devices':[dict(r) for r in conn.execute('SELECT id,last,enabled FROM devices WHERE paired=1')],'serverTime':time.time()}

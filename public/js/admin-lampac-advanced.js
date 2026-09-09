@@ -11,7 +11,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
   const content = document.createElement('div');
   content.className = 'lc-content';
   section.append(navigation, overview, content);
-  const tabs = [['overview', 'Сервер'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства'], ['announcements','Объявления'], ['settings', 'Источники и плагины'], ['client', 'Общие настройки']];
+  const tabs = [['overview', 'Сервер'], ['playback', 'Просмотры'], ['torrents', 'Торренты'], ['clients', 'Подключения'], ['devices', 'Устройства'], ['announcements','Объявления'], ['settings', 'Источники и плагины'], ['client', 'Общие настройки']];
   const panes = {};
   for (const [key, label] of tabs) {
     const button = document.createElement('button');
@@ -26,6 +26,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
       tab = key;
       const descriptions = {
         overview:'Состояние сервисов, подключения и настройки сервера.',
+        playback:'Текущие сеансы и последняя ошибка. Обновление каждые 5 секунд; сведения присылает плеер устройства.',
         torrents:'Активные потоки TorrServer, скорость и буфер. Данные обновляются автоматически.',
         clients:'История запросов к Lampac и блокировка внешних IP-адресов.',
         devices:'Доступ и индивидуальные настройки установок Lampa. Новые устройства требуют активации.',
@@ -109,7 +110,7 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     });return {values,inherit};
   }
   function renderDevices(data) {
-    replaceRecords(panes.devices, `<p class="wk-note">Устройства регистрируются автоматически через <code>${esc(publicUrl + '/workspace-client.js')}</code>. ID относится к установке Lampa и меняется после очистки её данных.</p><div class="wk-list-heading"><span>Устройство</span><span>Состояние</span></div><div class="lc-list lc-record-list">${data.devices.map((d, i) => `<details class="card lc-record" data-record-key="${esc(d.id)}"><summary><span>${esc(d.name)}</span><small class="wk-badge">${d.enabled===0?'Ожидает доступа':Date.now()/1000-d.last<35?'На связи':'Нет связи'}</small></summary><div class="lc-record-body"><dl class="wk-metadata"><div><dt>ID установки</dt><dd><code>${esc(d.id)}</code></dd></div><div><dt>IP-адрес</dt><dd>${esc(d.ip)}</dd></div><div><dt>Последний ответ</dt><dd>${esc(date(d.last))}</dd></div><div><dt>Профиль</dt><dd>${d.applied < d.revision ? 'Ожидает применения' : 'Изменения подтверждены'}</dd></div></dl><form data-rename-form="${i}" class="wk-inline-form"><label class="voice-field">Название устройства<input name="deviceName" required maxlength="80" value="${esc(d.name)}"></label><button class="ghost">Переименовать</button></form><details class="lc-device-settings"><summary>Настройки устройства</summary><form data-device-form="${i}"><p class="wk-note">Значения устройства перекрывают общий профиль при каждом запуске. «Общий профиль» возвращает наследование.</p><label class="voice-field">Найти настройку<input type="search" data-pref-search placeholder="Например, меню или плеер"></label>${preferences(data.fields.filter(f=>!f.key.startsWith('workspace_ui_')||!Array.isArray(d.controls)||d.controls.includes(f.key)||Object.hasOwn(d.desired||{},f.key)),d.desired||{},d.snapshot||{},false,data.shared||{})}${toggle('device-reload-'+i,'Перезапустить Lampa после применения · прервёт просмотр',false)}<div class="wk-actions"><button class="save" ${d.applied < d.revision ? 'disabled' : ''}>Сохранить профиль</button></div></form></details><footer class="wk-actions wk-record-actions"><button class="${d.enabled===0?'save':'ghost'}" data-access="${i}">${d.enabled===0?'Включить доступ':'Отключить доступ'}</button><button class="danger" data-revoke="${i}">Удалить устройство</button></footer></div></details>`).join('') || empty('Запустите Lampa с плагином Workspace: устройство появится автоматически.')}</div>`);
+    replaceRecords(panes.devices, `<p class="wk-note">Устройства регистрируются автоматически через <code>${esc(publicUrl + '/workspace-client.js')}</code>. ID относится к установке Lampa и меняется после очистки её данных.</p><div class="wk-list-heading"><span>Устройство</span><span>Состояние</span></div><div class="lc-list lc-record-list">${data.devices.map((d, i) => `<details class="card lc-record" data-record-key="${esc(d.id)}"><summary><span>${esc(d.name)}</span><small class="wk-badge" data-device-presence="${esc(d.id)}">${d.enabled===0?'Ожидает доступа':Date.now()/1000-d.last<90?'На связи':'Нет свежего сигнала'}</small></summary><div class="lc-record-body"><dl class="wk-metadata"><div><dt>ID установки</dt><dd><code>${esc(d.id)}</code></dd></div><div><dt>IP-адрес</dt><dd>${esc(d.ip)}</dd></div><div><dt>Последний ответ</dt><dd data-device-last="${esc(d.id)}">${esc(date(d.last))}</dd></div><div><dt>Профиль</dt><dd>${d.applied < d.revision ? 'Ожидает применения' : 'Изменения подтверждены'}</dd></div></dl><form data-rename-form="${i}" class="wk-inline-form"><label class="voice-field">Название устройства<input name="deviceName" required maxlength="80" value="${esc(d.name)}"></label><button class="ghost">Переименовать</button></form><details class="lc-device-settings"><summary>Настройки устройства</summary><form data-device-form="${i}"><p class="wk-note">Значения устройства перекрывают общий профиль при каждом запуске. «Общий профиль» возвращает наследование.</p><label class="voice-field">Найти настройку<input type="search" data-pref-search placeholder="Например, меню или плеер"></label>${preferences(data.fields.filter(f=>!f.key.startsWith('workspace_ui_')||!Array.isArray(d.controls)||d.controls.includes(f.key)||Object.hasOwn(d.desired||{},f.key)),d.desired||{},d.snapshot||{},false,data.shared||{})}${toggle('device-reload-'+i,'Перезапустить Lampa после применения · прервёт просмотр',false)}<div class="wk-actions"><button class="save" ${d.applied < d.revision ? 'disabled' : ''}>Сохранить профиль</button></div></form></details><footer class="wk-actions wk-record-actions"><button class="${d.enabled===0?'save':'ghost'}" data-access="${i}">${d.enabled===0?'Включить доступ':'Отключить доступ'}</button><button class="danger" data-revoke="${i}">Удалить устройство</button></footer></div></details>`).join('') || empty('Запустите Lampa с плагином Workspace: устройство появится автоматически.')}</div>`);
     panes.devices.querySelectorAll('[data-rename-form]').forEach(form=>form.onsubmit=async e=>{e.preventDefault();if(await operation('/devices',{action:'rename',id:data.devices[Number(form.dataset.renameForm)].id,name:form.elements.deviceName.value.trim()},'Устройство переименовано'))refresh(true);});
     panes.devices.querySelectorAll('[data-access]').forEach(button=>button.onclick=async()=>{const d=data.devices[Number(button.dataset.access)];if(d.enabled!==0&&!confirm('Отключить доступ «'+d.name+'»? Его настройки сохранятся.'))return;if(await operation('/devices',{action:'access',id:d.id,enabled:d.enabled===0},d.enabled===0?'Доступ включён':'Доступ отключён'))refresh(true);});
     panes.devices.querySelectorAll('[data-device-form]').forEach(form=>{bindPreferences(form);});
@@ -180,14 +181,33 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     };
     settingsLoaded = true;
   }
+  const playbackStates={idle:'Lampa открыта',loading:'Загрузка',playing:'Смотрит',paused:'Пауза',buffering:'Буферизация',ended:'Просмотр завершён',error:'Ошибка плеера'};
+  const playbackErrors={aborted:'Воспроизведение прервано',network:'Ошибка загрузки потока',decode:'Ошибка декодирования',unsupported:'Формат или источник не поддерживается',player:'Ошибка плеера без подробностей'};
+  const seconds=n=>n==null?'Недоступно':Math.floor(n/60)+':'+String(Math.floor(n%60)).padStart(2,'0');
+  function presence(device,sessions,now){
+    if(!device.enabled)return 'Ожидает доступа';
+    const current=sessions.find(s=>s.device===device.id&&s.fresh&&['playing','buffering','loading','paused'].includes(s.state));
+    return current?playbackStates[current.state]:now-device.last<90?'На связи':'Нет свежего сигнала';
+  }
+  function updatePresence(data){
+    panes.devices.querySelectorAll('[data-device-presence]').forEach(node=>{const d=data.devices.find(d=>d.id===node.dataset.devicePresence);if(d)node.textContent=presence(d,data.sessions,data.serverTime);});
+    panes.devices.querySelectorAll('[data-device-last]').forEach(node=>{const d=data.devices.find(d=>d.id===node.dataset.deviceLast);if(d)node.textContent=date(d.last);});
+  }
+  function renderPlayback(data){
+    const records=data.sessions.filter(s=>s.state!=='idle');
+    const row=(label,value)=>`<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`;
+    panes.playback.innerHTML=`<p class="wk-note">Проверено ${esc(date(data.serverTime))}. Без сигнала более 90 секунд статус просмотра не подтверждён. Внешний плеер может не передавать данные. Скорость TorrServer относится ко всей раздаче, буфер — к этому плееру. Последние сведения хранятся до 24 часов.${data.torrentsAvailable?'':' Скорость TorrServer сейчас недоступна.'}</p><div class="lc-list lc-record-list">${records.map(s=>`<article class="card lc-session"><h3>${esc(s.name)} <small class="wk-badge">${esc(!s.enabled?'Доступ отключён':s.fresh?playbackStates[s.state]:'Статус не подтверждён')}</small></h3><p>${esc(s.title||'Название не передано')}</p><dl class="wk-metadata">${row('Источник',(s.hash?'Торрент · ':'')+(s.source||'Не передан'))}${row('Способ',({'browser':'Встроенный · браузер','browser-hls':'Встроенный · HLS','native':'Встроенный · система устройства'})[s.method]||'Не определён')}${row('Позиция',seconds(s.position)+' / '+seconds(s.duration))}${row('Буфер плеера',s.fresh&&s.buffer!=null?s.buffer+' с':'Недоступно')}${row('Скорость раздачи',s.fresh&&s.downloadSpeed!=null?bytes(s.downloadSpeed)+'/с':'Недоступно')}${row('Последний сигнал',date(s.updated))}${row('Последняя ошибка',playbackErrors[s.error]||'Не зарегистрирована')}</dl></article>`).join('')||empty('Сеансов пока нет. После обновления плагина перезапустите Lampa и включите фильм.')}</div>`;
+  }
   async function refresh(force = false) {
     if (!alive || refreshing || tab === 'overview') return;
     // Do not replace a focused input or expanded file list during automatic polling.
-    if (!force && (panes[tab].contains(document.activeElement) || panes[tab].querySelector('details[open]') && ['torrents','clients','devices','announcements'].includes(tab))) return;
+    const editing=!force&&(panes[tab].contains(document.activeElement)||panes[tab].querySelector('details[open]'));
+    if(editing&&!['devices','playback'].includes(tab))return;
     refreshing = true; const active = tab;
     try {
-      if (active === 'announcements') {const data=await request('/devices');if(alive)renderAnnouncements(data);}
-      else if (active === 'devices') { const data = await request('/devices'); if (alive) renderDevices(data); }
+      if (active === 'playback') {const data=await request('/playback');if(alive)renderPlayback(data);}
+      else if (active === 'announcements') {const data=await request('/devices');if(alive)renderAnnouncements(data);}
+      else if (active === 'devices') { if(!editing){const data=await request('/devices');if(alive)renderDevices(data);}const live=await request('/playback');if(alive)updatePresence(live); }
       else if (active === 'torrents') { const data = await request('/torrents'); if (alive) renderTorrents(data); }
       else if (active === 'clients') { const data = await request('/clients'); if (alive) renderClients(data); }
       else if (!settingsLoaded) { const data = await request('/advanced'); if (alive) renderSettings(data); }
