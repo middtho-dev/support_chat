@@ -94,3 +94,14 @@
 External position/pause requires telemetry from the external player itself.
 Hash correlation confirms stream delivery, not rendered frames or individual
 reader identity. Reload Lampa once after rollout to identify subsequent handoffs.
+
+## 2026-09-09 — Lampa torrent selection
+
+- [x] File size contrast in torrent results, plain files and episode/movie rows,
+  including focus and hover (minimum 4.5:1).
+- [x] Existing FHD/4K/HDR metadata gets distinct accents; no inferred quality score.
+- [x] Season and episode-range badge is the same compact scale as quality badges.
+- [x] Dynamic native metadata updates and disabling the theme release accents.
+- [x] Native production Lampa CSS tested in Chromium/WebKit at 1920, 1280 and 390 px,
+  in normal/focus/hover states. TV-scale screenshots inspected.
+- [x] 86 Node tests, 43 Python tests, npm run check and git diff --check.
