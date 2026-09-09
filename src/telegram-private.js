@@ -118,6 +118,8 @@ const MIME_BY_EXTENSION = {
   '.opus': 'audio/opus'
 };
 
+const chatCleanup = require('./telegram-chat-cleanup')(db.db, id => isAuthorized(id));
+const chatCleanupConfirmations = new Map();
 let bot = null;
 let io = null;
 let lifecycle = {};
@@ -530,6 +532,7 @@ function dashboardKeyboard(counts = {}) {
   ], [
     { text: '⚙️ Система и настройки', callback_data: 'system:show' }
   ]];
+  rows.push([{ text: '🧹 Очистить чат', callback_data: 'dashboard:clear' }]);
   const webAppUrl = adminWebAppUrl();
   if (webAppUrl) rows.push([{ text: '🖥 Админка', web_app: { url: webAppUrl } }]);
   return { inline_keyboard: rows };
@@ -1357,6 +1360,7 @@ async function startBot() {
       }
     });
     configureLongPollRequestTimeout(instance);
+    chatCleanup.attach(instance);
     bot = instance;
     instance.on('polling_error', error => {
       if (instance !== bot) return;
@@ -1379,6 +1383,7 @@ async function startBot() {
       console.error('[TG private] Error:', tgError(error));
     });
     instance.on('message', msg => {
+      if(msg.chat?.type==='private') chatCleanup.track(msg.chat.id,msg);
       return queueIncomingMessage(msg).catch(error => {
         console.error('[TG private] message handling:', tgError(error));
         operationalAlert(
@@ -2715,7 +2720,29 @@ async function handleCallbackQuery(query) {
     await bot.answerCallbackQuery(query.id, options).catch(() => {});
   };
   try {
+    if (data === 'dashboard:clear' || data === 'dashboard:clear-confirm') {
+      const chatId=String(query.message.chat.id);
+      const dashboard=db.getTelegramOperatorDashboard.get(userId);
+      if(chatId!==userId || String(dashboard?.dashboard_chat_id)!==chatId || dashboard?.dashboard_message_id!==query.message.message_id) {
+        await answer({text:'Откройте актуальное главное меню командой /admin.',show_alert:true});return;
+      }
+      if(data==='dashboard:clear') {
+        chatCleanupConfirmations.set(chatId,{id:query.message.message_id,expires:Date.now()+60000});
+        await answer();
+        const text='Очистить этот чат? Главное меню останется. Удалятся известные боту сообщения за последние 48 часов, включая сообщения в темах. Telegram не позволяет боту удалить более старые сообщения или получить всю историю. История обращений в Workspace сохранится.';
+        await editPanel(query.message,{markdown:text,fallback:text,replyMarkup:{inline_keyboard:[[{text:'Удалить сообщения',callback_data:'dashboard:clear-confirm'}],[{text:'Отмена',callback_data:'dashboard:show'}]]}});return;
+      }
+      const confirmation=chatCleanupConfirmations.get(chatId);chatCleanupConfirmations.delete(chatId);
+      if(!confirmation || confirmation.id!==query.message.message_id || confirmation.expires<Date.now()) {await answer({text:'Подтверждение истекло. Нажмите «Очистить чат» ещё раз.',show_alert:true});return;}
+      await answer({text:'Очищаю чат…'});
+      const result=await chatCleanup.clear(bot,chatId,query.message.message_id);
+      const model=dashboardModel(operator);
+      const report=`Удалено сообщений: ${result.removed}. Не удалось удалить: ${result.failed}. Старые и неизвестные боту сообщения могли остаться.`;
+      model.markdown+='\n\n'+report;model.fallback+='\n\n'+report;
+      await editPanel(query.message,model);return;
+    }
     if (data === 'dashboard:refresh' || data === 'dashboard:show' || data === 'queue:refresh') {
+      chatCleanupConfirmations.delete(userId);
       await answer();
       await editPanel(query.message, dashboardModel(operator));
       return;

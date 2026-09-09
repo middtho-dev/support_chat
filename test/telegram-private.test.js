@@ -1217,3 +1217,21 @@ test('invalid Telegram topic IDs clear only the stale thread association', async
     assert.equal(db.getTicketById.get(id).status, 'open');
   } finally { fakeBot.sendChatAction = original; }
 });
+
+test('operator cleanup requires confirmation and preserves the canonical dashboard', async () => {
+  await fakeBot.handlers.message({message_id:98001,date:Math.floor(Date.now()/1000),chat:{id:7001,type:'private'},from:{id:7001,first_name:'Admin'},text:'/admin'});
+  const panel=db.getTelegramOperatorDashboard.get('7001');
+  const query={id:'cleanup-test',from:{id:7001,first_name:'Admin'},message:{message_id:panel.dashboard_message_id,chat:{id:7001,type:'private'}}};
+  const before=deleted.length;
+  await fakeBot.handlers.callback_query({...query,data:'dashboard:clear-confirm'});
+  assert.equal(deleted.length,before);
+  await fakeBot.handlers.callback_query({...query,data:'dashboard:clear'});
+  assert.equal(deleted.length,before);
+  assert.ok(JSON.stringify(edits.at(-1)).includes('48'));
+  await fakeBot.handlers.callback_query({...query,data:'dashboard:clear-confirm'});
+  assert.ok(!deleted.slice(before).some(row=>row.chatId==='7001'&&row.messageId===panel.dashboard_message_id));
+  assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
+  const after=deleted.length;
+  await fakeBot.handlers.callback_query({...query,from:{id:999999},data:'dashboard:clear-confirm'});
+  assert.equal(deleted.length,after);
+});
