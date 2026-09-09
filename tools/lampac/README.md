@@ -242,3 +242,10 @@ whole swarm download, not an individual viewer. Listing does not wake torrents.
 Deploy agent.py, devices.py, playback.py, playback-client.js and device-client.js
 together to /usr/local/lib/lampac-workspace and restart only the Workspace agent.
 Existing open Lampa pages must reload once to load the reporting client.
+
+Playback cards show an optional poster from the player movie card. Only supported
+catalogue image hosts (TMDB, Kinopoisk image CDNs) and query-free image paths are
+accepted. Invalid images become empty without rejecting the heartbeat; older
+clients and stored snapshots remain compatible. Missing or failed images retain
+a fixed poster placeholder. Poster URLs are loaded by the browser with no referrer,
+not fetched by the agent. The current film title is the primary card heading.

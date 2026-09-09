@@ -112,7 +112,14 @@ input[type=checkbox]{accent-color:var(--blue)}
 #lampac .lc-record-list>.lc-record:last-child{border-bottom:0}
 #lampac .lc-record-list>.lc-session{margin:0;border:0;border-radius:0;border-bottom:1px solid var(--line)}
 #lampac .lc-record-list>.lc-session:last-child{border-bottom:0}
-#lampac .lc-session h3{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#lampac .lc-session{display:grid;grid-template-columns:112px minmax(0,1fr);gap:20px;align-items:start}
+#lampac .lc-session-poster{position:relative;aspect-ratio:2/3;border-radius:8px;overflow:hidden;background:var(--panel2);display:grid;place-items:center;color:var(--muted);font-size:30px}
+#lampac .lc-session-poster img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#lampac .lc-session-poster img[hidden]{display:none}
+#lampac .lc-session-content{min-width:0}
+#lampac .lc-session-device{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px;flex-wrap:wrap}
+#lampac .lc-session h3.lc-session-title{font-size:21px;font-weight:700;line-height:1.3;margin:8px 0 18px;overflow-wrap:anywhere}
+@media(max-width:600px){#lampac .lc-session{grid-template-columns:68px minmax(0,1fr);gap:12px}#lampac .lc-session h3.lc-session-title{font-size:18px;margin-bottom:12px}#lampac .lc-session-content{display:contents}#lampac .lc-session-poster{grid-row:1/3}#lampac .lc-session-device,#lampac .lc-session-title{grid-column:2}#lampac .lc-session .wk-metadata{grid-column:1/-1;grid-template-columns:1fr}}
 #lampac .lc-record>summary>span{flex:1;min-width:0;overflow-wrap:anywhere}
 #lampac .lc-record>summary>small{font-size:11px;font-weight:400;color:var(--muted);flex-shrink:0}
 #lampac .lc-record-body{padding:4px 0 0}

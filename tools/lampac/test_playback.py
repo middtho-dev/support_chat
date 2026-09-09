@@ -18,6 +18,15 @@ class PlaybackTests(unittest.TestCase):
             result=devices.playback_listing(self.root);self.assertTrue(result['sessions'][0]['fresh']);self.assertEqual(result['devices'][0]['last'],1000)
         with patch('time.time',return_value=1090):self.assertFalse(devices.playback_listing(self.root)['sessions'][0]['fresh'])
         with patch('time.time',return_value=88000):self.assertEqual(devices.playback_listing(self.root)['sessions'],[])
+    def test_optional_poster_keeps_older_clients_compatible(self):
+        self.beat()
+        self.assertEqual(devices.playback_listing(self.root)['sessions'][0]['poster'],'')
+        self.beat(dict(self.data,poster='/poster123.jpg'))
+        self.assertEqual(devices.playback_listing(self.root)['sessions'][0]['poster'],'https://image.tmdb.org/t/p/w300/poster123.jpg')
+        for value in ['https://evil.example/image.jpg','https://image.tmdb.org/t/p/w300/a.jpg?token=secret','javascript:alert(1)',{'url':'bad'}]:
+            self.beat(dict(self.data,poster=value))
+            self.assertEqual(devices.playback_listing(self.root)['sessions'][0]['poster'],'')
+
     def test_ipv6_source_hostname(self):
         self.beat(dict(self.data,source='[2001:db8::1]'))
         self.assertEqual(devices.playback_listing(self.root)['sessions'][0]['source'],'[2001:db8::1]')

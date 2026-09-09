@@ -1,7 +1,7 @@
 (function(){'use strict';
 window.createWorkspacePlayback=function(options){
  var session=Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,14),busy=false,last=0;
- var data={session:session,state:'idle',title:'',source:'',hash:'',method:'unknown',position:null,duration:null,buffer:null,error:''};
+ var data={session:session,state:'idle',title:'',poster:'',source:'',hash:'',method:'unknown',position:null,duration:null,buffer:null,error:''};
  function number(n){return typeof n==='number'&&isFinite(n)&&n>=0&&n<=604800?Math.round(n*10)/10:null;}
  function video(){try{return Lampa.PlayerVideo&&Lampa.PlayerVideo.video();}catch(e){return null;}}
  function sample(){
@@ -16,8 +16,16 @@ window.createWorkspacePlayback=function(options){
   sample();busy=true;last=Date.now();
   try{options.request('heartbeat',{token:token,playback:data},function(status,result){busy=false;if(status===200&&result.enabled===false)options.access(false);});}catch(e){busy=false;}
  }
+ function poster(value){
+  if(typeof value!=='string'||value.length>512)return '';
+  if(/^\/[a-zA-Z0-9_-]+\.(jpg|png|webp)$/.test(value))return 'https://image.tmdb.org/t/p/w300'+value;
+  var match=value.match(/^https:\/\/image\.tmdb\.org\/t\/p\/(w[0-9]+|original)(\/[a-zA-Z0-9_-]+\.(jpg|png|webp))$/);
+  if(match)return 'https://image.tmdb.org/t/p/w300'+match[2];
+  return /^https:\/\/(st\.kp\.yandex\.net|kinopoiskapiunofficial\.tech)\/[a-zA-Z0-9/_-]+\.(jpg|png|webp)$/.test(value)?value:'';
+ }
  function start(item){
   item=item||{};data.state='loading';data.error='';data.position=null;data.duration=null;data.buffer=null;
+  var card=item.card||{};data.poster=poster(card.poster_path)||poster(card.poster)||poster(card.img)||poster(item.poster);
   var title=String(item.title||(item.card&&(item.card.title||item.card.name))||'');
   data.title=/https?:\/\/|[?&](token|password|key)=/i.test(title)?'':title.replace(/[\x00-\x1f]/g,' ').slice(0,200);
   data.hash=/^[a-f0-9]{40}$/i.test(item.torrent_hash||'')?item.torrent_hash.toLowerCase():'';

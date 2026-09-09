@@ -11,8 +11,18 @@ ERRORS = {'', 'aborted', 'network', 'decode', 'unsupported', 'player'}
 def schema(conn):
     conn.execute('CREATE TABLE IF NOT EXISTS playback (device TEXT, session TEXT, updated REAL, data TEXT, PRIMARY KEY(device,session))')
 
+def poster(value):
+    # Only catalogue image locations; never an arbitrary URL or credentialed proxy.
+    if not isinstance(value,str) or len(value)>512:return ''
+    if re.fullmatch(r'/[a-zA-Z0-9_-]+\.(?:jpg|png|webp)',value):
+        return 'https://image.tmdb.org/t/p/w300'+value
+    match=re.fullmatch(r'https://image\.tmdb\.org/t/p/(?:w[0-9]+|original)(/[a-zA-Z0-9_-]+\.(?:jpg|png|webp))',value)
+    if match:return 'https://image.tmdb.org/t/p/w300'+match[1]
+    if re.fullmatch(r'https://(?:st\.kp\.yandex\.net|kinopoiskapiunofficial\.tech)/[a-zA-Z0-9/_-]+\.(?:jpg|png|webp)',value):return value
+    return ''
+
 def clean(body):
-    if not isinstance(body, dict) or set(body) != {'session','state','title','source','hash','method','position','duration','buffer','error'}:
+    if not isinstance(body, dict) or set(body)-{'poster'} != {'session','state','title','source','hash','method','position','duration','buffer','error'}:
         raise ValueError('Некорректная диагностика')
     if not isinstance(body['session'], str) or not re.fullmatch(r'[a-zA-Z0-9_-]{8,64}',body['session']):
         raise ValueError('Некорректный сеанс')
@@ -27,7 +37,7 @@ def clean(body):
     for key in ['position','duration','buffer']:
         value=body[key]
         if value is not None and (type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=604800):raise ValueError('Некорректное время')
-    return dict(body,hash=body['hash'].lower())
+    return dict(body,hash=body['hash'].lower(),poster=poster(body.get('poster','')))
 
 def record(conn, device, body):
     data=clean(body)
