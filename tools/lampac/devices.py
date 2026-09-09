@@ -215,3 +215,7 @@ def access_allowed(root,cookie_header,allow_unknown=False):
 def playback_listing(root):
     with closing(database(root)) as conn, conn:
         return {'sessions':playback.listing(conn),'devices':[dict(r) for r in conn.execute('SELECT id,last,enabled FROM devices WHERE paired=1')],'serverTime':time.time()}
+
+def playback_remove(root,body):
+    with closing(database(root)) as conn, conn:
+        return playback.remove(conn,body)

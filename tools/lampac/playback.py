@@ -6,6 +6,7 @@ import time
 
 STATES = {'idle', 'loading', 'playing', 'paused', 'buffering', 'ended', 'error'}
 METHODS = {'unknown', 'browser', 'browser-hls', 'native'}
+STALE_SECONDS = 300
 ERRORS = {'', 'aborted', 'network', 'decode', 'unsupported', 'player'}
 
 def schema(conn):
@@ -43,14 +44,34 @@ def record(conn, device, body):
     data=clean(body)
     schema(conn)
     now=time.time()
-    conn.execute('DELETE FROM playback WHERE updated<?',(now-86400,))
+    conn.execute('DELETE FROM playback WHERE updated<?',(now-STALE_SECONDS,))
+    if data['state'] in ('idle','ended'):
+        conn.execute('DELETE FROM playback WHERE device=? AND session=?',(device,data['session']))
+        return
     conn.execute('INSERT OR REPLACE INTO playback VALUES (?,?,?,?)',(device,data['session'],now,json.dumps(data)))
     conn.execute('DELETE FROM playback WHERE device=? AND session NOT IN (SELECT session FROM playback WHERE device=? ORDER BY updated DESC LIMIT 8)',(device,device))
 
 def listing(conn):
     schema(conn)
     now=time.time()
-    conn.execute('DELETE FROM playback WHERE updated<?',(now-86400,))
-    rows=conn.execute('SELECT p.*,d.name,d.enabled FROM playback p JOIN devices d ON d.id=p.device WHERE p.updated>? ORDER BY p.updated DESC LIMIT 500',(now-86400,))
+    conn.execute('DELETE FROM playback WHERE updated<?',(now-STALE_SECONDS,))
+    rows=conn.execute('SELECT p.*,d.name,d.enabled FROM playback p JOIN devices d ON d.id=p.device WHERE p.updated>? ORDER BY p.updated DESC LIMIT 500',(now-STALE_SECONDS,))
     return [{**json.loads(r['data']),'device':r['device'],'name':r['name'],'updated':r['updated'],
              'fresh':now-r['updated']<90,'enabled':bool(r['enabled'])} for r in rows]
+
+def remove(conn,body):
+    schema(conn)
+    if not isinstance(body,dict):raise ValueError('Нужна команда')
+    action=body.get('action')
+    if action=='clear-inactive' and set(body)=={'action'}:
+        rows=conn.execute('SELECT device,session,updated,data FROM playback').fetchall()
+    elif action=='remove' and set(body)=={'action','device','session'} and all(isinstance(body[k],str) and 1<=len(body[k])<=64 for k in ['device','session']):
+        rows=conn.execute('SELECT device,session,updated,data FROM playback WHERE device=? AND session=?',(body['device'],body['session'])).fetchall()
+    else:raise ValueError('Некорректная команда')
+    removed=0
+    for row in rows:
+        data=json.loads(row['data'])
+        if time.time()-row['updated']>=90 or data['state'] in ('idle','ended'):
+            conn.execute('DELETE FROM playback WHERE device=? AND session=?',(row['device'],row['session']));removed+=1
+        elif action=='remove':raise ValueError('Сеанс снова активен. Обновите список.')
+    return {'ok':True,'removed':removed}

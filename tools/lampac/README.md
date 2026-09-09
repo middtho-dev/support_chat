@@ -232,7 +232,7 @@ cannot be observed. Background browser suspension is not treated as proof that
 the film has stopped.
 
 Each page has a separate session, limited to eight per device. Only the latest
-snapshot per session is stored; snapshots expire from results after 24 hours and
+snapshot per session is stored; snapshots expire from results after five minutes without a heartbeat and
 are purged on the next heartbeat or diagnostics read. After 90 seconds without a
 heartbeat the UI marks playback unconfirmed. Device status keeps refreshing while
 its forms remain open, without replacing inputs. No stale session is counted as
@@ -249,3 +249,10 @@ accepted. Invalid images become empty without rejecting the heartbeat; older
 clients and stored snapshots remain compatible. Missing or failed images retain
 a fixed poster placeholder. Poster URLs are loaded by the browser with no referrer,
 not fetched by the agent. The current film title is the primary card heading.
+
+Poster resolution follows Lampa's own card lookup: player card/movie, then the
+active activity card/movie. Known TMDB proxy paths are reduced to a canonical image
+path; proxy credentials are never reported. Idle/ended heartbeats remove their
+session instead of resurrecting completed records. Managers can remove one stale
+record or clear all inactive records through POST /api/lampac/playback; fresh
+active playback is protected. Removal affects diagnostics only, not the player.

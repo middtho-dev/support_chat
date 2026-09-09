@@ -24,9 +24,9 @@ test('Lampac expanded routes retain manager checks and do not expose internal ac
     assert.equal((await fetch(url+path,{headers:{'x-admin-token':'operator'}})).status,403);
     assert.equal((await fetch(url+path,{headers:{'x-admin-token':'manager'}})).status,200);
   }
-  for(const path of ['/client','/advanced','/torrents','/clients','/devices']){
+  for(const path of ['/client','/advanced','/torrents','/clients','/devices','/playback']){
     assert.equal((await fetch(url+path,{method:'POST',headers:{'x-admin-token':'manager','Content-Type':'application/json'},body:'{}'})).status,200);
   }
   for(const path of ['/access','/client.js','/config','/../access'])assert.equal((await fetch(url+path,{headers:{'x-admin-token':'manager'}})).status,404);
-  assert.equal(seen.length,10);
+  assert.equal(seen.length,11);
 });
