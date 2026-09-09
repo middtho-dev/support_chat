@@ -51,7 +51,7 @@
     document.body.classList.toggle('module-subnav-active', !!document.querySelector('.module-subnav:not([hidden]) button'));
     main.querySelectorAll('.panel details').forEach(details => {
       const summary = details.querySelector(':scope > summary');
-      if (!summary || details.closest('#frp-mobile-devices')) return;
+      if (!summary || details.closest('#frp-mobile-devices') || details.matches('.lc-record,.lc-info,.lc-compose')) return;
       const fields = details.querySelectorAll('input:not([type=search]):not([type=hidden]),select,textarea');
       if (!fields.length) return;
       let count = summary.querySelector(':scope > .summary-count');
