@@ -141,9 +141,9 @@ function initTelegramMiniApp() {
   if (!IS_TG_MINI) return;
   document.body.classList.add('tg-mini');
   document.title = 'KV9RU · Панель управления';
-  document.querySelector('.auth-card h1').textContent = 'KV9RU Workspace';
+  document.querySelector('.auth-card h1').textContent = 'Workspace';
   document.querySelector('.auth-card p').textContent = 'Вход с помощью Telegram';
-  document.querySelector('.top h1').textContent = 'KV9RU Workspace';
+  document.querySelector('.top h1').textContent = 'Workspace';
   document.querySelector('.top .brand p').textContent = 'Telegram Mini App';
   $('tok').style.display = 'none';
   $('lbtn').style.display = 'none';
@@ -968,7 +968,7 @@ function renderSettings() {
     ? '<div class="card control-access-note"><b>Настройки доступны руководителю</b><p>Состояние системы и очередей можно смотреть всем операторам. Изменение параметров требует отдельного права.</p></div>'
     : !S.settings
       ? '<div class="card maintenance-loading">Загружаю настройки…</div>'
-      : `<div class="control-settings-head"><div><span class="settings-eyebrow">${support?'Поддержка':'Система'}</span><h2>${support?'Настройки поддержки':'Хранение и обслуживание'}</h2><p>Изменения применяются только после подтверждения сервером.</p></div><div class="settings-hero-actions"><button id="settings-export" class="ghost">Экспорт</button>${support?'':'<button id="settings-test-alert" class="ghost">Тест системного уведомления</button>'}</div></div>
+      : `<div class="control-settings-head page-heading"><div><span class="settings-eyebrow">${support?'Поддержка':'Система'}</span><h2>${support?'Настройки поддержки':'Хранение и обслуживание'}</h2><p>Изменения применяются только после подтверждения сервером.</p></div><div class="settings-hero-actions"><button id="settings-export" class="ghost">Экспорт</button>${support?'':'<button id="settings-test-alert" class="ghost">Тест системного уведомления</button>'}</div></div>
         <div class="settings-toolbar">
           <input id="settings-search" type="search" value="${esc(S.settingsQuery)}" placeholder="Найти настройку…" aria-label="Поиск по настройкам">
           <div class="settings-filters" ${support?'':'hidden'}>${filters.map(([value,label]) => `<button type="button" data-settings-filter="${value}" class="${S.settingsFilter === value ? 'on' : ''}">${label}</button>`).join('')}</div>
@@ -982,9 +982,6 @@ function renderSettings() {
           <button id="set-save" class="save" disabled>Сохранить настройки</button>
         </div>`;
   $('settings').innerHTML = `<div class="section settings-section">
-    <div class="settings-hero" ${support?'hidden':''}>
-      <div><span class="settings-eyebrow">${support?'Поддержка':'Workspace'}</span><h2>${support?'Поддержка':'Система'}</h2><p>${support?'Обращения, доставка сообщений и параметры работы поддержки.':'Состояние сервера, резервные копии и диск.'}</p></div>
-    </div>
     <div class="management-tabs" ${support?'hidden':''} aria-label="Система"><button type="button" data-management-view="status">Состояние</button><button type="button" data-management-view="configuration">Настройки</button></div><div id="deployment-info" hidden></div><div id="control-health"></div>
     <div class="control-divider" ${support?'hidden':''}></div>
     <div id="settings-config">${settingsContent}</div>
@@ -1330,7 +1327,7 @@ function renderMaintenance() {
   if (!root) return;
   const m = S.maintenance;
   if (!m) {
-    root.innerHTML = '<div class="maintenance-title"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Проверяю Telegram, realtime, резервные копии и свободное место…</p></div><button id="maintenance-refresh" class="ghost" disabled>Обновляю…</button></div><div class="card maintenance-loading">Загрузка…</div>';
+    root.innerHTML = '<div class="maintenance-title page-heading"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Проверяю Telegram, realtime, резервные копии и свободное место…</p></div><button id="maintenance-refresh" class="ghost" disabled>Обновляю…</button></div><div class="card maintenance-loading">Загрузка…</div>';
     return;
   }
   const diskClass = !m.config?.diskMonitoringEnabled ? '' : m.diskLevel === 'critical' ? 'critical' : m.diskLevel === 'warning' ? 'warning' : 'ok';
@@ -1362,7 +1359,7 @@ function renderMaintenance() {
   const focusedId = root.contains(document.activeElement) ? document.activeElement.id : null;
   const buttons = Array.from(root.querySelectorAll('button[id]'));
   root.innerHTML = `<div class="control-health-block">
-    <div class="maintenance-title"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Telegram, realtime, очереди, резервные копии и диск обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
+    <div class="maintenance-title page-heading"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Telegram, realtime, очереди, резервные копии и диск обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
       <div class="health-stat ${backupClass}"><span>Резервная копия</span><b>${backupLabel}</b><small>${esc(fmtStatusDate(m.lastBackupAt))}</small></div>
       <div class="health-stat ${diskClass}"><span>Диск</span><b>${m.disk ? `${m.disk.usedPercent}%` : '—'}</b><small>${m.disk ? `${fmtBytes(m.disk.freeBytes)} свободно` : 'нет данных'}</small></div>
@@ -1451,7 +1448,7 @@ async function loadDeploymentInfo() {
     const d = await adminMaintenanceApi('/api/admin/deployment');
     if (token !== S.token || !root.isConnected) return;
     const row = (name, value) => `<div class="address-row"><span>${esc(name)}</span><code>${esc(value || 'Не задано')}</code></div>`;
-    root.innerHTML = `<div class="maintenance-title"><div><h2>Домены и адреса</h2><p>Адреса из настроек сервера и текущие ответы DNS. Эта страница не меняет записи у регистратора.</p></div><button class="ghost" id="addresses-refresh">Проверить DNS</button></div>
+    root.innerHTML = `<div class="maintenance-title page-heading"><div><h2>Домены и адреса</h2><p>Адреса из настроек сервера и текущие ответы DNS. Эта страница не меняет записи у регистратора.</p></div><button class="ghost" id="addresses-refresh">Проверить DNS</button></div>
       <div class="grid maintenance-grid"><section class="card"><h3>Сервер и панель</h3>${row('IPv4 для A-записей', d.ipv4)}${row('IPv6 для AAAA-записей', d.ipv6)}${row('Панель и поддержка', d.publicUrl)}${row('Telegram Mini App', d.miniapp)}${row('Репозиторий', d.repository)}${row('Lampac', d.lampac)}</section>
       <section class="card"><h3>FRP</h3>${d.frp ? row('Адрес подключения', d.frp.host + ':' + d.frp.port) + row('Порты устройств', d.frp.portStart + '–' + d.frp.portEnd) + row('Исключения диапазона', (d.frp.reservedPorts || []).join(', ')) : '<p>FRP недоступен: проверьте раздел «FRP».</p>'}<p>При переносе сервера меняйте DNS домена подключения. В конфигурациях устройств домен и порты остаются прежними.</p></section></div>
       <h3>Записи DNS</h3><div class="grid maintenance-grid">${d.records.map(r => `<section class="card"><h3>${esc(r.host)}</h3>${row('A сейчас', r.a === null ? 'Не удалось проверить' : r.a.join(', ') || 'Записи нет')}${row('A должно быть', d.ipv4)}${row('AAAA сейчас', r.aaaa === null ? 'Не удалось проверить' : r.aaaa.join(', ') || 'Записи нет')}<p>${esc(!d.ipv4 ? 'Укажите PUBLIC_SERVER_IPV4 в .env сервера.' : r.a === null ? 'Повторите проверку DNS позже.' : r.a.length === 1 && r.a[0] === d.ipv4 ? 'A-запись соответствует серверу.' : 'A-запись отличается. При прямом подключении замените её на IPv4 выше; при использовании CDN адреса могут отличаться.')}</p>${r.aaaa?.length && !d.ipv6 ? '<p>На сервере не указан публичный IPv6. Проверьте AAAA: старая запись может отправлять часть посетителей на прежний сервер.</p>' : ''}</section>`).join('')}</div>
