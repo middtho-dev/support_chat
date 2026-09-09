@@ -256,3 +256,22 @@ body.tg-mini.support-active .app{grid-template-rows:calc(58px + var(--tg-top-ui)
  body.ticket-open>.support-nav{display:none}
  .panel h2,#frp .frp-wrap>h2{font-size:20px}
 }
+
+/* Lampac disclosure rows: the same density for records and configuration. */
+#lampac .lc-record-list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+#lampac details.card:is(.lc-record,.lc-info,.lc-compose,.lc-config-group){padding:0 12px;margin:0 0 8px}
+#lampac details.card>summary,#lampac .lc-pref-family>summary,#lampac .lc-pref-group>summary{display:flex;align-items:center;gap:10px;min-height:42px;padding:9px 0;margin:0;box-sizing:border-box}
+#lampac .lc-record>summary>span{flex:1;min-width:0;overflow-wrap:anywhere}
+#lampac .lc-record>summary>small{color:var(--muted);font-weight:400;font-size:11px;flex-shrink:0}
+#lampac .lc-record-body,#lampac .lc-compose>form{padding:2px 0 12px}
+#lampac .lc-record-body>p{font-size:12px}
+#lampac .voice-actions{align-items:flex-end}
+#lampac .voice-actions>button{align-self:flex-end;flex:none}
+#lampac .voice-field{display:grid;gap:5px;min-width:0;font-size:12px;margin:8px 0}
+#lampac .voice-field :is(input,select,textarea){box-sizing:border-box;width:100%;min-height:36px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
+#lampac .voice-field textarea{min-height:84px;resize:vertical}
+#lampac .lc-pref-family{padding:0 12px;margin:8px 0;border-color:var(--line);border-radius:var(--card-radius)}
+#lampac .lc-pref-group{margin:0;border-color:var(--line)}
+#lampac .lc-config-group .voice-grid{margin:4px 0 12px}
+#lampac .lc-compose .voice-grid{gap:8px 16px}
+@media(max-width:560px){#lampac .voice-field :is(input,select,textarea){font-size:16px}#lampac .lc-record>summary{flex-wrap:wrap}#lampac .lc-record>summary>span{flex-basis:55%}}
