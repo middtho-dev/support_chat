@@ -232,3 +232,22 @@ input[type=checkbox]{accent-color:var(--blue)}
  #mobile-ticket-card{min-width:34px;padding:6px;font-size:13px}.mobile-ticket-copy{min-width:0}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Disclosures share a visible hierarchy across every workspace module. */
+#app .panel details{background:#10212a;border:1px solid #35515e;border-left:3px solid #426775;border-radius:10px;padding:0 12px;margin-block:10px;min-width:0}
+#app .panel details[open]{border-color:#48717d;border-left-color:var(--blue);padding-bottom:12px}
+#app .panel details>summary{padding:10px 0;margin:0;min-height:42px}
+#app .panel details[open]>summary{border-bottom:1px solid #42616b;margin-bottom:12px;color:var(--text)}
+#app .panel details details{background:#09171f;border-color:#304b58;margin-left:10px}
+#app .panel details details details{background:#172c35;border-color:#49616a}
+#app .panel details details details details{background:#0b1c25}
+#app .panel .lc-pref-row{background:#09171e;border:1px solid #2c4652;border-radius:7px;padding:12px;margin:8px 0;gap:16px}
+#app .panel .lc-pref-family-body{padding:0}
+#lampac .lc-torrent-list{align-items:stretch}
+#lampac .lc-torrent-list>.card{display:flex;flex-direction:column;margin:0;min-width:0}
+#lampac .lc-torrent-list>.card>.voice-actions,#lampac .lc-torrent-list>.card>.wk-actions{margin-top:auto;padding-top:16px}
+.lc-device-film{color:var(--soft);font-size:12px;overflow-wrap:anywhere}
+@media(max-width:560px){#app .panel details{padding-inline:10px}#app .panel details details{margin-left:4px}#app .panel .lc-pref-row{padding:10px;gap:10px}}
+
+/* Native WebKit select chrome clips text when combined with fixed-height padding. */
+#app .panel select{appearance:none;-webkit-appearance:none;padding-block:0;padding-right:30px;line-height:normal;background-color:var(--bg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4 3 3 3-3' fill='none' stroke='%238fa7ad' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}

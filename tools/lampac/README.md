@@ -256,3 +256,44 @@ path; proxy credentials are never reported. Idle/ended heartbeats remove their
 session instead of resurrecting completed records. Managers can remove one stale
 record or clear all inactive records through POST /api/lampac/playback; fresh
 active playback is protected. Removal affects diagnostics only, not the player.
+
+
+## External player telemetry
+
+The client listens to Lampa's `Player.listener` `external` event, including paths
+which never emit the internal player's `start`. An in-flight heartbeat queues
+this handoff. External playback never samples the old browser video element.
+The helper reads `/torrents` (`list`) and `/cache` (`get`) for up to 32 loaded
+streams, with eight concurrent requests. It never starts a saved torrent.
+Readers confirm delivery, not rendered frames, pause or playback position.
+A hash is associated only with one known enabled session; shared or unidentified
+streams appear separately without attributing them to a device. IP/NAT is not
+used as device identity. This is hash correlation, not per-reader authentication.
+Normal snapshots expire after five minutes. External handoffs can be matched for
+up to 12 hours while the TV suspends Lampa; without readers, stale handoffs are
+hidden. Reader-confirmed sessions are protected from diagnostic cleanup.
+After deploying the client, reload Lampa once to capture subsequent handoffs.
+An external torrent application that bypasses this TorrServer cannot be observed
+by its cache API.
+
+## Updating native Lampac
+
+Workspace runs outside `/opt/lampac`, in `/usr/local/lib/lampac-workspace`, with
+its own systemd service. Caddy routes bootstrap and workspace scripts to that
+helper. No patch to native `app.min.js` is needed.
+
+The official installer at
+https://github.com/lampac-nextgen/lampac/blob/main/install.sh supports `--update`
+and `--dry-run`. As reviewed on 2026-09-09, its update exclusions preserve
+`init.conf`, `init.yaml`, databases, `database/`, `data/ts/`, TorrServer data,
+`wwwroot/` and user overrides. Workspace profiles in `init.conf` and device
+state under `database/workspace` therefore survive this update path. Because
+`wwwroot/` is preserved, do not assume it replaces the Lampa frontend too.
+
+Back up configuration and workspace databases before upgrading, review the
+installer dry run and then use its explicit update mode. Updating native Lampac
+restarts that service and can interrupt playback. Workspace helper updates are
+separate; official Lampac releases do not update our adapter. Future API/frontend
+changes can require adapter changes: after an upgrade verify access, automatic
+registration, per-device settings and playback before broad use. Never replace
+or delete `/opt/lampac` as an update procedure.

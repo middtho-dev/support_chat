@@ -15,6 +15,8 @@ import time
 import urllib.request
 import advanced
 import devices
+import playback
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = Path(os.environ.get('LAMPAC_DIR', '/opt/lampac'))
@@ -68,7 +70,7 @@ def patch_config(config, values):
                           'chromium': {'enable': values['chromium']}, 'listen': {'ResponseCancelAfter': values['timeout']}})
 
 def torr_request(body, path='/settings'):
-    if path not in ('/settings', '/torrents'):
+    if path not in ('/settings', '/torrents', '/cache'):
         raise ValueError('Unsupported TorrServer endpoint')
     config = merge(read_config('current.conf'), read_config('init.conf'))
     port = int(config.get('TorrServer', {}).get('tsport', 9085))
@@ -171,6 +173,25 @@ def bootstrap_page(source):
     return re.sub(r'</head\s*>',lambda match:tag+match.group(),source,count=1,flags=re.I)
 
 
+def playback_status():
+    result=devices.playback_listing(ROOT)
+    result['torrentsAvailable']=True
+    try:
+        torrents={t['hash']:t for t in advanced.torrents(torr_request)}
+    except Exception:
+        torrents={};result['torrentsAvailable']=False
+    active=[key for key,torrent in torrents.items() if torrent.get('stat')==3][:32]
+    def reader_count(key):
+        try:
+            value=torr_request({'action':'get','hash':key},'/cache').get('Readers')
+            return key,len(value) if isinstance(value,list) else None
+        except Exception:return key,None
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        readers=dict(pool.map(reader_count,active))
+    result=playback.correlate(result,torrents,readers)
+    return result
+
+
 class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
@@ -244,15 +265,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(script)
             elif self.path.endswith('/playback'):
-                result=devices.playback_listing(ROOT)
-                result['torrentsAvailable']=True
-                try:
-                    torrents={t['hash']:t for t in advanced.torrents(torr_request)}
-                except Exception:
-                    torrents={};result['torrentsAvailable']=False
-                for session in result['sessions']:
-                    torrent=torrents.get(session['hash']) if session['fresh'] else None
-                    session['downloadSpeed']=torrent.get('download_speed') if torrent else None
+                result=playback_status()
                 self.reply(200,result)
             elif self.path.endswith('/devices'):
                 result=devices.listing(ROOT)
@@ -313,7 +326,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError('Нужен объект JSON')
             if self.path.endswith('/playback'):
-                return self.reply(200, devices.playback_remove(ROOT, body))
+                protected={(s['device'],s['session']) for s in playback_status()['sessions'] if s.get('streamActive')}
+                return self.reply(200, devices.playback_remove(ROOT, body, protected))
             if self.path.endswith('/devices'):
                 return self.reply(200, devices.manage(ROOT, body))
             if self.path.endswith('/advanced') or self.path.endswith('/client'):

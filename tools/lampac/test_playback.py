@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import devices
+import playback
 
 class PlaybackTests(unittest.TestCase):
     def setUp(self):
@@ -66,3 +67,41 @@ class PlaybackTests(unittest.TestCase):
             self.assertEqual(devices.playback_remove(self.root,{'action':'clear-inactive'})['removed'],1)
             self.assertEqual(devices.playback_listing(self.root)['sessions'],[])
         with self.assertRaises(ValueError):devices.playback_remove(self.root,{'action':'remove','device':self.r['id']})
+
+
+    def external(self):
+        with patch('time.time',return_value=1000):self.beat(dict(self.data,method='external',state='external'))
+
+    def test_external_delivery_survives_suspended_lampa_without_faking_position(self):
+        self.external()
+        with patch('time.time',return_value=1600):
+            data=devices.playback_listing(self.root)
+            result=playback.correlate(data,{'a'*40:{'download_speed':100}}, {'a'*40:1})
+            session=result['sessions'][0]
+            self.assertTrue(session['fresh']);self.assertTrue(session['streamActive'])
+            self.assertEqual(session['device'],self.r['id']);self.assertEqual(session['updated'],1000)
+            self.assertIsNone(session['position']);self.assertIsNone(session['buffer'])
+            protected={(session['device'],session['session'])}
+            self.assertEqual(devices.playback_remove(self.root,{'action':'clear-inactive'},protected)['removed'],0)
+            with self.assertRaises(ValueError):devices.playback_remove(self.root,{'action':'remove','device':session['device'],'session':session['session']},protected)
+        with patch('time.time',return_value=1000+playback.EXTERNAL_SECONDS+1):self.assertEqual(devices.playback_listing(self.root)['sessions'],[])
+
+    def test_download_or_missing_reader_data_never_confirms_external_playback(self):
+        self.external()
+        for reader in [0,None]:
+            with patch('time.time',return_value=1600):
+                result=playback.correlate(devices.playback_listing(self.root),{'a'*40:{'stat':3,'download_speed':999}}, {'a'*40:reader})
+                self.assertEqual(result['sessions'],[])
+
+    def test_unidentified_and_shared_hash_readers_are_not_assigned_to_one_device(self):
+        torrents={'a'*40:{'title':'Film','download_speed':5,'poster':'https://bad/?token=secret'}}
+        result=playback.correlate({'serverTime':1100,'sessions':[]},torrents,{'a'*40:1})
+        self.assertEqual(result['sessions'][0]['device'],'');self.assertEqual(result['sessions'][0]['poster'],'')
+        self.external()
+        with patch('time.time',return_value=1050):
+            data=devices.playback_listing(self.root)
+            data['sessions'].append(dict(data['sessions'][0],device='another-device'))
+            result=playback.correlate(data,torrents,{'a'*40:1})
+            self.assertEqual(len(result['sessions']),3)
+            self.assertTrue(all(not s['streamActive'] for s in result['sessions'] if s['device']))
+            self.assertEqual(result['sessions'][-1]['device'],'')
