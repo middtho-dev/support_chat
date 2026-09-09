@@ -1,0 +1,10 @@
+#!/bin/sh /etc/rc.common
+START=99
+USE_PROCD=1
+start_service() {
+    [ ! -f /etc/kv9-frpc-ready ] || return 0
+    procd_open_instance
+    procd_set_param command /bin/sh /usr/libexec/kv9-frpc-enroll
+    procd_set_param respawn 3600 60 5
+    procd_close_instance
+}

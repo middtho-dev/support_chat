@@ -25,6 +25,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 fresh=1
 [ ! -f /etc/config/frpc ] || fresh=0
+[ "${KV9_FRPC_FRESH:-0}" != 1 ] || fresh=1
 if [ "$fresh" = 0 ]; then
     backup="/etc/config/frpc.kv9-backup-$(date +%s)-$$"
     cp /etc/config/frpc "$backup"
@@ -32,7 +33,9 @@ if [ "$fresh" = 0 ]; then
     /etc/init.d/frpc running >/dev/null 2>&1 && was_running=1 || true
 fi
 echo '[1/3] Installing frpc and luci-app-frpc from configured OpenWrt repositories...'
-if command -v apk >/dev/null 2>&1; then
+if [ "${KV9_FRPC_PREINSTALLED:-0}" = 1 ]; then
+    [ -x /usr/bin/frpc ] || { echo 'ERROR: FRPC package missing from firmware.'; exit 1; }
+elif command -v apk >/dev/null 2>&1; then
     apk update
     apk add frpc luci-app-frpc
 elif command -v opkg >/dev/null 2>&1; then

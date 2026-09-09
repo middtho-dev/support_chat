@@ -43,3 +43,10 @@ test('ticket survives manager restart, secrets are hashed and admin status does 
  try {const result=await manager.action('generate-installer',{name:'Спальня',password:'router-test-password',enrollmentUrl:'https://example.org/api/frp/enroll'});assert.equal(result.status.enrollments,undefined);assert.equal(JSON.parse(fs.readFileSync(path.join(directory,'state.json'),'utf8')).enrollments[0].port,null);await manager.shutdown();manager=createFrp({directory});assert.equal(JSON.parse(fs.readFileSync(path.join(directory,'state.json'),'utf8')).enrollments[0].name,'Спальня');}
  finally{await manager.shutdown();fs.rmSync(directory,{recursive:true,force:true});}
 });
+
+test('firmware enrollment needs no SSH password and assigns no port until first boot',async()=>{
+ const f=fixture({portFree:async()=>true});const result=f.enrollment.issue({name:'Firmware Router',localIP:'127.0.0.1',localPort:80,enrollmentUrl:'https://panel.example.org/api/frp/enroll'},true);
+ assert.match(result.token,/^[a-f0-9]{64}$/);assert.equal(result.file,undefined);assert.equal(f.state.enrollments[0].port,null);assert.ok(Date.parse(result.expiresAt)-Date.now()>29*86400000);assert.ok(!JSON.stringify(f.state).includes(result.token));
+ const claim=await f.enrollment.redeem({token:result.token,fingerprint:'e'.repeat(64),operation:'claim'});assert.ok(claim.port>=20000&&claim.port<=23000);
+ await assert.rejects(f.enrollment.redeem({token:result.token,fingerprint:'f'.repeat(64),operation:'claim'}),/другом роутере/);
+});
