@@ -216,6 +216,6 @@ def playback_listing(root):
     with closing(database(root)) as conn, conn:
         return {'sessions':playback.listing(conn),'devices':[dict(r) for r in conn.execute('SELECT id,last,enabled FROM devices WHERE paired=1')],'serverTime':time.time()}
 
-def playback_remove(root,body):
+def playback_remove(root,body,protected=()):
     with closing(database(root)) as conn, conn:
-        return playback.remove(conn,body)
+        return playback.remove(conn,body,protected)

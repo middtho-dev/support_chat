@@ -71,3 +71,26 @@
 4. После сохранения/отмены настройки сохраняют раскрытые группы независимо от добавленного числового счётчика.
 5. Сохранение источников без изменений сообщает об этом явно.
 6. Подменю не оставляет кнопки старой формы после ошибки загрузки/сброса, и скрывается при выходе.
+
+
+## 2026-09-09 — external playback and shared disclosures
+
+- [x] External Lampa handoff without internal start; queued heartbeat delivery.
+- [x] No stale browser position/pause/error for external playback.
+- [x] Read-only TorrServer cache readers; downloads alone do not imply viewing.
+- [x] Unknown/shared hashes are not attributed to an arbitrary device.
+- [x] Bounded external snapshots and protection of active streams from cleanup.
+- [x] Device film title and external-stream presence.
+- [x] Equal torrent-card height and aligned action rows.
+- [x] Shared nested backgrounds/borders across all workspace modules.
+- [x] “Управлять настройкой” toggle and matching help/accessible label.
+- [x] WebKit select text is no longer clipped by native chrome.
+- [x] Chromium/WebKit at 1440, 390 and 360 px: 138 read-only navigation/layout
+  checks; 3034 controls inventoried. Screenshots reviewed for expanded settings,
+  devices and torrents. This is not a claim of executing every destructive action.
+- [x] 85 Node tests, 43 Lampac Python tests, syntax and whitespace checks.
+- [x] Official update boundaries documented in tools/lampac/README.md.
+
+External position/pause requires telemetry from the external player itself.
+Hash correlation confirms stream delivery, not rendered frames or individual
+reader identity. Reload Lampa once after rollout to identify subsequent handoffs.

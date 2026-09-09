@@ -14,7 +14,7 @@ class AgentTests(unittest.TestCase):
         server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
         threading.Thread(target=server.serve_forever,daemon=True).start()
         try:
-            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.devices,'playback_listing',side_effect=lambda root:{'sessions':[{'hash':'a'*40,'fresh':True},{'hash':'a'*40,'fresh':False}]}),patch.object(agent,'torr_request',return_value=[{'hash':'a'*40,'download_speed':123}]) as request:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.devices,'playback_listing',side_effect=lambda root:{'serverTime':1000,'sessions':[{'device':'tv','session':'session_1','enabled':True,'method':'browser','hash':'a'*40,'fresh':True},{'device':'tv','session':'session_2','enabled':True,'method':'browser','hash':'a'*40,'fresh':False}]}),patch.object(agent,'torr_request',return_value=[{'hash':'a'*40,'download_speed':123}]) as request:
                 url='http://127.0.0.1:'+str(server.server_port)+'/api/lampac/playback'
                 req=urllib.request.Request(url,headers={'x-admin-token':'test-token'})
                 with urllib.request.urlopen(req) as response:data=json.load(response)
@@ -30,7 +30,7 @@ class AgentTests(unittest.TestCase):
         server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
         threading.Thread(target=server.serve_forever,daemon=True).start()
         try:
-            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.devices,'playback_remove',return_value={'ok':True,'removed':1}) as remove:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent,'playback_status',return_value={'sessions':[]}),patch.object(agent.devices,'playback_remove',return_value={'ok':True,'removed':1}) as remove:
                 url='http://127.0.0.1:'+str(server.server_port)+'/api/lampac/playback'
                 for token,expected in [('',401),('test-token',200)]:
                     req=urllib.request.Request(url,data=b'{"action":"clear-inactive"}',headers={'x-admin-token':token,'Content-Type':'application/json'})
@@ -38,7 +38,7 @@ class AgentTests(unittest.TestCase):
                         with urllib.request.urlopen(req) as response:code=response.status
                     except urllib.error.HTTPError as error:code=error.code;error.close()
                     self.assertEqual(code,expected)
-                remove.assert_called_once_with(agent.ROOT,{'action':'clear-inactive'})
+                remove.assert_called_once_with(agent.ROOT,{'action':'clear-inactive'},set())
         finally:server.shutdown();server.server_close()
 
     def test_caddy_auth_accepts_asset_query_strings_without_bypassing_auth(self):
@@ -163,5 +163,19 @@ class AgentTests(unittest.TestCase):
                 self.assertTrue(json.load(urllib.request.urlopen(req))['unchanged'])
                 request.assert_called_once_with({'action':'get'})
         finally:server.shutdown();server.server_close()
+
+
+
+
+    def test_external_reader_queries_only_get_cache_for_loaded_torrents(self):
+        key='a'*40
+        def request(body,path):
+            if path=='/torrents':return [{'hash':key,'stat':3,'title':'Film'},{'hash':'b'*40,'stat':0}]
+            self.assertEqual(path,'/cache');self.assertEqual(body,{'action':'get','hash':key})
+            return {'Readers':[{'Start':1,'End':20,'Reader':3}]}
+        with patch.object(agent.devices,'playback_listing',side_effect=lambda root:{'serverTime':1000,'sessions':[]}),patch.object(agent,'torr_request',side_effect=request) as req:
+            result=agent.playback_status()
+            self.assertEqual(req.call_count,2);self.assertTrue(result['sessions'][0]['streamActive'])
+            self.assertEqual(result['sessions'][0]['device'],'')
 
 if __name__=='__main__':unittest.main()
