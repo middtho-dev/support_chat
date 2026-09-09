@@ -10,6 +10,22 @@ import urllib.error
 import agent
 
 class AgentTests(unittest.TestCase):
+    def test_playback_matches_torrent_without_waking_and_survives_torrserver_failure(self):
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.devices,'playback_listing',side_effect=lambda root:{'sessions':[{'hash':'a'*40,'fresh':True},{'hash':'a'*40,'fresh':False}]}),patch.object(agent,'torr_request',return_value=[{'hash':'a'*40,'download_speed':123}]) as request:
+                url='http://127.0.0.1:'+str(server.server_port)+'/api/lampac/playback'
+                req=urllib.request.Request(url,headers={'x-admin-token':'test-token'})
+                with urllib.request.urlopen(req) as response:data=json.load(response)
+                self.assertEqual(data['sessions'][0]['downloadSpeed'],123)
+                self.assertIsNone(data['sessions'][1]['downloadSpeed'])
+                request.assert_called_once_with({'action':'list'},'/torrents')
+                request.side_effect=RuntimeError('offline')
+                with urllib.request.urlopen(req) as response:data=json.load(response)
+                self.assertFalse(data['torrentsAvailable']);self.assertIsNone(data['sessions'][0]['downloadSpeed'])
+        finally:server.shutdown();server.server_close()
+
     def test_caddy_auth_accepts_asset_query_strings_without_bypassing_auth(self):
         server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
         threading.Thread(target=server.serve_forever,daemon=True).start()

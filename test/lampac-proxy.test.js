@@ -20,7 +20,7 @@ test('Lampac expanded routes retain manager checks and do not expose internal ac
   app.use('/lampac',createLampacProxy({authorize:token=>({authenticated:!!token,canManageSettings:token==='manager'}),token:'private',fetcher:async(url)=>{seen.push(url.pathname);return Response.json({ok:true});}}));
   const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>server.close());
   const url='http://127.0.0.1:'+server.address().port+'/lampac';
-  for(const path of ['/advanced','/torrents','/clients','/devices']){
+  for(const path of ['/advanced','/torrents','/clients','/devices','/playback']){
     assert.equal((await fetch(url+path,{headers:{'x-admin-token':'operator'}})).status,403);
     assert.equal((await fetch(url+path,{headers:{'x-admin-token':'manager'}})).status,200);
   }
@@ -28,5 +28,5 @@ test('Lampac expanded routes retain manager checks and do not expose internal ac
     assert.equal((await fetch(url+path,{method:'POST',headers:{'x-admin-token':'manager','Content-Type':'application/json'},body:'{}'})).status,200);
   }
   for(const path of ['/access','/client.js','/config','/../access'])assert.equal((await fetch(url+path,{headers:{'x-admin-token':'manager'}})).status,404);
-  assert.equal(seen.length,9);
+  assert.equal(seen.length,10);
 });
