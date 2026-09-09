@@ -17,7 +17,9 @@ window.createWorkspacePlayback=function(options){
   try{options.request('heartbeat',{token:token,playback:data},function(status,result){busy=false;if(status===200&&result.enabled===false)options.access(false);});}catch(e){busy=false;}
  }
  function poster(value){
-  if(typeof value!=='string'||value.length>512)return '';
+  if(typeof value!=='string'||value.length>2048)return '';
+  var proxied=value.match(/(?:image\.tmdb\.org\/|\/tmdb\/img\/)t\/p\/(?:w[0-9]+|original)(\/[a-zA-Z0-9_-]+\.(?:jpg|png|webp))(?:[?#].*)?$/);
+  if(proxied)return 'https://image.tmdb.org/t/p/w300'+proxied[1];
   if(/^\/[a-zA-Z0-9_-]+\.(jpg|png|webp)$/.test(value))return 'https://image.tmdb.org/t/p/w300'+value;
   var match=value.match(/^https:\/\/image\.tmdb\.org\/t\/p\/(w[0-9]+|original)(\/[a-zA-Z0-9_-]+\.(jpg|png|webp))$/);
   if(match)return 'https://image.tmdb.org/t/p/w300'+match[2];
@@ -25,7 +27,8 @@ window.createWorkspacePlayback=function(options){
  }
  function start(item){
   item=item||{};data.state='loading';data.error='';data.position=null;data.duration=null;data.buffer=null;
-  var card=item.card||{};data.poster=poster(card.poster_path)||poster(card.poster)||poster(card.img)||poster(item.poster);
+  var active={};try{active=Lampa.Activity&&Lampa.Activity.active?Lampa.Activity.active()||{}:{};}catch(e){}
+  var card=item.card||item.movie||active.card||active.movie||{};data.poster=poster(card.poster_path)||poster(card.poster)||poster(card.img)||poster(item.poster)||poster(item.img);
   var title=String(item.title||(item.card&&(item.card.title||item.card.name))||'');
   data.title=/https?:\/\/|[?&](token|password|key)=/i.test(title)?'':title.replace(/[\x00-\x1f]/g,' ').slice(0,200);
   data.hash=/^[a-f0-9]{40}$/i.test(item.torrent_hash||'')?item.torrent_hash.toLowerCase():'';

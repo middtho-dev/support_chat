@@ -301,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {'error':'Проверьте запрос или подождите минуту перед повтором'})
             except Exception:
                 return self.reply(502, {'error':'Управление устройствами временно недоступно'})
-        if self.path not in ['/api/lampac/action', '/api/lampac/configure', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/client', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices']:
+        if self.path not in ['/api/lampac/action', '/api/lampac/configure', '/api/lampac/torrserver', '/api/lampac/advanced', '/api/lampac/client', '/api/lampac/torrents', '/api/lampac/clients', '/api/lampac/devices', '/api/lampac/playback']:
             return self.reply(404, {'error': 'Неизвестный запрос'})
         if not LOCK.acquire(blocking=False):
             return self.reply(409, {'error': 'Дождитесь завершения предыдущей операции'})
@@ -312,6 +312,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError('Нужен объект JSON')
+            if self.path.endswith('/playback'):
+                return self.reply(200, devices.playback_remove(ROOT, body))
             if self.path.endswith('/devices'):
                 return self.reply(200, devices.manage(ROOT, body))
             if self.path.endswith('/advanced') or self.path.endswith('/client'):

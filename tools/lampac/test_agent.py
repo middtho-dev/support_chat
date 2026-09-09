@@ -26,6 +26,21 @@ class AgentTests(unittest.TestCase):
                 self.assertFalse(data['torrentsAvailable']);self.assertIsNone(data['sessions'][0]['downloadSpeed'])
         finally:server.shutdown();server.server_close()
 
+    def test_playback_cleanup_route_requires_service_auth(self):
+        server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            with patch.object(agent,'TOKEN','test-token'),patch.object(agent.devices,'playback_remove',return_value={'ok':True,'removed':1}) as remove:
+                url='http://127.0.0.1:'+str(server.server_port)+'/api/lampac/playback'
+                for token,expected in [('',401),('test-token',200)]:
+                    req=urllib.request.Request(url,data=b'{"action":"clear-inactive"}',headers={'x-admin-token':token,'Content-Type':'application/json'})
+                    try:
+                        with urllib.request.urlopen(req) as response:code=response.status
+                    except urllib.error.HTTPError as error:code=error.code;error.close()
+                    self.assertEqual(code,expected)
+                remove.assert_called_once_with(agent.ROOT,{'action':'clear-inactive'})
+        finally:server.shutdown();server.server_close()
+
     def test_caddy_auth_accepts_asset_query_strings_without_bypassing_auth(self):
         server=agent.ThreadingHTTPServer(('127.0.0.1',0),agent.Handler)
         threading.Thread(target=server.serve_forever,daemon=True).start()
