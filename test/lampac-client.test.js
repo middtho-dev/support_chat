@@ -83,3 +83,13 @@ test('brand theme toggles live with device precedence and restores stock CSS',()
  assert.doesNotMatch(style.textContent,/#2ED3B7|kv9-appear/);
  assert.equal(data.get('source'),'cub');assert.equal(data.get('background'),'false');
 });
+
+test('torrent quality accents track native metadata and detach when the theme is disabled',()=>{
+ const nodes=['FHD','4K','HDR','HD','Unknown'].map(textContent=>({textContent,attributes:{},setAttribute(k,v){this.attributes[k]=v},removeAttribute(k){delete this.attributes[k]}}));let style,notify,scheduled,observing=false;
+ const map=new Map();const context={setTimeout:fn=>(scheduled=fn,1),clearTimeout:()=>scheduled=null,MutationObserver:class{constructor(fn){notify=fn}observe(){observing=true}disconnect(){observing=false}},document:{body:{},getElementById:()=>style,createElement:()=>({}),head:{appendChild:n=>style=n},querySelectorAll:()=>nodes},Lampa:{Storage:{get:(k,f)=>map.has(k)?map.get(k):f,set:(k,v)=>map.set(k,v),remove:k=>map.delete(k)}},localStorage:{getItem:()=>null}};context.window=context;
+ vm.runInNewContext(script.replace('POLICY',JSON.stringify({mode:'disabled',values:{}})),context);
+ context.workspaceApplyTheme(true);assert.equal(observing,true);assert.deepEqual(nodes.map(n=>n.attributes['data-workspace-quality']),['fhd','uhd','hdr',undefined,undefined]);
+ nodes[0].textContent='720p';notify();scheduled();assert.equal(nodes[0].attributes['data-workspace-quality'],undefined);
+ nodes[0].textContent='2160p';notify();scheduled();assert.equal(nodes[0].attributes['data-workspace-quality'],'uhd');
+ context.workspaceApplyTheme(false);assert.equal(observing,false);assert.ok(nodes.every(n=>!n.attributes['data-workspace-quality']));assert.equal(style.textContent,'');
+});
