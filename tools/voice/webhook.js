@@ -40,7 +40,9 @@ class WebhookInbox {
     const expected = Buffer.from(this.secret);
     if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return send(403);
     try {
-      let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 1024*1024) return send(413); }
+      const chunks = []; let bytes = 0;
+      for await (const chunk of req) { bytes += chunk.length; if (bytes > 1024*1024) return send(413); chunks.push(chunk); }
+      const body = Buffer.concat(chunks).toString('utf8');
       let update; try { update = JSON.parse(body); } catch { return send(400); }
       if (!Number.isSafeInteger(update?.update_id) || update.update_id < 0) return send(400);
       this.accept(update); send(200);
