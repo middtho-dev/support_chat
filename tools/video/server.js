@@ -9,7 +9,7 @@ function createService(env=process.env){
  if(!/^[A-Za-z0-9_-]{32,256}$/.test(env.VIDEO_WEBHOOK_SECRET||''))throw Error('Configure VIDEO_WEBHOOK_SECRET');
  let inbox,registered='',error='',connecting=false,secret='';
  const call=async(method,data)=>{
-  let response;try{response=await fetch('https://api.telegram.org/bot'+store.data.config.botToken+'/'+method,{method:'POST',redirect:'error',...(data instanceof FormData?{body:data}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:AbortSignal.timeout(90000)});}catch{throw Error('Telegram не подтвердил ответ. Автоматический повтор отключён.');}
+  let response;try{response=await fetch('https://api.telegram.org/bot'+store.data.config.botToken+'/'+method,{method:'POST',redirect:'error',...(data instanceof FormData?{body:data}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:AbortSignal.timeout(['sendVideo','answerGuestQuery'].includes(method)?90000:10000)});}catch{throw Error('Telegram не подтвердил ответ. Автоматический повтор отключён.');}
   const body=await response.json();if(!body.ok){const e=Error('Telegram: '+String(body.description||response.status).slice(0,250));e.definite=true;throw e;}return body.result;
  };
  const worker=new Worker(store,{call,download,publicUrl});
@@ -47,6 +47,7 @@ function createService(env=process.env){
    if(worker.busy||connecting)return json(res,409,{error:'Дождитесь завершения текущего запроса'});
    if(pathname.endsWith('/check')){await connect();return json(res,200,status());}
    const chunks=[];let size=0;for await(const b of req){size+=b.length;if(size>16384)return json(res,413,{});chunks.push(b);}
+   if(worker.busy||connecting)return json(res,409,{error:'Дождитесь завершения текущего запроса'});
    const next=validate(JSON.parse(Buffer.concat(chunks).toString('utf8')),store.data.config);
    if(next.botToken!==store.data.config.botToken&&store.data.jobs.some(j=>['queued','downloading','sending'].includes(j.status)))return json(res,409,{error:'Перед сменой бота дождитесь опустошения очереди'});
    if(next.botToken!==store.data.config.botToken){for(const job of store.data.jobs)await fs.promises.rm(path.join(store.dir,'files',job.id),{recursive:true,force:true});store.data.jobs=[];worker.bot=null;}
