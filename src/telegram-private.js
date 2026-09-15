@@ -1,3 +1,6 @@
+const {WebhookInbox, registerWebhook} = require('../tools/voice/webhook');
+let webhookInbox = null;
+const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || '';
 const { TelegramBot } = require('node-telegram-bot-api');
 const fs = require('fs');
 const fsp = require('fs').promises;
@@ -1396,7 +1399,28 @@ async function startBot() {
     instance.on('callback_query', query => { resetPollingErrors(); return handleCallbackQuery(query); });
     instance.on('message_reaction', update => { resetPollingErrors(); return handleMessageReaction(update); });
     instance.on('message_reaction_count', update => { resetPollingErrors(); return handleMessageReactionCount(update); });
-    await instance.startPolling();
+    if (webhookUrl) {
+      if (!webhookInbox) webhookInbox = new WebhookInbox({
+        dir: require('path').join(require('path').dirname(process.env.DB_PATH || require('path').join(__dirname,'../data/support.db')), 'telegram-inbox', require('crypto').createHash('sha256').update(TOKEN).digest('hex').slice(0,16)),
+        secret: process.env.TELEGRAM_WEBHOOK_SECRET,
+        ready: () => tgEnabled(),
+        handle: async update => {
+          if (update.message) {
+            if(update.message.chat?.type==='private')chatCleanup.track(update.message.chat.id,update.message);
+            queueIncomingMessage(update.message).catch(()=>{}); // SQLite queue owns retries after synchronous persistence.
+          }
+          else if (update.callback_query) await handleCallbackQuery(update.callback_query);
+          else if (update.message_reaction) await handleMessageReaction(update.message_reaction);
+          else if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count);
+        }
+      });
+      await registerWebhook((method, body) => method === 'setWebhook' ? instance.setWebhook(body.url, body) : instance.getWebhookInfo(), webhookUrl, process.env.TELEGRAM_WEBHOOK_SECRET,
+        ['message','callback_query','message_reaction','message_reaction_count']);
+    } else {
+      const hook = await instance.getWebhookInfo();
+      if (hook.url) throw Error('Webhook is active; explicitly remove it before enabling polling');
+      await instance.startPolling();
+    }
     await configureBot(instance);
     return instance;
   } catch (error) {
@@ -3981,6 +4005,7 @@ function status(now = new Date()) {
     botUsername: botUsername || null,
     threadedModeEnabled,
     richMessagesAvailable,
+    transport: webhookInbox?.status() || {mode:webhookUrl?'webhook':'polling'},
     polling: {
       ...(pollingLease?.status() || { owner: false, pausedUntil: null }),
       ...pollingStats
@@ -4116,6 +4141,8 @@ async function createTopic(ticketId) {
 }
 
 module.exports = {
+  receiveWebhook: (req,res) => webhookInbox ? webhookInbox.receive(req,res) : res.status(503).end(),
+  webhookStatus: () => webhookInbox?.status() || {mode:'polling'},
   queueBusy: (kind,id) => kind==='incoming' ? incomingMessageQueues.has(String(id).split(':')[0]) : kind==='customer' ? customerDeliveryMessages.has(String(id)) : forwardingMessages.has(String(id)),
   wakeDelivery: () => {scheduleDeliveryQueue(1);setTimeout(()=>processIncomingRetryQueue(),1);},
   init,

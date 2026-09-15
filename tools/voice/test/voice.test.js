@@ -120,3 +120,25 @@ test('exhausted API credit is actionable and does not schedule pointless retries
  const worker=new Worker(store,{transcribe:async()=>{throw error;}});await worker.ingest({update_id:1,business_message:msg});await worker.process(store.data.jobs[0]);
  assert.equal(store.data.jobs[0].status,'failed');assert.equal(store.data.jobs[0].attempts,1);
 });
+
+test('Telegram rate limit retries delivery without another transcription',async t=>{
+ const {store}=fixture(t);store.data.config.polish=false;store.data.config.emoji=false;store.data.config.deleteIncomingVoice=false;
+ let sends=0,transcriptions=0;
+ const worker=new Worker(store,{telegram:async method=>{
+  if(method==='getBusinessConnection')return conn;
+  if(method==='sendMessage'&&++sends===1){const e=Error('rate limit');e.code=429;e.retryAfter=7;throw e;}
+  return {message_id:20};
+ },transcribe:async()=>{transcriptions++;return 'Text';}});
+ await worker.ingest({update_id:1,business_message:msg});const job=store.data.jobs[0];
+ await worker.process(job);assert.equal(job.status,'ready');assert.ok(job.next>Date.now()+5000);
+ await worker.process(job);assert.equal(job.status,'done');assert.equal(transcriptions,1);assert.equal(sends,2);
+});
+
+test('webhook transport registers without starting getUpdates',async t=>{
+ const {store}=fixture(t),calls=[];
+ const oldUrl=process.env.VOICE_WEBHOOK_URL,oldSecret=process.env.VOICE_WEBHOOK_SECRET;
+ process.env.VOICE_WEBHOOK_URL='https://example.com/api/webhooks/telegram/voice';process.env.VOICE_WEBHOOK_SECRET='s'.repeat(48);
+ const worker=new Worker(store,{telegram:async(method)=>{calls.push(method);if(method==='setWebhook')worker.stopped=true;return {url:''};}});
+ try{await worker.poll();assert.deepEqual(calls,['getWebhookInfo','setWebhook']);}
+ finally{worker.inbox.stop();if(oldUrl===undefined)delete process.env.VOICE_WEBHOOK_URL;else process.env.VOICE_WEBHOOK_URL=oldUrl;if(oldSecret===undefined)delete process.env.VOICE_WEBHOOK_SECRET;else process.env.VOICE_WEBHOOK_SECRET=oldSecret;}
+});

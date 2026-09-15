@@ -65,6 +65,9 @@ class FakeBot {
   startPolling() {
     return Promise.resolve();
   }
+  getWebhookInfo() {
+    return Promise.resolve({url:''});
+  }
   stopPolling() {
     stopPollingCalls++;
     return Promise.resolve();

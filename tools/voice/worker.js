@@ -3,9 +3,20 @@ const fs=require('fs/promises'),os=require('os'),path=require('path');
 const {execFile}=require('child_process');const {promisify}=require('util');
 const {selectMessage}=require('./config');
 const {shouldDelete,responseBody}=require('./formatting');
+const {WebhookInbox,registerWebhook}=require('./webhook');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 class Worker {
-  constructor(store,adapters={}){this.store=store;this.adapters=adapters;this.busy=false;this.stopped=false;this.error='';this.pollController=null;}
+  constructor(store,adapters={}){this.store=store;this.adapters=adapters;this.busy=false;this.stopped=false;this.error='';this.pollController=null;
+    this.webhookUrl=process.env.VOICE_WEBHOOK_URL||'';
+    this.setupInbox();
+  }
+  setupInbox(){
+    this.inbox?.stop();
+    const store=this.store;
+    if(this.webhookUrl)this.inbox=new WebhookInbox({dir:path.join(path.dirname(store.file),'telegram-inbox',require('crypto').createHash('sha256').update(store.data.config.botToken||'unset').digest('hex').slice(0,16)),secret:process.env.VOICE_WEBHOOK_SECRET,
+      ready:()=>!this.stopped&&!this.configuring&&store.data.config.enabled,
+      handle:update=>this.ingest(update)});
+  }
   async timed(job,stage,action){
     job.stage=stage;this.store.save();const start=Date.now();
     try{return await action();}finally{job.timings={...job.timings,[stage]:(job.timings?.[stage]||0)+Date.now()-start};this.store.save();}
@@ -14,7 +25,7 @@ class Worker {
   async telegram(method,body,signal){
     if(this.adapters.telegram)return this.adapters.telegram(method,body);
     const r=await this.request(`https://api.telegram.org/bot${this.store.data.config.botToken}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:signal||AbortSignal.timeout(30000)});
-    const data=await r.json();if(!r.ok||!data.ok){const e=Error(`Telegram ${method}: ${data.error_code||r.status}`);e.code=data.error_code||r.status;throw e;}return data.result;
+    const data=await r.json();if(!r.ok||!data.ok){const e=Error(`Telegram ${method}: ${data.error_code||r.status}`);e.code=data.error_code||r.status;e.retryAfter=data.parameters?.retry_after;throw e;}return data.result;
   }
   async ingest(update){
     const d=this.store.data,token=d.config.botToken;
@@ -93,7 +104,7 @@ class Worker {
         if(!d.config.enabled||job.status==='cancelled')return;
         job.status='sending';this.store.save();
         try{await this.timed(job,'delivery',()=>this.telegram('sendMessage',{business_connection_id:job.connectionId,chat_id:job.chatId,text:job.parts[job.sent],disable_notification:c.silent,link_preview_options:{is_disabled:true}}));}
-        catch(e){job.status='uncertain';job.error='Нет надёжного подтверждения отправки. Проверьте чат; повтор автоматически не выполняется.';this.store.save();return;}
+        catch(e){if(e.code===429){job.status='ready';job.next=Date.now()+Math.max(1,Number(e.retryAfter)||30)*1000;job.error='Telegram rate limit; delivery retry scheduled';this.store.save();return;}if([400,401,403,404].includes(e.code)){job.status='failed';job.error=e.message;this.store.save();return;}job.status='uncertain';job.error='Нет надёжного подтверждения отправки. Проверьте чат; повтор автоматически не выполняется.';this.store.save();return;}
         job.sent++;job.status='ready';this.store.save();
       }
       if(job.status==='ready'){job.status=shouldDelete(c,job,conn)?'cleanup':'done';job.error='';this.store.save();}
@@ -128,6 +139,14 @@ class Worker {
       if(this.configuring||!this.store.data.config.enabled){await delay(250);continue;}
       try{
         const token=this.store.data.config.botToken;
+        if(this.webhookUrl){
+          if(this.registeredToken!==token){
+            await registerWebhook((method,body)=>this.telegram(method,body),this.webhookUrl,process.env.VOICE_WEBHOOK_SECRET,
+              ['business_connection','business_message','deleted_business_messages']);
+            this.registeredToken=token;
+          }
+          this.error='';await delay(1000);continue;
+        }
         const controller=new AbortController();this.pollController=controller;const timer=setTimeout(()=>controller.abort(),30000);
         let updates;try{updates=await this.telegram('getUpdates',{offset:this.store.data.offset,timeout:15,limit:50,allowed_updates:['business_connection','business_message','deleted_business_messages']},controller.signal);}finally{clearTimeout(timer);}
         if(token!==this.store.data.config.botToken)continue;
