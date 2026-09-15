@@ -5,6 +5,7 @@ from pathlib import Path
 from image import inspect_image,MAX_IMAGE
 from presets import validate
 from builder import build
+from bundle import FORMAT
 ROOT=Path(os.environ.get('FIRMWARE_DIR','/data'))
 TOKEN=os.environ.get('FIRMWARE_SERVICE_TOKEN','')
 LOCK=threading.Lock()
@@ -38,11 +39,11 @@ def work(folder,image_path,body):
     state={'id':folder.name,'created':time.time(),'state':'building','stage':'Подготовка'}
     def progress(stage):state['stage']=stage;store(folder/'status.json',state)
     try:
-        result=build(image_path,body,folder/'firmware.bin',progress)
+        result=build(image_path,body,folder/'bundle.zip',progress)
         state.update(state='ready',stage='Готово',result=result)
     except Exception as error:
         state.update(state='failed',stage='Сборка остановлена',error=str(error)[:2400])
-        (folder/'firmware.bin').unlink(missing_ok=True)
+        (folder/'bundle.zip').unlink(missing_ok=True)
     finally:
         body.clear();store(folder/'status.json',state);LOCK.release()
 
@@ -60,8 +61,9 @@ class Handler(BaseHTTPRequestHandler):
             match=re.fullmatch(r'/jobs/([a-f0-9]{32})/download',self.path)
             if match:
                 folder=record('jobs',match[1]);state=json.loads((folder/'status.json').read_text())
-                if state['state']!='ready':raise ValueError('Образ ещё не готов')
-                path=folder/'firmware.bin';self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Cache-Control','no-store');self.send_header('Content-Disposition','attachment; filename="'+state['result']['filename']+'"');self.send_header('Content-Length',str(path.stat().st_size));self.end_headers()
+                if state['state']!='ready':raise ValueError('Комплект ещё не готов')
+                if state.get('result',{}).get('format')!=FORMAT:raise ValueError('Скачивание старых пересобранных образов отключено. Создайте новый комплект')
+                path=folder/'bundle.zip';self.send_response(200);self.send_header('Content-Type','application/zip');self.send_header('Cache-Control','no-store');self.send_header('Content-Disposition','attachment; filename="'+state['result']['filename']+'"');self.send_header('Content-Length',str(path.stat().st_size));self.end_headers()
                 with path.open('rb') as f:shutil.copyfileobj(f,self.wfile)
                 return
             self.reply(404,{'error':'Неизвестная операция'})
@@ -113,6 +115,7 @@ if __name__=='__main__':
     ROOT.mkdir(parents=True,exist_ok=True);ROOT.chmod(0o700);cleanup()
     for path in (ROOT/'jobs').glob('*/status.json'):
         data=json.loads(path.read_text())
+        if data['state']=='ready' and data.get('result',{}).get('format')!=FORMAT:data.update(state='failed',stage='Старый образ отключён',error='Создайте комплект с неизменной исходной прошивкой');store(path,data)
         if data['state']=='building':data.update(state='failed',error='Сервис перезапущен. Повторите сборку');store(path,data)
     def janitor():
         while True:

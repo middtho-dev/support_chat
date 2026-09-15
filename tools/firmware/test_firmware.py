@@ -34,7 +34,8 @@ class FirmwareTests(unittest.TestCase):
     def test_off_and_keep_do_not_require_credentials(self):
         config=validate({'name':'Router','wifi':[{'band':'5g','configure':True,'enabled':False}]})
         script=config_script(config);self.assertIn('disabled=1',script);self.assertNotIn('network.wan',script)
-        self.assertIn('/etc/init.d/podkop disable',script)
+        self.assertNotIn('podkop',script)
+        with self.assertRaisesRegex(ValueError,'Podkop'):validate({'name':'Router','podkop':True})
         with self.assertRaises(ValueError):validate({'name':'Router','frpc':'true'})
 
 

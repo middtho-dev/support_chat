@@ -28,7 +28,8 @@ def network(address,mask,label):
 
 def validate(body):
     if not isinstance(body,dict):raise ValueError('Нужны настройки сборки')
-    out={'name':text(body.get('name',''),'Имя устройства',1,80),'frpc':boolean(body.get('frpc',True),'FRPC'),'podkop':boolean(body.get('podkop',True),'Podkop')}
+    if body.get('podkop',False) is not False:raise ValueError('Установка Podkop исключена. Обновите страницу и создайте комплект заново')
+    out={'name':text(body.get('name',''),'Имя устройства',1,80),'frpc':boolean(body.get('frpc',True),'FRPC')}
     out['localIP']=str(ipaddress.ip_address(body.get('localIP','127.0.0.1')))
     out['localPort']=integer(body.get('localPort',80),'Порт назначения',1,65535)
     wan=body.get('wan',{})
@@ -102,7 +103,6 @@ def config_script(config):
             for k,v in [('ssid',w['ssid']),('encryption',w['security']),('key',w['password']),('hidden','1' if w['hidden'] else '0'),('disabled','0')]:lines.append('uci set "wireless.$iface.'+k+'="'+q(v))
         lines+=['done','[ "$found" = 1 ] || { logger -t kv9-firmware "Configured Wi-Fi band not found"; exit 1; }']
     lines+=['uci commit network','uci commit dhcp','uci commit wireless']
-    if config['podkop']:lines+=['/etc/init.d/podkop disable','/etc/init.d/sing-box disable']
     if config['frpc']:lines.append('/etc/init.d/kv9-frpc-enroll enable')
     lines+=['logger -t kv9-firmware "Preset applied"','exit 0']
     return '\n'.join(lines)+'\n'

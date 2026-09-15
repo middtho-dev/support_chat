@@ -29,4 +29,8 @@ class WorkerTests(unittest.TestCase):
                 server.LOCK.release()
                 self.assertEqual(request('DELETE','/images/'+item['id'])[0],200)
                 self.assertEqual(len(request('GET','/')[1]['images']),1)
+                old_job=Path(directory)/'jobs'/('a'*32);old_job.mkdir()
+                server.store(old_job/'status.json',{'state':'ready','result':{'filename':'old.bin'}})
+                (old_job/'firmware.bin').write_bytes(b'old firmware')
+                self.assertEqual(request('GET','/jobs/'+old_job.name+'/download')[0],400)
             finally:http.shutdown();http.server_close();thread.join()

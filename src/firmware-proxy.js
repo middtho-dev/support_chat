@@ -28,7 +28,7 @@ module.exports.createFirmwareProxy=function({authorize,serviceUrl=process.env.FI
    const response=await fetch(new URL(suffix,serviceUrl),{method:req.method,headers,...(body?{body,duplex:'half'}:{}),redirect:'error',signal:AbortSignal.timeout(120000)});
    if(response.status===401)return res.status(503).json({error:'Ключ сервиса подготовки прошивок не совпадает'});
    res.status(response.status);
-   if(response.ok&&suffix.endsWith('/download')){res.set('Content-Type','application/octet-stream');res.set('Content-Disposition',response.headers.get('content-disposition')||'attachment; filename="firmware.bin"');await pipeline(Readable.fromWeb(response.body),res);}
+   if(response.ok&&suffix.endsWith('/download')){res.set('Content-Type',response.headers.get('content-type')==='application/zip'?'application/zip':'application/octet-stream');res.set('Content-Disposition',response.headers.get('content-disposition')||'attachment; filename="bundle.zip"');await pipeline(Readable.fromWeb(response.body),res);}
    else res.json(await response.json());
   }catch{if(!res.headersSent)res.status(502).json({error:'Сервис прошивок недоступен или загрузка прервана'});else res.destroy();}
  };
