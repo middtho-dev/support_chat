@@ -1,0 +1,20 @@
+services:
+  video:
+    build:
+      context: ../..
+      dockerfile: tools/video/Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 64
+    volumes:
+      - video-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7800/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  video-data:

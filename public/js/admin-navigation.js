@@ -4,11 +4,11 @@
   const main = document.getElementById('main');
   const mobile = matchMedia('(max-width:560px)');
   mobile.addEventListener('change', () => schedule());
-  const selectors = { lampac: '.lc-tabs', voice: '.voice-tabs', settings: '.management-tabs', frp: '.frp-tabs' };
+  const selectors = { video: '.video-tabs', lampac: '.lc-tabs', voice: '.voice-tabs', settings: '.management-tabs', frp: '.frp-tabs' };
   let scheduled = false;
   function sync() {
     scheduled = false;
-    for (const id of ['lampac', 'voice', 'settings', 'frp']) {
+    for (const id of ['lampac', 'voice', 'video', 'settings', 'frp']) {
       const panel = document.getElementById(id);
       let nav = document.getElementById(id + '-subnav');
       if (!nav) {
