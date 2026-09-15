@@ -25,7 +25,7 @@ class Worker {
   async telegram(method,body,signal){
     if(this.adapters.telegram)return this.adapters.telegram(method,body);
     const r=await this.request(`https://api.telegram.org/bot${this.store.data.config.botToken}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:signal||AbortSignal.timeout(30000)});
-    const data=await r.json();if(!r.ok||!data.ok){const e=Error(`Telegram ${method}: ${data.error_code||r.status}`);e.code=data.error_code||r.status;e.retryAfter=data.parameters?.retry_after;throw e;}return data.result;
+    const data=await r.json();if(!r.ok||!data.ok){const e=Error(`Telegram ${method}: ${data.error_code||r.status}`);e.code=data.error_code||r.status;e.retryAfter=data.parameters?.retry_after;e.notModified=/message is not modified/i.test(data.description||'');e.richUnavailable=/rich/i.test(data.description||'');throw e;}return data.result;
   }
   async ingest(update){
     const d=this.store.data,token=d.config.botToken;
@@ -50,8 +50,8 @@ class Worker {
     if(update.deleted_business_messages){const x=update.deleted_business_messages;for(const j of d.jobs)if(j.connectionId===x.business_connection_id&&j.chatId===x.chat.id&&x.message_ids.includes(j.messageId)&&['pending','ready'].includes(j.status))j.status='cancelled';}
     d.offset=update.update_id+1;this.store.save();
   }
-  async transcribe(job,c){
-    if(this.adapters.transcribe)return this.adapters.transcribe(job,c);
+  async transcribe(job,c,onText){
+    if(this.adapters.transcribe)return this.adapters.transcribe(job,c,onText);
     const f=await this.telegram('getFile',{file_id:job.fileId});
     if(!f.file_path||f.file_size>20*1024*1024)throw Error('Файл недоступен или превышает 20 МБ');
     let dir;
@@ -70,8 +70,10 @@ class Worker {
       }
       if(ext==='oga')ext='ogg';
       const form=new FormData();form.append('model',c.transcribeModel);form.append('file',new Blob([audio],{type:mime}),'voice.'+ext);if(c.language)form.append(c.transcribeModel==='gpt-transcribe'?'languages[]':'language',c.language);if(c.transcribePrompt)form.append('prompt',c.transcribePrompt);
+      const streaming=!!onText&&c.smoothText&&/^(gpt-transcribe|gpt-4o-(mini-)?transcribe)(-|$)/.test(c.transcribeModel);
+      if(streaming)form.append('stream','true');
       const r=await this.request('https://api.openai.com/v1/audio/transcriptions',{method:'POST',headers:{Authorization:`Bearer ${c.openaiKey}`},body:form,signal:AbortSignal.timeout(120000)});
-      if(!r.ok)throw await openaiError(r);const result=await r.json();if(!result.text?.trim())throw Error('Речь не распознана');return result.text.trim();
+      if(!r.ok)throw await openaiError(r);if(streaming)return await require('./transcript-stream').readTranscript(r,onText);const result=await r.json();if(!result.text?.trim())throw Error('Речь не распознана');return result.text.trim();
     }finally{if(dir)await fs.rm(dir,{recursive:true,force:true});}
   }
   async polish(text,c,timeout=120000){
@@ -87,6 +89,7 @@ class Worker {
     if(!selectMessage(c,conn,{chat:{id:job.chatId,type:'private'},from:{id:job.senderId},business_connection_id:job.connectionId,[job.kind]:{file_id:job.fileId,duration:job.seconds}})){
       job.status='cancelled';job.error='Аккаунт, права или фильтры изменены';this.store.save();return;
     }
+    if((c.earlyText||job.progressive)&&!['ready','cleanup'].includes(job.status))return require('./progressive').processProgressive(this,job,c);
     try{
       if(job.status==='pending'){
         job.startedAt ||= Date.now();job.queueMs ||= job.startedAt-job.created;job.stage='audio';

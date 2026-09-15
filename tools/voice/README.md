@@ -162,3 +162,23 @@ API-запрос; результат показывается только в п
 скорости модели. Сеть, VPN, длина записи и загрузка OpenAI влияют на результат.
 Ошибки баланса, ключа и доступа не повторяются автоматически; временные лимиты
 и сетевые ошибки продолжают использовать ограниченные повторы.
+# Early text and Business Rich messages
+
+The **Отправка и хранение** section offers three independent preferences:
+`earlyText` sends the first transcript before polishing, `smoothText` requests
+streamed transcription and updates the preview at most once per 1.5 seconds,
+and `richMessages` uses `sendRichMessage` with the existing Business connection.
+The latter two apply to early delivery. Existing installations keep early
+delivery off until explicitly enabled.
+
+The initial message ID is persisted and final formatting edits that same message.
+Long output is split into additional messages without truncation. Formatting
+failure keeps the raw transcript and original audio. Explicit Rich permission
+errors fall back to plain account messages; ambiguous send failures never trigger
+a second send. Interrupted streams are not treated as complete transcripts.
+
+Telegram `sendRichMessageDraft` currently has no `business_connection_id` field.
+This mode therefore uses ordinary message edits from the connected account, not
+native animated Rich drafts. Actual Rich availability depends on the account's
+Telegram permissions. Short audio may arrive as a single completed text chunk;
+no artificial delay is introduced just to animate it.
