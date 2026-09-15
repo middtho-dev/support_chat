@@ -13,6 +13,7 @@ const { loadSettings, saveSettings, isWithinWorkHours } = require('./settings');
 const { createMaintenance } = require('./maintenance');
 const { createFrpProxy } = require('./frp-proxy');
 const { createVoiceProxy } = require('./voice-proxy');
+const { createVideoProxy } = require('./video-proxy');
 const uuidv4 = () => crypto.randomUUID();
 
 const app = express();
@@ -351,6 +352,7 @@ app.get(['/miniapp', '/tg-admin'], (req, res) => {
 
 app.get('/admin/frp', (_req, res) => res.redirect(302, '/admin?view=frp'));
 app.use('/api/admin/voice', createVoiceProxy({ authorize: token => ({ authenticated: isAdminToken(token), canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings }) }));
+app.use('/api/admin/video', createVideoProxy({ authorize: token => ({ authenticated: isAdminToken(token), canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings }) }));
 app.use('/api/admin/lampac', require('./lampac-proxy').createLampacProxy({ authorize: token => ({ authenticated: isAdminToken(token), canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings }) }));
 app.get('/css/frp-panel.css', (_req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(__dirname, '../tools/frp/public/panel.css')); });
 app.get('/js/frp-panel.js', (_req, res) => {

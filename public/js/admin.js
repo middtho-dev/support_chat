@@ -471,6 +471,8 @@ function setView(view) {
   $('frp').classList.toggle('on', S.view === 'frp');
   $('lampac').classList.toggle('on', S.view === 'lampac');
   if (S.view === 'lampac') window.LampacPanel?.open(); else window.LampacPanel?.pause();
+  $('video').classList.toggle('on', S.view === 'video');
+  if (S.view === 'video') window.VideoPanel?.open(); else window.VideoPanel?.pause();
   $('voice').classList.toggle('on', S.view === 'voice');
   if (S.view === 'voice') window.VoicePanel?.open();
   else window.VoicePanel?.pause();
