@@ -44,3 +44,15 @@ test('registration retains pending updates and refuses another webhook',async()=
   assert.equal(calls[1].body.secret_token,secret);
   await assert.rejects(registerWebhook(async()=>({url:'https://other.example/hook'}),'https://example.com/hook',secret,['message']));
 });
+
+test('UTF-8 message bytes split across HTTP chunks are preserved',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'webhook-utf8-'));
+  const inbox=new WebhookInbox({dir,secret,ready:()=>false,handle:async()=>{}});
+  t.after(()=>{inbox.stop();fs.rmSync(dir,{recursive:true,force:true});});
+  const update={update_id:99,message:{text:'Привет 👋'}};
+  const body=Buffer.from(JSON.stringify(update));
+  const req={method:'POST',headers:{'x-telegram-bot-api-secret-token':secret},async *[Symbol.asyncIterator](){for(const byte of body)yield Buffer.from([byte]);}};
+  const res={end(){}};await inbox.receive(req,res);
+  assert.equal(res.statusCode,200);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir,'99.json'),'utf8')).update,update);
+});
