@@ -1,3 +1,5 @@
+const {createVideoRouter,isVideoUpdate}=require('./telegram-video-router');
+const videoRouter=createVideoRouter();
 const {WebhookInbox, registerWebhook} = require('../tools/voice/webhook');
 let webhookInbox = null;
 const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || '';
@@ -1358,7 +1360,7 @@ async function startBot() {
         autoStart: false,
         params: {
           timeout: TELEGRAM_LONG_POLL_TIMEOUT_SECONDS,
-          allowed_updates: ['message', 'callback_query', 'message_reaction', 'message_reaction_count']
+          allowed_updates: ['message', 'guest_message', 'callback_query', 'message_reaction', 'message_reaction_count']
         }
       }
     });
@@ -1385,7 +1387,9 @@ async function startBot() {
       if (instance !== bot) return;
       console.error('[TG private] Error:', tgError(error));
     });
+    instance.on('guest_message', msg => { try { videoRouter.route({guest_message:msg},botUsername); } catch(error) { console.error('[TG private] video inbox unavailable'); } });
     instance.on('message', msg => {
+      try { if(videoRouter.route({message:msg},botUsername))return; } catch(error) { console.error('[TG private] video inbox unavailable'); return; }
       if(msg.chat?.type==='private') chatCleanup.track(msg.chat.id,msg);
       return queueIncomingMessage(msg).catch(error => {
         console.error('[TG private] message handling:', tgError(error));
@@ -1403,8 +1407,11 @@ async function startBot() {
       if (!webhookInbox) webhookInbox = new WebhookInbox({
         dir: require('path').join(require('path').dirname(process.env.DB_PATH || require('path').join(__dirname,'../data/support.db')), 'telegram-inbox', require('crypto').createHash('sha256').update(TOKEN).digest('hex').slice(0,16)),
         secret: process.env.TELEGRAM_WEBHOOK_SECRET,
-        ready: () => tgEnabled(),
+        ready: () => !!bot && !!pollingLease?.isOwner(),
+        partition: update => (isVideoUpdate(update,botUsername)?'video:':'support:')+String((update.guest_message||update.message||update.callback_query?.message)?.chat?.id||'other'),
         handle: async update => {
+          if(videoRouter.route(update,botUsername))return;
+          if(!tgEnabled())throw Error('Support processing disabled');
           if (update.message) {
             if(update.message.chat?.type==='private')chatCleanup.track(update.message.chat.id,update.message);
             queueIncomingMessage(update.message).catch(()=>{}); // SQLite queue owns retries after synchronous persistence.
@@ -1415,7 +1422,7 @@ async function startBot() {
         }
       });
       await registerWebhook((method, body) => method === 'setWebhook' ? instance.setWebhook(body.url, body) : instance.getWebhookInfo(), webhookUrl, process.env.TELEGRAM_WEBHOOK_SECRET,
-        ['message','callback_query','message_reaction','message_reaction_count']);
+        ['message','guest_message','callback_query','message_reaction','message_reaction_count']);
     } else {
       const hook = await instance.getWebhookInfo();
       if (hook.url) throw Error('Webhook is active; explicitly remove it before enabling polling');
@@ -4005,6 +4012,7 @@ function status(now = new Date()) {
     botUsername: botUsername || null,
     threadedModeEnabled,
     richMessagesAvailable,
+    videoForward: videoRouter.status(),
     transport: webhookInbox?.status() || {mode:webhookUrl?'webhook':'polling'},
     polling: {
       ...(pollingLease?.status() || { owner: false, pausedUntil: null }),

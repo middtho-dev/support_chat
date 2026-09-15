@@ -10,7 +10,8 @@ class Worker {
   if(guest&&!m.guest_query_id)return;
   if(!guest&&m.from?.is_bot)return;
   const text=m.text||m.caption||'',name=this.bot?.username;
-  if(!guest&&m.chat?.type!=='private'&&!(name&&text.toLowerCase().includes('@'+name.toLowerCase()))&&m.reply_to_message?.from?.id!==this.bot?.id)return;
+  const command=/^\/video(?:@\w+)?(?:\s|$)/i.test(text);
+  if(!guest&&m.chat?.type!=='private'&&!command&&!(name&&text.toLowerCase().includes('@'+name.toLowerCase()))&&m.reply_to_message?.from?.id!==this.bot?.id)return;
   const id=String(update.update_id),jobs=this.store.data.jobs;
   if(jobs.some(j=>j.id===id))return;
   const user=String(m.guest_bot_caller_user?.id||m.guest_bot_caller_chat?.id||m.from?.id||m.sender_chat?.id||'');

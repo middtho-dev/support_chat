@@ -9,30 +9,31 @@ function createService(env=process.env){
  if(!/^[A-Za-z0-9_-]{32,256}$/.test(env.VIDEO_WEBHOOK_SECRET||''))throw Error('Configure VIDEO_WEBHOOK_SECRET');
  let inbox,registered='',error='',connecting=false,secret='';
  const call=async(method,data)=>{
-  let response;try{response=await fetch('https://api.telegram.org/bot'+store.data.config.botToken+'/'+method,{method:'POST',redirect:'error',...(data instanceof FormData?{body:data}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:AbortSignal.timeout(['sendVideo','answerGuestQuery'].includes(method)?90000:10000)});}catch{throw Error('Telegram не подтвердил ответ. Автоматический повтор отключён.');}
+  let response;try{response=await fetch('https://api.telegram.org/bot'+(env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken)+'/'+method,{method:'POST',redirect:'error',...(data instanceof FormData?{body:data}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:AbortSignal.timeout(['sendVideo','answerGuestQuery'].includes(method)?90000:10000)});}catch{throw Error('Telegram не подтвердил ответ. Автоматический повтор отключён.');}
   const body=await response.json();if(!body.ok){const e=Error('Telegram: '+String(body.description||response.status).slice(0,250));e.definite=true;throw e;}return body.result;
  };
+ const shared=!!env.VIDEO_MAIN_BOT_TOKEN;
  const worker=new Worker(store,{call,download,publicUrl});
  function prepare(){
   inbox?.stop();registered='';
-  const token=store.data.config.botToken;if(!token)return;
+  const token=env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken;if(!token)return;
   const namespace=crypto.createHash('sha256').update(token).digest('hex').slice(0,20);
   secret=crypto.createHmac('sha256',env.VIDEO_WEBHOOK_SECRET).update(token).digest('hex');
   inbox=new WebhookInbox({dir:path.join(store.dir,'inbox',namespace),secret,handle:u=>worker.accept(u),ready:()=>!!registered&&store.data.config.enabled});
  }
  async function connect(){
-  if(connecting||!store.data.config.botToken)return;
+  if(connecting||!(env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken))return;
   connecting=true;
-  try{worker.bot=await call('getMe',{});if(store.data.config.enabled){await registerWebhook(call,publicUrl+'/api/webhooks/telegram/video',secret,['guest_message','message']);registered=store.data.config.botToken;}error='';}
+  try{worker.bot=await call('getMe',{});if(store.data.config.enabled){if(!shared)await registerWebhook(call,publicUrl+'/api/webhooks/telegram/video',secret,['guest_message','message']);registered=env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken;}error='';}
   catch(e){error=e.message;throw e;}finally{connecting=false;}
  }
- function status(){const {botToken,...config}=store.data.config;return {config,hasBotToken:!!botToken,bot:worker.bot?{username:worker.bot.username,guestMode:!!worker.bot.supports_guest_queries}:null,error,busy:worker.busy,transport:inbox?.status()||null,jobs:store.data.jobs.slice(-30).reverse().map(({id,user,source,title,status,error,created,finished,size})=>({id,user,source,title,status,error,created,finished,size}))};}
+ function status(){const {botToken,...config}=store.data.config;return {config,hasBotToken:!!(env.VIDEO_MAIN_BOT_TOKEN||botToken),sharedBot:shared,bot:worker.bot?{username:worker.bot.username,guestMode:!!worker.bot.supports_guest_queries}:null,error,busy:worker.busy,transport:inbox?{...inbox.status(),mode:shared?'shared-webhook':'webhook'}:null,jobs:store.data.jobs.slice(-30).reverse().map(({id,user,source,title,status,error,created,finished,size})=>({id,user,source,title,status,error,created,finished,size}))};}
  const json=(res,code,data)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
  const server=http.createServer(async(req,res)=>{
   try{
    const pathname=new URL(req.url,'http://localhost').pathname;
    if(pathname==='/health')return json(res,200,{ok:true});
-   if(pathname==='/api/webhooks/telegram/video'){if(!inbox)return json(res,503,{error:'Не настроен'});return inbox.receive(req,res);}
+   if(pathname==='/api/webhooks/telegram/video'){if(shared)return json(res,404,{});if(!inbox)return json(res,503,{error:'Не настроен'});return inbox.receive(req,res);}
    const file=pathname.match(/^\/api\/video\/files\/(\d+)\/([a-f0-9]{64})\.(mp4|jpg)$/);
    if(file&&['GET','HEAD'].includes(req.method)){
     const job=store.data.jobs.find(j=>j.id===file[1]&&j.cap===file[2]&&j.expires>Date.now());if(!job)return json(res,404,{});
@@ -42,13 +43,24 @@ function createService(env=process.env){
    }
    const supplied=Buffer.from(String(req.headers['x-admin-token']||'')),expected=Buffer.from(env.VIDEO_SERVICE_TOKEN);
    if(supplied.length!==expected.length||!crypto.timingSafeEqual(supplied,expected))return json(res,401,{error:'Требуется вход'});
+   if(pathname==='/api/video/update'&&req.method==='POST'){
+    if(!shared)return json(res,409,{error:'Общий бот не подключён'});
+    const parts=[];let bytes=0;for await(const b of req){bytes+=b.length;if(bytes>1024*1024)return json(res,413,{});parts.push(b);}
+    const update=JSON.parse(Buffer.concat(parts).toString('utf8'));
+    if(!Number.isSafeInteger(update.update_id)||update.update_id<0)return json(res,400,{error:'Invalid update'});
+    if(!store.data.config.enabled)return json(res,200,{accepted:false,reason:'disabled'});
+    inbox.accept(update);return json(res,200,{accepted:true});
+   }
    if(pathname==='/api/video'&&req.method==='GET')return json(res,200,status());
    if(req.method!=='POST'||!['/api/video/configure','/api/video/check'].includes(pathname))return json(res,404,{});
    if(worker.busy||connecting)return json(res,409,{error:'Дождитесь завершения текущего запроса'});
    if(pathname.endsWith('/check')){await connect();return json(res,200,status());}
    const chunks=[];let size=0;for await(const b of req){size+=b.length;if(size>16384)return json(res,413,{});chunks.push(b);}
    if(worker.busy||connecting)return json(res,409,{error:'Дождитесь завершения текущего запроса'});
-   const next=validate(JSON.parse(Buffer.concat(chunks).toString('utf8')),store.data.config);
+   const input=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+   if(shared&&input.botToken)throw Error('Используется основной бот; отдельный токен не нужен');
+   const next=validate(shared?{...input,botToken:env.VIDEO_MAIN_BOT_TOKEN}:input,store.data.config);
+   if(shared)next.botToken=store.data.config.botToken;
    if(next.botToken!==store.data.config.botToken&&store.data.jobs.some(j=>['queued','downloading','sending'].includes(j.status)))return json(res,409,{error:'Перед сменой бота дождитесь опустошения очереди'});
    if(next.botToken!==store.data.config.botToken){for(const job of store.data.jobs)await fs.promises.rm(path.join(store.dir,'files',job.id),{recursive:true,force:true});store.data.jobs=[];worker.bot=null;}
    store.data.config=next;store.save();prepare();

@@ -7,7 +7,7 @@ function createVideoProxy({authorize,url=process.env.VIDEO_SERVICE_URL||'http://
     const suffix=req.path==='/'?'':req.path;
     if(!(req.method==='GET'&&!suffix||req.method==='POST'&&['/configure','/check'].includes(suffix)))return res.sendStatus(404);
     if(!token)return res.status(503).json({error:'Сервис загрузки видео ещё не подключён'});
-    if(req.body?.botToken && req.body.botToken === process.env.TELEGRAM_BOT_TOKEN)return res.status(400).json({error:'Для загрузки видео нужен отдельный бот, не бот поддержки'});
+    if(req.body?.botToken && req.body.botToken === process.env.TELEGRAM_BOT_TOKEN)return res.status(400).json({error:'Основной бот подключается автоматически, вводить его токен здесь не нужно'});
     try{const r=await fetch(new URL('/api/video'+suffix,url),{method:req.method,redirect:'error',headers:{'x-admin-token':token,'Content-Type':'application/json'},...(req.method==='POST'?{body:JSON.stringify(req.body||{})}:{}),signal:AbortSignal.timeout(35000)});res.status(r.status).json(await r.json());}
     catch{res.status(502).json({error:'Сервис загрузки видео временно недоступен'});}
   };

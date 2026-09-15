@@ -5,9 +5,9 @@ const crypto = require('crypto');
 
 // Each module owns its inbox. Acknowledgements follow an atomic, flushed write.
 class WebhookInbox {
-  constructor({dir, secret, handle, ready = () => true}) {
+  constructor({dir, secret, handle, ready = () => true, partition}) {
     if (!/^[A-Za-z0-9_-]{32,256}$/.test(secret || '')) throw Error('Webhook secret must contain 32–256 safe characters');
-    this.dir = dir; this.secret = secret; this.handle = handle; this.ready = ready;
+    this.dir = dir; this.secret = secret; this.handle = handle; this.ready = ready; this.partition = partition;
     this.busy = false; this.lastError = ''; this.lastReceivedAt = null;
     fs.mkdirSync(dir, {recursive:true, mode:0o700});
     this.timer = setInterval(() => this.drain().catch(() => { this.lastError = 'Inbox storage unavailable'; }), 1000);
@@ -59,7 +59,7 @@ class WebhookInbox {
         if (item.done) { if (item.done < Date.now()-7*86400000) fs.unlinkSync(file); continue; }
         const update = item.update;
         const message = update.message || update.business_message || update.callback_query?.message;
-        const key = String(message?.chat?.id || update.business_connection?.id || update.deleted_business_messages?.chat?.id || 'other');
+        const key = this.partition ? String(this.partition(update)) : String(message?.chat?.id || update.business_connection?.id || update.deleted_business_messages?.chat?.id || 'other');
         if (blocked.has(key)) continue;
         if (item.next > Date.now()) { blocked.add(key); continue; }
         try {
