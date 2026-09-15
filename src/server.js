@@ -328,6 +328,7 @@ const upload = multer({
   }
 });
 
+app.all('/api/webhooks/telegram/support', (req,res) => telegram.receiveWebhook(req,res));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use('/api', (_req, res, next) => {
@@ -409,6 +410,7 @@ app.post('/api/admin/telegram-auth', (req, res) => {
   });
 });
 
+app.get('/api/admin/telegram-transport', (req,res) => { if(!isAdminToken(req.get('x-admin-token')))return res.sendStatus(401);res.json(telegram.webhookStatus()); });
 app.use('/api/admin/support-queue', require('./support-queue').createSupportQueue({database: db.db, service: telegram, settings: loadSettings, authorize: token => ({authenticated:isAdminToken(token), canManageSettings:!!(ADMIN_TOKEN && safeEqualString(token,ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings})}));
 
 app.get('/api/admin/deployment', require('./deployment').createDeploymentInfo({ authorize: token => ({ authenticated: isAdminToken(token), canManageSettings: !!(ADMIN_TOKEN && safeEqualString(token, ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings }) }));

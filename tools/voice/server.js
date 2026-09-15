@@ -6,10 +6,11 @@ function createServer(store,worker,token){
   return http.createServer(async(req,res)=>{
     res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');
     const send=(code,value)=>{res.writeHead(code);res.end(JSON.stringify(value));};
+    if(req.url==='/api/webhooks/telegram/voice')return worker.inbox?worker.inbox.receive(req,res):send(503,{error:'Webhook unavailable'});
     if(req.url==='/health')return send(200,{ok:true});
     const supplied=Buffer.from(String(req.headers['x-admin-token']||'')),expected=Buffer.from(token);
     if(!expected.length||expected.length!==supplied.length||!crypto.timingSafeEqual(expected,supplied))return send(401,{error:'Требуется авторизация'});
-    const status=()=>({...store.status(),busy:worker.busy,error:worker.error,vpn:vpn?.status()||{running:false}});
+    const status=()=>({...store.status(),busy:worker.busy,error:worker.error,transport:worker.inbox?.status()||{mode:'polling'},vpn:vpn?.status()||{running:false}});
     if(req.method==='GET'&&req.url==='/api/voice')return send(200,status());
     if(req.method!=='POST'||!['/api/voice/configure','/api/voice/check','/api/voice/check-vpn','/api/voice/preview'].includes(req.url))return send(404,{error:'Неизвестный запрос'});
     let ownsLock=false;
@@ -33,7 +34,7 @@ function createServer(store,worker,token){
         configuring=true;ownsLock=true;
         return send(200,await vpn.check(store.data.config));
       }
-      if(req.url.endsWith('/check')){if(!store.data.config.botToken)throw Error('Сначала сохраните токен бота');const bot=await worker.telegram('getMe',{});const hook=await worker.telegram('getWebhookInfo',{});return send(200,{username:bot.username,business:!!bot.can_connect_to_business,webhook:!!hook.url});}
+      if(req.url.endsWith('/check')){if(!store.data.config.botToken)throw Error('Сначала сохраните токен бота');const bot=await worker.telegram('getMe',{});const hook=await worker.telegram('getWebhookInfo',{});return send(200,{username:bot.username,business:!!bot.can_connect_to_business,webhook:!!hook.url,webhookOwned:!!hook.url&&hook.url===worker.webhookUrl});}
       if(configuring||previewing)throw Error('Настройки или проверка уже выполняются');
       configuring=true;ownsLock=true;worker.configuring=true;
       if(worker.busy && !(input.enabled===false && Object.keys(input).length===1))throw Error('Дождитесь завершения текущего сообщения');
@@ -44,7 +45,7 @@ function createServer(store,worker,token){
       if(c.enabled&&!previous.enabled){
         const bot=await worker.telegram('getMe',{}),hook=await worker.telegram('getWebhookInfo',{});
         if(!bot.can_connect_to_business)throw Error('Включите Business / Secretary Mode у бота в BotFather');
-        if(hook.url)throw Error('У бота задан webhook другого сервиса. Используйте отдельного бота без webhook.');
+        if(hook.url&&hook.url!==worker.webhookUrl)throw Error('У бота задан webhook другого сервиса. Используйте отдельного бота без webhook.');
         store.data.activatedAt=Math.floor(Date.now()/1000);
       }
       if(vpn&&(c.vpnEnabled!==previous.vpnEnabled||c.vlessUrl!==previous.vlessUrl)){
@@ -52,7 +53,7 @@ function createServer(store,worker,token){
         catch(e){if(previous.vpnEnabled)await vpn.ensure(previous).catch(()=>{});throw e;}
       }
       if(c.botToken!==previous.botToken){store.data.offset=0;store.data.connections={};store.data.jobs=[];}
-      store.data.config=c;store.save();worker.pollController?.abort();return send(200,status());
+      store.data.config=c;store.save();if(c.botToken!==previous.botToken)worker.setupInbox?.();worker.pollController?.abort();return send(200,status());
     }catch(e){return send(400,{error:String(e.message).slice(0,200)});}
     finally{if(ownsLock){configuring=false;worker.configuring=false;}}
   });
@@ -63,6 +64,6 @@ if(require.main===module){
   if(store.data.config.vpnEnabled)vpn.ensure(store.data.config).catch(()=>{});const server=createServer(store,worker,process.env.VOICE_SERVICE_TOKEN||'');
   if(!process.env.VOICE_SERVICE_TOKEN)throw Error('Нужен VOICE_SERVICE_TOKEN');
   server.listen(Number(process.env.VOICE_PORT||7500),'127.0.0.1');worker.run();
-  for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{worker.stopped=true;vpn.stop().catch(()=>{});store.data.config.enabled&&store.save();worker.pollController?.abort();server.close();setTimeout(()=>process.exit(0),1000).unref();});
+  for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{worker.stopped=true;worker.inbox?.stop();vpn.stop().catch(()=>{});store.data.config.enabled&&store.save();worker.pollController?.abort();server.close();setTimeout(()=>process.exit(0),1000).unref();});
 }
 module.exports={createServer};

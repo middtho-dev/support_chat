@@ -1381,7 +1381,7 @@ function renderMaintenance() {
       <div class="maintenance-summary">
         <div class="health-stat ${telegramClass}"><span>Бот</span><b>${telegramLabel}</b><small>${esc(tg?.botUsername ? `@${tg.botUsername}` : tg?.mode || '—')}</small></div>
         <div class="health-stat ${telegramBacklog ? 'warning' : 'ok'}"><span>Очередь</span><b>${telegramBacklog}</b><small>входящие ${Number(tgDelivery.pendingIncomingMessages || 0)} · оператору ${Number(tgDelivery.pendingMessages || 0)} · клиенту ${Number(tgDelivery.pendingCustomerReplies || 0)}</small></div>
-        <div class="health-stat ${Number(tg?.polling?.conflicts || 0) ? 'warning' : telegramHealthy ? 'ok' : ''}"><span>Polling</span><b>${pollingLabel}</b><small>конфликтов ${Number(tg?.polling?.conflicts || 0)}</small></div>
+        <div class="health-stat ${Number(tg?.polling?.conflicts || 0) ? 'warning' : telegramHealthy ? 'ok' : ''}"><span>${tg?.transport?.mode === "webhook" ? "Webhook" : "Polling"}</span><b>${pollingLabel}</b><small>${tg?.transport?.mode === "webhook" ? "входящих: " + Number(tg.transport.pending || 0) : "конфликтов: " + Number(tg?.polling?.conflicts || 0)}</small></div>
         <div class="health-stat ${Number(tgDelivery.mediaFailures || 0) ? 'warning' : 'ok'}"><span>Медиа</span><b>${Number(tgDelivery.mediaFailures || 0)}</b><small>ошибок загрузки</small></div>
         <div class="health-stat ${telegramHealthy && remindersEnabled && !tgReminders.pausedOutsideWorkHours ? 'ok' : ''}"><span>Напоминания</span><b>${remindersLabel}</b><small>${reminderStart}:00–${reminderEnd}:00 · ${esc(reminderTimezone)}</small></div>
       </div>
