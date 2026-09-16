@@ -13,9 +13,9 @@ test('public access defaults and bounded settings',()=>{
 });
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'video-test-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const store=new Store(dir,'a'.repeat(64));store.data.config={...defaults,enabled:true,botToken:'123:'+ 'b'.repeat(25)};return store;}
 test('guest replies use exactly one guest query response and never chat sendVideo',async t=>{
- const store=fixture(t),calls=[];const worker=new Worker(store,{call:async(...args)=>calls.push(args),download:async()=>({title:'Clip',size:12,duration:5}),publicUrl:'https://example.com'});
+ const store=fixture(t),calls=[];const worker=new Worker(store,{call:async(...args)=>{calls.push(args);return {inline_message_id:'inline-1'};},download:async()=>({title:'Clip',size:12,duration:5}),publicUrl:'https://example.com'});
  const update={update_id:1,guest_message:{guest_query_id:'q',guest_bot_caller_user:{id:7},chat:{id:8},message_id:4,text:'https://youtu.be/abcdefghijk'}};
- worker.accept(update);worker.accept(update);assert.equal(store.data.jobs.length,1);await worker.tick();assert.equal(calls.length,1);assert.equal(calls[0][0],'answerGuestQuery');assert.equal(calls[0][1].result.type,'video');assert.match(calls[0][1].result.video_url,/\/1\/[a-f0-9]{64}\.mp4$/);assert.equal(store.data.jobs[0].status,'done');
+ worker.accept(update);worker.accept(update);assert.equal(store.data.jobs.length,1);await worker.tick();assert.equal(calls.filter(c=>c[0]==='answerGuestQuery').length,1);assert.equal(calls[0][1].result.type,'article');const final=calls.find(c=>c[0]==='editMessageMedia');assert.equal(final[1].inline_message_id,'inline-1');assert.match(final[1].media.media,/\/1\/[a-f0-9]{64}\.mp4$/);assert.ok(calls.every(c=>!['sendVideo','deleteMessage'].includes(c[0])));assert.equal(store.data.jobs[0].status,'done');
 });
 test('ambiguous delivery is not repeated on restart',async t=>{
  const store=fixture(t),worker=new Worker(store,{call:async()=>{throw Error('network');},download:async()=>({title:'Clip',size:12,duration:5}),publicUrl:'https://example.com'});

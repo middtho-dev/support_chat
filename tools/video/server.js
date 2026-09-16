@@ -9,8 +9,8 @@ function createService(env=process.env){
  if(!/^[A-Za-z0-9_-]{32,256}$/.test(env.VIDEO_WEBHOOK_SECRET||''))throw Error('Configure VIDEO_WEBHOOK_SECRET');
  let inbox,registered='',error='',connecting=false,secret='';
  const call=async(method,data)=>{
-  let response;try{response=await fetch('https://api.telegram.org/bot'+(env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken)+'/'+method,{method:'POST',redirect:'error',...(data instanceof FormData?{body:data}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:AbortSignal.timeout(['sendVideo','answerGuestQuery'].includes(method)?90000:10000)});}catch{throw Error('Telegram не подтвердил ответ. Автоматический повтор отключён.');}
-  const body=await response.json();if(!body.ok){const e=Error('Telegram: '+String(body.description||response.status).slice(0,250));e.definite=true;throw e;}return body.result;
+  let response;try{response=await fetch('https://api.telegram.org/bot'+(env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken)+'/'+method,{method:'POST',redirect:'error',...(data instanceof FormData?{body:data}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:AbortSignal.timeout(['sendVideo','answerGuestQuery','editMessageMedia'].includes(method)?90000:10000)});}catch{throw Error('Telegram не подтвердил ответ. Автоматический повтор отключён.');}
+  const body=await response.json();if(!body.ok){const e=Error('Telegram: '+String(body.description||response.status).slice(0,250));e.definite=true;e.code=body.error_code||response.status;e.retryAfter=Number(body.parameters?.retry_after)||0;e.notModified=/message is not modified/i.test(body.description||'');throw e;}return body.result;
  };
  const shared=!!env.VIDEO_MAIN_BOT_TOKEN;
  const worker=new Worker(store,{call,download,publicUrl});
@@ -27,7 +27,7 @@ function createService(env=process.env){
   try{worker.bot=await call('getMe',{});if(store.data.config.enabled){if(!shared)await registerWebhook(call,publicUrl+'/api/webhooks/telegram/video',secret,['guest_message','message']);registered=env.VIDEO_MAIN_BOT_TOKEN||store.data.config.botToken;}error='';}
   catch(e){error=e.message;throw e;}finally{connecting=false;}
  }
- function status(){const {botToken,...config}=store.data.config;return {config,hasBotToken:!!(env.VIDEO_MAIN_BOT_TOKEN||botToken),sharedBot:shared,bot:worker.bot?{username:worker.bot.username,guestMode:!!worker.bot.supports_guest_queries}:null,error,busy:worker.busy,transport:inbox?{...inbox.status(),mode:shared?'shared-webhook':'webhook'}:null,jobs:store.data.jobs.slice(-30).reverse().map(({id,user,source,title,status,error,created,finished,size})=>({id,user,source,title,status,error,created,finished,size}))};}
+ function status(){const {botToken,...config}=store.data.config;return {config,hasBotToken:!!(env.VIDEO_MAIN_BOT_TOKEN||botToken),sharedBot:shared,bot:worker.bot?{username:worker.bot.username,guestMode:!!worker.bot.supports_guest_queries}:null,error,busy:worker.busy,transport:inbox?{...inbox.status(),mode:shared?'shared-webhook':'webhook'}:null,jobs:store.data.jobs.slice(-30).reverse().map(({id,user,source,title,status,error,created,finished,size,cleanupWarning})=>({id,user,source,title,status,error,created,finished,size,cleanupWarning}))};}
  const json=(res,code,data)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
  const server=http.createServer(async(req,res)=>{
   try{

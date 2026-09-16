@@ -1,5 +1,5 @@
 'use strict';
-const defaults={enabled:false,botToken:'',allowEveryone:true,allowedUsers:'',youtube:true,instagram:true,maxMB:45,maxSeconds:180,height:720,perHour:10,retentionMinutes:30};
+const defaults={enabled:false,deleteInvocation:true,botToken:'',allowEveryone:true,allowedUsers:'',youtube:true,instagram:true,maxMB:45,maxSeconds:180,height:720,perHour:10,retentionMinutes:30};
 function validate(input,previous=defaults){
  const c={...previous};
  for(const key of Object.keys(defaults))if(Object.hasOwn(input,key)){
