@@ -166,7 +166,7 @@ API-запрос; результат показывается только в п
 
 The **Отправка и хранение** section offers three independent preferences:
 `earlyText` sends the first transcript before polishing, `smoothText` requests
-streamed transcription and updates the preview at most once per 1.5 seconds,
+streamed transcription and updates the preview at most once per 1.2 seconds,
 and `richMessages` uses `sendRichMessage` with the existing Business connection.
 The latter two apply to early delivery. Existing installations keep early
 delivery off until explicitly enabled.
@@ -182,3 +182,6 @@ This mode therefore uses ordinary message edits from the connected account, not
 native animated Rich drafts. Actual Rich availability depends on the account's
 Telegram permissions. Short audio may arrive as a single completed text chunk;
 no artificial delay is introduced just to animate it.
+
+
+`richCompact` (по умолчанию включён) использует компактный блок Rich для текста; его конкретный размер определяет Telegram. Выключение возвращает стандартный абзац. Промежуточные обновления объединяются примерно раз в 1,2 секунды в отдельной очереди: ожидание Telegram больше не останавливает приём потока распознавания. После завершения отправляется полный результат, без искусственного посимвольного замедления. Это редактирование сообщения от Business-аккаунта; нативная анимация `sendRichMessageDraft` требует личного чата с ботом и не поддерживает `business_connection_id`.
