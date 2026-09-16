@@ -74,9 +74,9 @@ input,textarea{
   flex-direction:column;
   width:min(100%,960px);
   height:var(--app-height);
-  max-height:100dvh;
   min-height:320px;
   overflow:hidden;
+  overflow:clip;
   transform:translate3d(-50%,var(--app-top),0);
   background:var(--chat);
   box-shadow:0 0 0 1px rgba(255,255,255,.035),0 24px 80px rgba(0,0,0,.35);
@@ -222,6 +222,8 @@ input,textarea{
 
 /* Chat shell */
 #cs{
+  /* Hidden overflow is still programmatically scrollable on focus in Safari. */
+  overflow:clip;
   position:relative;
   flex-direction:column;
   background:var(--chat);
@@ -303,6 +305,7 @@ input,textarea{
   display:flex;
   flex-direction:column;
   overflow:hidden;
+  overflow:clip;
 }
 
 .chat-stage::before{
@@ -828,7 +831,8 @@ input,textarea{
 
 .mov{
   position:fixed;
-  inset:0;
+  inset:var(--app-top) 0 auto;
+  height:var(--app-height);
   z-index:1000;
   padding:20px;
   background:rgba(0,0,0,.66);
@@ -841,7 +845,7 @@ input,textarea{
 .mbox{
   width:100%;
   max-width:330px;
-  max-height:calc(100dvh - 40px);
+  max-height:calc(var(--app-height) - 40px);
   overflow:auto;
   overflow-wrap:anywhere;
   padding:22px;

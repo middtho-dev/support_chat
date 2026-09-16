@@ -12,6 +12,41 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
    const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
    await page.route('https://telegram.org/**',r=>r.abort());
    await page.goto(url);await page.locator('#ni').fill('Проверка интерфейса');
+   async function keyboardCycle(mode){
+    await page.setViewportSize({width:390,height:844});
+    const selector=mode==='login'?'#ni':'#ti';
+    await page.locator(selector).focus();
+    await page.evaluate(()=>{window.__innerHeightDescriptor=Object.getOwnPropertyDescriptor(window,'innerHeight');});
+    try{
+     for(const [height,top,inner] of [[400,0,400],[400,280,400],[400,280,844],[350,420,350],[300,500,300],[780,0,780]]){
+      await page.evaluate(({height,top,inner})=>{
+       Object.defineProperty(window,'innerHeight',{configurable:true,value:inner});
+       for(const [key,value] of Object.entries({height,offsetTop:top,scale:1}))Object.defineProperty(visualViewport,key,{configurable:true,value});
+       visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'));
+      },{height,top,inner});
+      await page.waitForFunction(({height,top})=>parseFloat(document.documentElement.style.getPropertyValue('--app-height'))===height&&parseFloat(document.documentElement.style.getPropertyValue('--app-top'))===top,{height,top});
+      const state=await page.evaluate(mode=>{
+       const r=id=>document.getElementById(id).getBoundingClientRect().toJSON();
+       return{scrolls:['app','cs','ls'].map(id=>({id,top:document.getElementById(id).scrollTop,left:document.getElementById(id).scrollLeft})),app:r('app'),control:r(mode==='login'?'sb':'ti'),header:mode==='chat'?document.querySelector('.hdr').getBoundingClientRect().toJSON():null};
+      },mode);
+      assert.ok(Math.abs(state.app.height-height)<2,`${engine} ${mode}: expected height ${height}, got ${state.app.height}; top ${top}, inner ${inner}`);
+      assert.ok(Math.abs(state.app.top-top)<2,`${engine} ${mode}: viewport offset lost`);
+      assert.ok(state.control.top>=top&&state.control.bottom<=top+height+1,`${engine} ${mode}: control outside visual viewport`);
+      assert.ok(state.scrolls.filter(s=>s.id!=='ls').every(s=>s.top===0&&s.left===0),'A shell ancestor scrolled on focus');
+      assert.ok(state.control.left>=state.app.left&&state.control.right<=state.app.right,'Control shifted horizontally');
+      if(state.header)assert.ok(state.header.top>=top-1&&state.header.bottom<state.control.top,JSON.stringify({engine,mode,top,height,state}));
+      if(height===350)await page.screenshot({path:path.join(output,`${engine}-${mode}-panned-keyboard.png`),clip:{x:0,y:top,width:390,height}});
+     }
+     // Pinch zoom must not shrink or reposition the application a second time.
+     const before=await page.locator('#app').boundingBox();
+     await page.evaluate(()=>{Object.defineProperty(visualViewport,'scale',{configurable:true,value:2});Object.defineProperty(visualViewport,'height',{configurable:true,value:150});visualViewport.dispatchEvent(new Event('resize'));});
+     await page.waitForTimeout(50);assert.deepEqual(await page.locator('#app').boundingBox(),before);
+    }finally{
+     await page.evaluate(()=>{Object.defineProperty(window,'innerHeight',window.__innerHeightDescriptor);for(const key of ['height','offsetTop','scale'])delete visualViewport[key];visualViewport.dispatchEvent(new Event('resize'));});
+     await page.locator(selector).blur();await page.waitForTimeout(400);
+    }
+   }
+   await keyboardCycle('login');
    // Login remains reachable even with a narrow software-keyboard viewport.
    await page.setViewportSize({width:360,height:300});await page.locator('#sb').scrollIntoViewIfNeeded();await page.locator('#sb').click();
    await page.locator('#cs.on').waitFor();
@@ -24,6 +59,7 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
    await page.locator('#fi').setInputFiles({name:'check.txt',mimeType:'text/plain',buffer:Buffer.from('local fixture')});
    assert.ok(await page.locator('#fp').isVisible());await page.locator('#fp button').click();
    const ticket=await page.evaluate(()=>{socket.disconnect();const id=S.tid;S.tid=null;return id;});
+   await keyboardCycle('chat');
    for(const [width,height] of [[2513,457],[1920,1080],[1366,768],[1089,1272],[390,844],[360,640],[390,340],[844,320]]){
     await page.setViewportSize({width,height});
     await page.evaluate(()=>{renderMsgs([{id:'a',sender:'support',content:'Добро пожаловать в службу поддержки KV9RU!',type:'text',created_at:new Date().toISOString()}]);});
@@ -61,7 +97,7 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
    await page.evaluate(id=>{S.tid=id;},ticket);
    await page.locator('#hcl').click();await page.locator('.mbc').click();assert.ok(await page.locator('#ia').isVisible());
    await page.locator('#hcl').click();await page.locator('.mbo').click();await page.locator('#cbar.on').waitFor();
-   assert.deepEqual(errors,[]);console.log(engine+': 8 sizes, keyboard-sized login/composer, long history, stale viewport passed');
+   assert.deepEqual(errors,[]);console.log(engine+': 8 sizes, keyboard resize/pan/restore, login/composer, dialogs, long history and zoom passed');
   }finally{await browser.close();}
  }
 })().catch(e=>{console.error(e);process.exitCode=1;});
