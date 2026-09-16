@@ -8,7 +8,7 @@ class Store{
   this.data=fs.existsSync(this.file)?JSON.parse(fs.readFileSync(this.file,'utf8')):{config:{...defaults},jobs:[]};
   if(this.data.config.botToken){const v=this.data.config.botToken,d=crypto.createDecipheriv('aes-256-gcm',this.key,Buffer.from(v.iv,'hex'));d.setAuthTag(Buffer.from(v.tag,'hex'));this.data.config.botToken=Buffer.concat([d.update(Buffer.from(v.data,'base64')),d.final()]).toString('utf8');}
   this.data.config={...defaults,...this.data.config};
-  for(const j of this.data.jobs){if(j.status==='downloading')j.status='queued';if(j.status==='sending'){j.status='uncertain';j.error='Отправка могла завершиться перед перезапуском; повтор не выполняется.';}}
+  for(const j of this.data.jobs){if(j.status==='downloading')j.status='queued';if(j.status==='sending'||j.announcing){j.status='uncertain';j.error='Отправка могла завершиться перед перезапуском; повтор не выполняется.';}}
   this.save();
  }
  save(){

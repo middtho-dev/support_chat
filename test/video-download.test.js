@@ -20,3 +20,10 @@ test('invalid media, playlists and live streams are not sent',async t=>{
  for(const metadata of [{_type:'playlist'},{_type:'video',is_live:true}]){const f=await fixture(t,metadata,10);await assert.rejects(download(job,config,f.dir,{execute:f.execute}),/одиночный ролик/);assert.equal(f.calls.length,1);}
  const f=await fixture(t,{_type:'video'},20,[{codec_type:'audio'}]);await assert.rejects(download(job,config,f.dir,{execute:f.execute}),/проверить видеофайл/);
 });
+
+test('download emits actual reported percentages and processing stages',async t=>{
+ const f=await fixture(t,{title:'Clip'},5),events=[];
+ const execute=async(args,timeout,binary,onLine)=>{if(args.includes('--progress-template')){onLine('KV9PROGRESS: 23.4%');onLine('KV9PROGRESS: NA');onLine('KV9PROGRESS:100.0%');}return f.execute(args,timeout,binary);};
+ await download(job,config,f.dir,{execute,onProgress:text=>events.push(text)});
+ assert.ok(events.some(text=>text.endsWith('23%')));assert.ok(events.some(text=>text.endsWith('100%')));assert.ok(!events.some(text=>text.includes('NaN')));assert.ok(events.length>=6);
+});
