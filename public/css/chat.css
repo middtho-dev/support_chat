@@ -74,6 +74,7 @@ input,textarea{
   flex-direction:column;
   width:min(100%,960px);
   height:var(--app-height);
+  max-height:100dvh;
   min-height:320px;
   overflow:hidden;
   transform:translate3d(-50%,var(--app-top),0);
@@ -338,7 +339,7 @@ input,textarea{
   padding:14px 22px 12px;
   display:flex;
   flex-direction:column;
-  justify-content:flex-end;
+  justify-content:flex-start;
   gap:2px;
 }
 
