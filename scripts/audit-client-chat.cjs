@@ -24,7 +24,7 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
    await page.locator('#fi').setInputFiles({name:'check.txt',mimeType:'text/plain',buffer:Buffer.from('local fixture')});
    assert.ok(await page.locator('#fp').isVisible());await page.locator('#fp button').click();
    const ticket=await page.evaluate(()=>{socket.disconnect();const id=S.tid;S.tid=null;return id;});
-   for(const [width,height] of [[1920,1080],[1366,768],[1089,1272],[390,844],[360,640],[390,340],[844,320]]){
+   for(const [width,height] of [[2513,457],[1920,1080],[1366,768],[1089,1272],[390,844],[360,640],[390,340],[844,320]]){
     await page.setViewportSize({width,height});
     await page.evaluate(()=>{renderMsgs([{id:'a',sender:'support',content:'Добро пожаловать в службу поддержки KV9RU!',type:'text',created_at:new Date().toISOString()}]);});
     await page.waitForTimeout(200);
@@ -37,6 +37,17 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
     assert.ok(await page.locator('#ti').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight));
     await page.screenshot({path:path.join(output,`${engine}-${width}x${height}.png`)});
     await page.locator('#ti').fill('');
+    await page.locator('#hcl').click();
+    await page.locator('.mbox').evaluate(el=>Promise.all(el.getAnimations().map(a=>a.finished)));
+    const box=await page.locator('.mbox').boundingBox();
+    assert.ok(box.width<=331&&box.width<=width-39,`${engine} ${width}: dialog too wide`);
+    assert.ok(Math.abs(box.x+box.width/2-width/2)<2&&Math.abs(box.y+box.height/2-height/2)<2,'Dialog not centered');
+    assert.ok(box.y>=19&&box.y+box.height<=height-19,'Dialog clipped');
+    for(const selector of ['.mbc','.mbo'])assert.ok(await page.locator(selector).evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),'Dialog button covered');
+    await page.screenshot({path:path.join(output,`${engine}-dialog-${width}x${height}.png`)});
+    await page.keyboard.press('Tab');assert.ok(await page.locator('.mbo').evaluate(el=>el===document.activeElement));
+    await page.keyboard.press('Escape');assert.equal(await page.locator('.mov').count(),0);
+    assert.ok(await page.locator('#hcl').evaluate(el=>el===document.activeElement),'Focus not restored');
    }
    await page.setViewportSize({width:1366,height:768});
    await page.evaluate(()=>{renderMsgs(Array.from({length:80},(_,i)=>({id:String(i),sender:'support',content:'Сообщение '+i,type:'text',created_at:new Date().toISOString()})));scrollBot(false);});
@@ -50,7 +61,7 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
    await page.evaluate(id=>{S.tid=id;},ticket);
    await page.locator('#hcl').click();await page.locator('.mbc').click();assert.ok(await page.locator('#ia').isVisible());
    await page.locator('#hcl').click();await page.locator('.mbo').click();await page.locator('#cbar.on').waitFor();
-   assert.deepEqual(errors,[]);console.log(engine+': 7 sizes, keyboard-sized login/composer, long history, stale viewport passed');
+   assert.deepEqual(errors,[]);console.log(engine+': 8 sizes, keyboard-sized login/composer, long history, stale viewport passed');
   }finally{await browser.close();}
  }
 })().catch(e=>{console.error(e);process.exitCode=1;});

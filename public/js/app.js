@@ -231,6 +231,8 @@ function showChat(){ni.blur();$('ls').classList.remove('on');$('cs').classList.a
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
   if(S.closed)return;
+  // Safari does not focus buttons on pointer clicks; restore to the opener.
+  hcl.focus({preventScroll:true});
   dlg('Закрыть обращение?','После закрытия можно начать новый чат.',async()=>{
     try{
       const r=await fetch(`/api/tickets/${S.tid}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token})});

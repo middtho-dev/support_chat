@@ -841,6 +841,9 @@ input,textarea{
 .mbox{
   width:100%;
   max-width:330px;
+  max-height:calc(100dvh - 40px);
+  overflow:auto;
+  overflow-wrap:anywhere;
   padding:22px;
   border-radius:15px;
   background:var(--header);
@@ -991,7 +994,7 @@ input,textarea{
 /* Shared visual language and accessible controls. */
 button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 #ls{overflow:auto}.lcard{border-radius:18px}.hdr img{border-radius:12px}.lcard .linp{font-size:16px}
-.mbox{max-width:calc(100vw - 32px)}.mbtns button{min-height:44px}.hbtn,.fprm{min-width:40px;min-height:40px}
+.mbtns button{min-height:44px}.hbtn,.fprm{min-width:40px;min-height:40px}
 .lb img{max-height:90dvh;object-fit:contain}.mfile{overflow-wrap:anywhere}
 @media(min-width:1000px){#app{border-inline:1px solid var(--line)}}
 @media(max-width:600px){#app{min-height:0}.lcard{max-height:100%;overflow:auto}.icn,.sndbtn{min-width:42px}.mbox{padding:24px}}
