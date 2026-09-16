@@ -1,8 +1,8 @@
 'use strict';
 const {ids}=require('./config');
 const {shouldDelete}=require('./formatting');
-const parts=text=>{const chars=Array.from(text),out=[];for(let i=0;i<chars.length;i+=1800)out.push(chars.slice(i,i+1800).join(''));return out;};
-const rich=(text,compact=true)=>{const tag=compact?'footer':'p';return {html:'<'+tag+'>'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+'</'+tag+'>'};};
+const parts=(text,size=1800)=>{const chars=Array.from(text),out=[];for(let i=0;i<chars.length;i+=size)out.push(chars.slice(i,i+size).join(''));return out;};
+const rich=require('./rich').render;
 
 async function processProgressive(worker,job,c){
   const store=worker.store;job.progressive=true;job.outputIds ||= [];job.outputTexts ||= [];
@@ -19,7 +19,7 @@ async function processProgressive(worker,job,c){
     const existing=job.outputIds[index];
     const useRich=c.richMessages&&job.richSupported!==false;
     const method=existing?'editMessageText':useRich?'sendRichMessage':'sendMessage';
-    const body={business_connection_id:job.connectionId,chat_id:job.chatId,...(existing?{message_id:existing}:{disable_notification:c.silent}),...(useRich?{rich_message:rich(text,c.richCompact!==false)}:{text,link_preview_options:{is_disabled:true}})};
+    const body={business_connection_id:job.connectionId,chat_id:job.chatId,...(existing?{message_id:existing}:{disable_notification:c.silent,protect_content:!!c.richProtect}),...(useRich?{rich_message:rich(text,c)}:{text,link_preview_options:{is_disabled:true}})};
     if(!existing){job.progressSending=true;store.save();}
     let result;
     try{result=await worker.telegram(method,body);}
@@ -45,12 +45,12 @@ async function processProgressive(worker,job,c){
     if(inflight||previewClosed||previewError||!latest||!active())return;
     const wait=nextPreview-Date.now();
     if(wait>0){if(!previewTimer)previewTimer=setTimeout(()=>{previewTimer=null;pump();},wait);return;}
-    const text=latest;latest='';nextPreview=Date.now()+1200;
+    const text=latest;latest='';nextPreview=Date.now()+(c.richUpdateMs||1200);
     inflight=write(text).catch(e=>{previewError=e;}).finally(()=>{inflight=null;pump();});
   };
   const preview=text=>{
-    if(!c.smoothText||!active()||Array.from(text).length<8)return;
-    latest=parts((c.prefix?c.prefix+'\n':'')+text)[0]+' …';pump();
+    if(!c.earlyText||!c.smoothText||!active()||Array.from(text).length<8)return;
+    latest=parts((c.prefix?c.prefix+'\n':'')+text,c.richChunkChars||1800)[0]+' …';pump();
   };
   const stopPreview=async()=>{previewClosed=true;clearTimeout(previewTimer);await inflight;};
   try{
@@ -60,9 +60,9 @@ async function processProgressive(worker,job,c){
       job.rawText=await worker.timed(job,'audio',()=>worker.transcribe(job,c,preview));store.save();
     }
     await stopPreview();guard();if(previewError)throw previewError;
-    const rawParts=parts((c.prefix?c.prefix+'\n':'')+job.rawText);
+    const rawParts=parts((c.prefix?c.prefix+'\n':'')+job.rawText,c.richChunkChars||1800);
     // Persist the first portion immediately. Longer output is finalized below.
-    if(!job.formatted)await write(rawParts[0]+(rawParts.length>1?' …':''));
+    if(c.earlyText&&!job.formatted)await write(rawParts[0]+(rawParts.length>1?' …':''));
     if(!job.formatted){
       job.text=job.rawText;
       if(c.polish||c.emoji){
@@ -72,7 +72,7 @@ async function processProgressive(worker,job,c){
       guard();job.formatted=true;store.save();
     }
     conn=await connection();
-    const final=parts((c.prefix?c.prefix+'\n':'')+job.text);
+    const final=parts((c.prefix?c.prefix+'\n':'')+job.text,c.richChunkChars||1800);
     for(let i=0;i<final.length;i++)await worker.timed(job,'delivery',()=>write(final[i],i));
     guard();
     if(!job.formatWarning&&shouldDelete(store.data.config,job,conn)&&conn.rights?.can_delete_all_messages){

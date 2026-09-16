@@ -49,7 +49,7 @@ test('preview uses unsaved formatting only, requires authentication and never ch
  assert.equal(r.status,200);assert.equal((await r.json()).text,'Кофе ☕');assert.equal(seen.formatModel,'gpt-5.4-nano');
  assert.equal(seen.openaiKey,before.openaiKey);assert.equal(seen.deleteIncomingVoice,before.deleteIncomingVoice);assert.deepEqual(store.data.config,before);
 });
-function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'voice-test-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const store=new Store(dir,'a'.repeat(64));store.data.config={...defaults,enabled:true,ownerIds:'777',botToken:'777:example-secret-token-long-enough',openaiKey:'example-openai-secret',deleteOriginal:true,deleteIncomingVoice:true};store.data.connections.business=structuredClone(conn);return {store,dir};}
+function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'voice-test-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const store=new Store(dir,'a'.repeat(64));store.data.config={...defaults,richMessages:false,enabled:true,ownerIds:'777',botToken:'777:example-secret-token-long-enough',openaiKey:'example-openai-secret',deleteOriginal:true,deleteIncomingVoice:true};store.data.connections.business=structuredClone(conn);return {store,dir};}
 test('filters protect owners, directions, media, duration and chat exclusions',()=>{
  const c={...defaults,enabled:true,ownerIds:'777'};
  assert.ok(selectMessage(c,conn,msg));assert.equal(selectMessage({...c,ownerIds:'999'},conn,msg),null);assert.equal(selectMessage({...c,direction:'outgoing'},conn,msg),null);

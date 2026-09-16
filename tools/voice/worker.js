@@ -89,7 +89,7 @@ class Worker {
     if(!selectMessage(c,conn,{chat:{id:job.chatId,type:'private'},from:{id:job.senderId},business_connection_id:job.connectionId,[job.kind]:{file_id:job.fileId,duration:job.seconds}})){
       job.status='cancelled';job.error='Аккаунт, права или фильтры изменены';this.store.save();return;
     }
-    if((c.earlyText||job.progressive)&&!['ready','cleanup'].includes(job.status))return require('./progressive').processProgressive(this,job,c);
+    if((c.earlyText||c.richMessages||job.progressive)&&!['ready','cleanup'].includes(job.status))return require('./progressive').processProgressive(this,job,c);
     try{
       if(job.status==='pending'){
         job.startedAt ||= Date.now();job.queueMs ||= job.startedAt-job.created;job.stage='audio';
