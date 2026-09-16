@@ -716,9 +716,13 @@ function hideSupportTyping(){
 /* ── NOTIFICATIONS ── */
 let _audioCtx=null;
 function _getAudioCtx(){
-  if(!_audioCtx)_audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  if(_audioCtx.state==='suspended')_audioCtx.resume().catch(()=>{});
-  return _audioCtx;
+  try{
+    const AudioContext=window.AudioContext||window.webkitAudioContext;
+    if(!AudioContext)return null;
+    if(!_audioCtx)_audioCtx=new AudioContext();
+    if(_audioCtx.state==='suspended')_audioCtx.resume().catch(()=>{});
+    return _audioCtx;
+  }catch{return null;}
 }
 // Unlock AudioContext on first user interaction (required on mobile)
 ['click','touchstart'].forEach(ev=>document.addEventListener(ev,()=>_getAudioCtx(),{once:true,passive:true}));
@@ -726,6 +730,7 @@ function _getAudioCtx(){
 function playNotifSound(){
   try{
     const ctx=_getAudioCtx();
+    if(!ctx)return;
     const osc=ctx.createOscillator();const gain=ctx.createGain();
     osc.connect(gain);gain.connect(ctx.destination);
     osc.frequency.value=880;osc.type='sine';
