@@ -52,3 +52,13 @@
 - Finish each task with the local checkout on a clean, current `main`.
 - Report the merged PR URL, final `main` SHA, validation results, and any
   infrastructure-only CI issue.
+
+## Client chat layout
+
+For changes to `public/index.html`, `public/css/chat.css`, or `public/js/app.js`,
+run `scripts/audit-client-chat.cjs` against an isolated local fixture without
+Telegram credentials, using Chromium and WebKit when available. Inspect desktop
+and phone screenshots. Verify the composer stays visible, short history has no
+screen-sized gap above it, keyboard-sized viewports retain usable controls, and
+resizing messages does not pull readers away from older history. Report browser
+or physical-device coverage limitations. Do not reset sessions to refresh CSS.

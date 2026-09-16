@@ -202,8 +202,8 @@ function syncViewport(){
   const app=$('app'),viewport=window.visualViewport;
   // Pinch zoom must magnify the page rather than shrink its layout again.
   if(viewport && viewport.scale > 1.01)return;
-  const height=Math.round(viewport?.height||window.innerHeight);
-  const top=Math.round(viewport?.offsetTop||0);
+  const top=Math.max(0,Math.round(viewport?.offsetTop||0));
+  const height=Math.max(0,Math.floor(Math.min(viewport?.height||window.innerHeight,window.innerHeight-top)));
   app.style.setProperty('--app-height',`${height}px`);
   app.style.setProperty('--app-top',`${top}px`);
   app.classList.toggle('compact-viewport', height < 540);
@@ -558,7 +558,7 @@ function scrollBot(smooth=true){
 
 // Re-pin whenever content height grows (images loading, new messages, etc.)
 new ResizeObserver(()=>{
-  mwrap.scrollTo({top:mwrap.scrollHeight,behavior:'auto'});
+  if(_pinToBottom)scrollBot(false);
 }).observe(ml);
 
 function updSDB(){
@@ -716,9 +716,13 @@ function hideSupportTyping(){
 /* ── NOTIFICATIONS ── */
 let _audioCtx=null;
 function _getAudioCtx(){
-  if(!_audioCtx)_audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  if(_audioCtx.state==='suspended')_audioCtx.resume().catch(()=>{});
-  return _audioCtx;
+  try{
+    const AudioContext=window.AudioContext||window.webkitAudioContext;
+    if(!AudioContext)return null;
+    if(!_audioCtx)_audioCtx=new AudioContext();
+    if(_audioCtx.state==='suspended')_audioCtx.resume().catch(()=>{});
+    return _audioCtx;
+  }catch{return null;}
 }
 // Unlock AudioContext on first user interaction (required on mobile)
 ['click','touchstart'].forEach(ev=>document.addEventListener(ev,()=>_getAudioCtx(),{once:true,passive:true}));
@@ -726,6 +730,7 @@ function _getAudioCtx(){
 function playNotifSound(){
   try{
     const ctx=_getAudioCtx();
+    if(!ctx)return;
     const osc=ctx.createOscillator();const gain=ctx.createGain();
     osc.connect(gain);gain.connect(ctx.destination);
     osc.frequency.value=880;osc.type='sine';
