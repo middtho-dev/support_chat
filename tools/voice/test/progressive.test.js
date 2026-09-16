@@ -53,8 +53,8 @@ test('SSE handles byte-split Unicode and requires a completion event',async()=>{
  await assert.rejects(readTranscript(new Response('data: {"type":"transcript.text.delta","delta":"partial"}\n\n',{headers:{'content-type':'text/event-stream'}}),async()=>{}),/прерван/);
 });
 
-test('compact rich typography escapes content and can be disabled',()=>{
- const {rich}=require('../progressive');assert.equal(rich('<hello> & world').html,'<footer>&lt;hello&gt; &amp; world</footer>');assert.equal(rich('text',false).html,'<p>text</p>');
+test('rich typography is readable by default and escapes content',()=>{
+ const {rich}=require('../progressive');assert.equal(rich('<hello> & world').html,'<p>&lt;hello&gt; &amp; world</p>');assert.equal(rich('text',{richBody:'footer'}).html,'<footer>text</footer>');
 });
 test('slow Telegram preview does not block receiving the transcript or create duplicates',async t=>{
  const f=fixture(t),original=f.worker.adapters.telegram;let release,transcribed=false;
@@ -62,11 +62,16 @@ test('slow Telegram preview does not block receiving the transcript or create du
  f.worker.adapters.telegram=async(method,body)=>{if(method==='sendRichMessage')await blocked;return original(method,body);};
  f.worker.adapters.transcribe=async(job,c,onText)=>{await onText('Первая порция');await onText('Первая порция и продолжение');transcribed=true;return 'Полная расшифровка';};
  const running=f.worker.process(f.job);await new Promise(r=>setImmediate(r));assert.equal(transcribed,true);assert.equal(f.job.rawText,'Полная расшифровка');release();await running;
- assert.equal(f.job.status,'done');assert.equal(f.calls.filter(c=>c.method==='sendRichMessage').length,1);assert.ok(f.calls.every(c=>!c.method.includes('Draft')));assert.match(f.calls.find(c=>c.method==='sendRichMessage').body.rich_message.html,/^<footer>/);
+ assert.equal(f.job.status,'done');assert.equal(f.calls.filter(c=>c.method==='sendRichMessage').length,1);assert.ok(f.calls.every(c=>!c.method.includes('Draft')));assert.match(f.calls.find(c=>c.method==='sendRichMessage').body.rich_message.html,/^<p>/);
 });
 test('preview flood limit preserves completed transcription for retry',async t=>{
  const f=fixture(t),original=f.worker.adapters.telegram;let transcriptions=0,sends=0;
  f.worker.adapters.telegram=async(method,body)=>{if(method==='sendRichMessage'&&++sends===1)throw Object.assign(Error('flood'),{code:429,retryAfter:3});return original(method,body);};
  f.worker.adapters.transcribe=async(job,c,onText)=>{transcriptions++;await onText('Начало расшифровки');return 'Полная расшифровка';};
  await f.worker.process(f.job);assert.equal(f.job.status,'pending');assert.equal(f.job.rawText,'Полная расшифровка');await f.worker.process(f.job);assert.equal(transcriptions,1);assert.equal(f.job.status,'done');
+});
+
+test('Rich formatting is independent of early transcription delivery',async t=>{
+ const f=fixture(t);f.store.data.config.earlyText=false;f.store.data.config.richBold=true;await f.worker.process(f.job);
+ assert.equal(f.job.status,'done');assert.equal(f.calls.filter(c=>c.method==='sendRichMessage').length,1);assert.ok(f.calls.findIndex(c=>c.method==='polish')<f.calls.findIndex(c=>c.method==='sendRichMessage'));assert.match(f.calls.find(c=>c.method==='sendRichMessage').body.rich_message.html,/<b>Красивый текст<\/b>/);
 });

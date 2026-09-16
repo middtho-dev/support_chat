@@ -12,11 +12,22 @@ function createServer(store,worker,token){
     if(!expected.length||expected.length!==supplied.length||!crypto.timingSafeEqual(expected,supplied))return send(401,{error:'Требуется авторизация'});
     const status=()=>({...store.status(),busy:worker.busy,error:worker.error,transport:worker.inbox?.status()||{mode:'polling'},vpn:vpn?.status()||{running:false}});
     if(req.method==='GET'&&req.url==='/api/voice')return send(200,status());
-    if(req.method!=='POST'||!['/api/voice/configure','/api/voice/check','/api/voice/check-vpn','/api/voice/preview'].includes(req.url))return send(404,{error:'Неизвестный запрос'});
+    if(req.method!=='POST'||!['/api/voice/configure','/api/voice/check','/api/voice/check-vpn','/api/voice/preview','/api/voice/rich-preview','/api/voice/rich-configure'].includes(req.url))return send(404,{error:'Неизвестный запрос'});
     let ownsLock=false;
     try{
       let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>16384)return send(413,{error:'Слишком большой запрос'});}
       const input=JSON.parse(body||'{}');
+      if(req.url.endsWith('/rich-preview')||req.url.endsWith('/rich-configure')){
+        const rich=require('./rich'),settings=input.settings||input;
+        const selected=Object.fromEntries(rich.keys.filter(k=>Object.hasOwn(settings,k)).map(k=>[k,settings[k]]));
+        const c=validate(selected,store.data.config);
+        if(req.url.endsWith('/rich-preview')){
+          if(typeof input.text!=='string'||!input.text.trim()||input.text.length>3000)throw Error('Введите пример до 3000 символов');
+          return send(200,{rich:rich.render((c.prefix?c.prefix+'\n':'')+input.text,c)});
+        }
+        if(configuring)throw Error('Настройки уже применяются');
+        store.data.config=c;store.save();return send(200,status());
+      }
       if(req.url.endsWith('/preview')){
         if(previewing||configuring)throw Error('Дождитесь завершения текущей проверки');
         if(typeof input.text!=='string'||!input.text.trim()||input.text.length>3000)throw Error('Введите пример текста длиной до 3000 символов');
