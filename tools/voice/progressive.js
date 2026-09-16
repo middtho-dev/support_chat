@@ -2,7 +2,7 @@
 const {ids}=require('./config');
 const {shouldDelete}=require('./formatting');
 const parts=text=>{const chars=Array.from(text),out=[];for(let i=0;i<chars.length;i+=1800)out.push(chars.slice(i,i+1800).join(''));return out;};
-const rich=text=>({html:'<p>'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+'</p>'});
+const rich=(text,compact=true)=>{const tag=compact?'footer':'p';return {html:'<'+tag+'>'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+'</'+tag+'>'};};
 
 async function processProgressive(worker,job,c){
   const store=worker.store;job.progressive=true;job.outputIds ||= [];job.outputTexts ||= [];
@@ -19,7 +19,7 @@ async function processProgressive(worker,job,c){
     const existing=job.outputIds[index];
     const useRich=c.richMessages&&job.richSupported!==false;
     const method=existing?'editMessageText':useRich?'sendRichMessage':'sendMessage';
-    const body={business_connection_id:job.connectionId,chat_id:job.chatId,...(existing?{message_id:existing}:{disable_notification:c.silent}),...(useRich?{rich_message:rich(text)}:{text,link_preview_options:{is_disabled:true}})};
+    const body={business_connection_id:job.connectionId,chat_id:job.chatId,...(existing?{message_id:existing}:{disable_notification:c.silent}),...(useRich?{rich_message:rich(text,c.richCompact!==false)}:{text,link_preview_options:{is_disabled:true}})};
     if(!existing){job.progressSending=true;store.save();}
     let result;
     try{result=await worker.telegram(method,body);}
@@ -40,16 +40,26 @@ async function processProgressive(worker,job,c){
     }
     job.outputTexts[index]=text;job.lastTextAt=Date.now();store.save();
   };
-  const preview=async text=>{
-    if(!c.smoothText||!active()||Array.from(text).length<24||Date.now()-(job.lastTextAt||0)<1500)return;
-    await write(parts((c.prefix?c.prefix+'\n':'')+text)[0]+' …');
+  let latest='',inflight=null,previewTimer=null,previewError=null,previewClosed=false,nextPreview=0;
+  const pump=()=>{
+    if(inflight||previewClosed||previewError||!latest||!active())return;
+    const wait=nextPreview-Date.now();
+    if(wait>0){if(!previewTimer)previewTimer=setTimeout(()=>{previewTimer=null;pump();},wait);return;}
+    const text=latest;latest='';nextPreview=Date.now()+1200;
+    inflight=write(text).catch(e=>{previewError=e;}).finally(()=>{inflight=null;pump();});
   };
+  const preview=text=>{
+    if(!c.smoothText||!active()||Array.from(text).length<8)return;
+    latest=parts((c.prefix?c.prefix+'\n':'')+text)[0]+' …';pump();
+  };
+  const stopPreview=async()=>{previewClosed=true;clearTimeout(previewTimer);await inflight;};
   try{
     job.startedAt ||= Date.now();job.queueMs ??= job.startedAt-job.created;job.attempts=(job.attempts||0)+1;store.save();
     let conn=await connection();
     if(!job.rawText){
-      job.rawText=await worker.timed(job,'audio',()=>worker.transcribe(job,c,preview));guard();store.save();
+      job.rawText=await worker.timed(job,'audio',()=>worker.transcribe(job,c,preview));store.save();
     }
+    await stopPreview();guard();if(previewError)throw previewError;
     const rawParts=parts((c.prefix?c.prefix+'\n':'')+job.rawText);
     // Persist the first portion immediately. Longer output is finalized below.
     if(!job.formatted)await write(rawParts[0]+(rawParts.length>1?' …':''));
@@ -77,6 +87,6 @@ async function processProgressive(worker,job,c){
       job.next=Date.now()+Math.max(1,Number(e.retryAfter)||5)*1000;
     }
     job.stage='';if(['failed','uncertain'].includes(job.status))job.finishedAt=Date.now();store.save();
-  }
+  }finally{await stopPreview();}
 }
 module.exports={processProgressive,rich};
