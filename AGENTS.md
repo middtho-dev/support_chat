@@ -67,3 +67,11 @@ rendered width (client `.mbox` <= 330px), centering, visible/hittable actions,
 Tab/Escape, and restored focus. Inspect screenshots of the open dialog; checking
 only that its action succeeds does not validate its layout. Audit final cascade
 overrides, not just the original component rule.
+
+Keyboard coverage must vary visualViewport.height/offsetTop independently of
+innerHeight, including equal heights with a nonzero offset; never subtract the
+offset from the visible height. Test focus/blur and viewport resize/scroll
+sequences. WebKit can scroll overflow:hidden shell ancestors when focusing an
+input: assert #app/#cs scrollTop and scrollLeft stay zero and verify actual
+header/composer geometry, not only the outer app rectangle. Preserve scrolling
+inside the login form and message history.

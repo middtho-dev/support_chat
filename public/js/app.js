@@ -99,6 +99,14 @@ function clearMsgCache(){SafeStorage.local.removeItem(MCACHE_KEY);}
 
 /* ── INIT ── */
 async function init(){
+  scheduleViewportSync();
+  window.addEventListener('resize',scheduleViewportSync,{passive:true});
+  window.addEventListener('orientationchange',scheduleViewportSync,{passive:true});
+  window.visualViewport?.addEventListener('resize',scheduleViewportSync,{passive:true});
+  window.visualViewport?.addEventListener('scroll',scheduleViewportSync,{passive:true});
+  window.addEventListener('pageshow',scheduleViewportSync,{passive:true});
+  document.addEventListener('focusin',settleViewport,{passive:true});
+  document.addEventListener('focusout',settleViewport,{passive:true});
   runClientCacheMigration();
   await refreshConfig();
   buildEmoji();
@@ -107,11 +115,6 @@ async function init(){
     navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(APP_CACHE_VERSION)}`).catch(e=>console.warn('[SW] register failed',e));
   }
 
-  scheduleViewportSync();
-  window.addEventListener('resize',scheduleViewportSync,{passive:true});
-  window.addEventListener('orientationchange',scheduleViewportSync,{passive:true});
-  window.visualViewport?.addEventListener('resize',scheduleViewportSync,{passive:true});
-  window.visualViewport?.addEventListener('scroll',scheduleViewportSync,{passive:true});
 
   // Refresh messages when tab becomes visible again
   document.addEventListener('visibilitychange',()=>{
@@ -193,7 +196,13 @@ function runClientCacheMigration(){
   }
 }
 
-let viewportFrame=0;
+let viewportFrame=0,viewportSettleTimer=0;
+function settleViewport(){
+  scheduleViewportSync();
+  clearTimeout(viewportSettleTimer);
+  // Safari keyboard animations may finish after focus/blur and resize events.
+  viewportSettleTimer=setTimeout(scheduleViewportSync,350);
+}
 function scheduleViewportSync(){
   if(viewportFrame)return;
   viewportFrame=requestAnimationFrame(()=>{viewportFrame=0;syncViewport();});
@@ -203,9 +212,12 @@ function syncViewport(){
   // Pinch zoom must magnify the page rather than shrink its layout again.
   if(viewport && viewport.scale > 1.01)return;
   const top=Math.max(0,Math.round(viewport?.offsetTop||0));
-  const height=Math.max(0,Math.floor(Math.min(viewport?.height||window.innerHeight,window.innerHeight-top)));
-  app.style.setProperty('--app-height',`${height}px`);
-  app.style.setProperty('--app-top',`${top}px`);
+  const height=Math.max(0,Math.floor(Math.min(viewport?.height||window.innerHeight,window.innerHeight)));
+  // offsetTop is a position, not an inset to subtract from the visible height.
+  // Safari can report innerHeight === visualViewport.height while offsetTop > 0.
+  const root=document.documentElement;
+  root.style.setProperty('--app-height',`${height}px`);
+  root.style.setProperty('--app-top',`${top}px`);
   app.classList.toggle('compact-viewport', height < 540);
   if(S.tid&&_pinToBottom)scrollBot(false);
 }
