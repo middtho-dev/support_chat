@@ -16,6 +16,7 @@ COPY --from=xray /opt/xray/LICENSE /usr/local/share/xray/LICENSE
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY rich.js config.js store.js worker.js server.js vless.js vpn.js formatting.js webhook.js progressive.js transcript-stream.js ./
+COPY editor/ ./editor/
 RUN mkdir /app/data && chown -R node:node /app
 USER node
 ENV VOICE_DATA_DIR=/app/data

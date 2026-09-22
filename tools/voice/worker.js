@@ -8,13 +8,14 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
 class Worker {
   constructor(store,adapters={}){this.store=store;this.adapters=adapters;this.busy=false;this.stopped=false;this.error='';this.pollController=null;
     this.webhookUrl=process.env.VOICE_WEBHOOK_URL||'';
+    this.editor=store.file&&store.encrypt?new (require('./editor').Editor)(this):null;
     this.setupInbox();
   }
   setupInbox(){
     this.inbox?.stop();
     const store=this.store;
     if(this.webhookUrl)this.inbox=new WebhookInbox({dir:path.join(path.dirname(store.file),'telegram-inbox',require('crypto').createHash('sha256').update(store.data.config.botToken||'unset').digest('hex').slice(0,16)),secret:process.env.VOICE_WEBHOOK_SECRET,
-      ready:()=>!this.stopped&&!this.configuring&&store.data.config.enabled,
+      ready:()=>!this.stopped&&!this.configuring&&(store.data.config.enabled||this.editor?.enabled),
       handle:update=>this.ingest(update)});
   }
   async timed(job,stage,action){
@@ -48,6 +49,7 @@ class Worker {
       }
     }
     if(update.deleted_business_messages){const x=update.deleted_business_messages;for(const j of d.jobs)if(j.connectionId===x.business_connection_id&&j.chatId===x.chat.id&&x.message_ids.includes(j.messageId)&&['pending','ready'].includes(j.status))j.status='cancelled';}
+    this.editor?.ingest(update);
     d.offset=update.update_id+1;this.store.save();
   }
   async transcribe(job,c,onText){
@@ -139,19 +141,19 @@ class Worker {
   }
   async poll(){
     while(!this.stopped){
-      if(this.configuring||!this.store.data.config.enabled){await delay(250);continue;}
+      if(this.configuring||!(this.store.data.config.enabled||this.editor?.enabled)){await delay(250);continue;}
       try{
         const token=this.store.data.config.botToken;
         if(this.webhookUrl){
           if(this.registeredToken!==token){
             await registerWebhook((method,body)=>this.telegram(method,body),this.webhookUrl,process.env.VOICE_WEBHOOK_SECRET,
-              ['business_connection','business_message','deleted_business_messages']);
+              ['business_connection','business_message','edited_business_message','deleted_business_messages']);
             this.registeredToken=token;
           }
           this.error='';await delay(1000);continue;
         }
         const controller=new AbortController();this.pollController=controller;const timer=setTimeout(()=>controller.abort(),30000);
-        let updates;try{updates=await this.telegram('getUpdates',{offset:this.store.data.offset,timeout:15,limit:50,allowed_updates:['business_connection','business_message','deleted_business_messages']},controller.signal);}finally{clearTimeout(timer);}
+        let updates;try{updates=await this.telegram('getUpdates',{offset:this.store.data.offset,timeout:15,limit:50,allowed_updates:['business_connection','business_message','edited_business_message','deleted_business_messages']},controller.signal);}finally{clearTimeout(timer);}
         if(token!==this.store.data.config.botToken)continue;
         for(const update of updates){if(token!==this.store.data.config.botToken)break;await this.ingest(update);}
         this.error='';
@@ -161,7 +163,7 @@ class Worker {
       }
     }
   }
-  async run(){await Promise.all([this.poll(),this.processQueue()]);}
+  async run(){await Promise.all([this.poll(),this.processQueue(),this.editor?.run()]);}
 
 }
 function splitText(text){const chars=Array.from(text),parts=[];while(chars.length)parts.push(chars.splice(0,1800).join(''));return parts;}
