@@ -211,19 +211,22 @@ function applyTelegramViewport() {
   if (stableHeight > 0) {
     document.documentElement.style.setProperty('--tg-stable-height', `${stableHeight}px`);
   }
+  // Desktop Telegram already reserves its native header outside the webview.
+  // A narrow desktop window is still desktop: do not infer this from width.
+  const mobileTelegram = ['ios', 'android', 'android_x'].includes(TG?.platform);
   const contentInsets = TG?.contentSafeAreaInset || {};
   const safeInsets = TG?.safeAreaInset || {};
-  const topInset = Math.max(
+  const topInset = mobileTelegram ? Math.max(
     0,
     Number(contentInsets.top) || 0,
     Number(safeInsets.top) || 0,
     (TG?.isFullscreen || telegramFullscreenRequested) ? TELEGRAM_FULLSCREEN_TOP_CLEARANCE : 0
-  );
-  const bottomInset = Math.max(
+  ) : 0;
+  const bottomInset = mobileTelegram ? Math.max(
     0,
     Number(contentInsets.bottom) || 0,
     Number(safeInsets.bottom) || 0
-  );
+  ) : 0;
   document.documentElement.style.setProperty('--tg-top-ui', `${Math.round(topInset)}px`);
   document.documentElement.style.setProperty('--tg-bottom-ui', `${Math.round(bottomInset)}px`);
 }
