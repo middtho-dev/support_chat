@@ -9,7 +9,7 @@ function validate(input,previous=defaults){
  }
  for(const k of ['ownerIds','excludeChatIds','chatIds'])if(c[k].length>4000||ids(c[k]).some(id=>! /^-?\d{1,16}$/.test(id)))throw Error('Нужны числовые Telegram ID');
  if(ids(c.ownerIds).some(id=>id.startsWith('-')))throw Error('ID аккаунта должен быть положительным');
- for(const [k,values]of [['style',['correct','readable','concise']],['emojiPlacement',['inline','paragraph']],['emojiDensity',['sparse','moderate','expressive']],['chatMode',['all','allow']]])if(!values.includes(c[k]))throw Error('Недопустимое значение: '+k);
+ for(const [k,values]of [['style',['correct','readable','concise','instruction']],['emojiPlacement',['inline','paragraph']],['emojiDensity',['sparse','moderate','expressive']],['chatMode',['all','allow']]])if(!values.includes(c[k]))throw Error('Недопустимое значение: '+k);
  if(!Number.isInteger(c.minLength)||c.minLength<1||c.minLength>1000||!Number.isInteger(c.dailyLimit)||c.dailyLimit<1||c.dailyLimit>3000)throw Error('Минимум: 1–1000 символов; лимит: 1–3000 сообщений');
  if(c.instructions.length>2000||! /^[a-zA-Z0-9._:-]{1,100}$/.test(c.model))throw Error('Некорректная модель или слишком длинная инструкция');
  if(c.enabled&&!ids(c.ownerIds).length)throw Error('Выберите хотя бы один аккаунт');
