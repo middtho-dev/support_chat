@@ -10,6 +10,7 @@ function createServer(store,worker,token){
     if(req.url==='/health')return send(200,{ok:true});
     const supplied=Buffer.from(String(req.headers['x-admin-token']||'')),expected=Buffer.from(token);
     if(!expected.length||expected.length!==supplied.length||!crypto.timingSafeEqual(expected,supplied))return send(401,{error:'Требуется авторизация'});
+    if(req.url==='/api/editor'||req.url.startsWith('/api/editor/'))return worker.editor?worker.editor.api(req,send):send(503,{error:'Редактор недоступен'});
     const status=()=>({...store.status(),busy:worker.busy,error:worker.error,transport:worker.inbox?.status()||{mode:'polling'},vpn:vpn?.status()||{running:false}});
     if(req.method==='GET'&&req.url==='/api/voice')return send(200,status());
     if(req.method!=='POST'||!['/api/voice/configure','/api/voice/check','/api/voice/check-vpn','/api/voice/preview','/api/voice/rich-preview','/api/voice/rich-configure'].includes(req.url))return send(404,{error:'Неизвестный запрос'});
@@ -50,6 +51,7 @@ function createServer(store,worker,token){
       configuring=true;ownsLock=true;worker.configuring=true;
       if(worker.busy && !(input.enabled===false && Object.keys(input).length===1))throw Error('Дождитесь завершения текущего сообщения');
       const previous=store.data.config,c=validate(input,previous);
+      if(worker.editor?.enabled&&['botToken','openaiKey','vlessUrl','vpnEnabled','vpnTelegram'].some(k=>c[k]!==previous[k]))throw Error('Сначала выключите редактор сообщений: он использует это подключение');
       if(previous.enabled&&c.enabled)throw Error('Остановите бота перед изменением настроек');
       if(c.enabled&&c.botToken!==previous.botToken)throw Error('Сначала сохраните новый токен с выключенным ботом');
 
