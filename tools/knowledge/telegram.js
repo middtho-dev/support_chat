@@ -1,7 +1,9 @@
 'use strict';
 const {TelegramClient,Api,utils}=require('telegram');
 const {StringSession}=require('telegram/sessions');
-const {NewMessage,EditedMessage,DeletedMessage}=require('telegram/events');
+const {NewMessage}=require('telegram/events');
+const {EditedMessage}=require('telegram/events/EditedMessage');
+const {DeletedMessage}=require('telegram/events/DeletedMessage');
 function peerData(e){if(e.className==='Channel')return{kind:'channel',id:e.id.toString(),hash:e.accessHash.toString()};if(e.className==='Chat')return{kind:'chat',id:e.id.toString()};return{kind:'user',id:e.id.toString(),hash:(e.accessHash||0).toString()};}
 function inputPeer(json){const p=JSON.parse(json),big=require('big-integer');return p.kind==='channel'?new Api.InputPeerChannel({channelId:big(p.id),accessHash:big(p.hash)}):p.kind==='chat'?new Api.InputPeerChat({chatId:big(p.id)}):new Api.InputPeerUser({userId:big(p.id),accessHash:big(p.hash)});}
 function message(m){return{id:m.id,date:Number(m.date)*1000,sender:[m.sender?.firstName,m.sender?.lastName,m.sender?.title,m.senderId?.toString()].filter(Boolean).join(' '),body:m.message||'',reply_id:m.replyTo?.replyToMsgId||null};}
