@@ -9,6 +9,7 @@ RUN npm ci --omit=dev
 # Copy source
 COPY src/ ./src/
 COPY tools/voice/webhook.js ./tools/voice/webhook.js
+COPY tools/knowledge/brain.js ./tools/knowledge/brain.js
 COPY public/ ./public/
 COPY tools/frp/public/app.js ./tools/frp/public/app.js
 COPY tools/frp/public/firmware.js ./tools/frp/public/firmware.js

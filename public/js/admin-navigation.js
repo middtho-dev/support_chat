@@ -4,11 +4,11 @@
   const main = document.getElementById('main');
   const mobile = matchMedia('(max-width:560px)');
   mobile.addEventListener('change', () => schedule());
-  const selectors = { editor: '.editor-tabs', video: '.video-tabs', lampac: '.lc-tabs', voice: '.voice-tabs', settings: '.management-tabs', frp: '.frp-tabs' };
+  const selectors = { knowledge: '.kb-tabs', editor: '.editor-tabs', video: '.video-tabs', lampac: '.lc-tabs', voice: '.voice-tabs', settings: '.management-tabs', frp: '.frp-tabs' };
   let scheduled = false;
   function sync() {
     scheduled = false;
-    for (const id of ['lampac', 'voice', 'video', 'settings', 'frp', 'editor']) {
+    for (const id of ['lampac', 'voice', 'video', 'settings', 'frp', 'editor', 'knowledge']) {
       const panel = document.getElementById(id);
       let nav = document.getElementById(id + '-subnav');
       if (!nav) {
@@ -51,7 +51,7 @@
     document.body.classList.toggle('module-subnav-active', !!document.querySelector('.module-subnav:not([hidden]) button'));
     main.querySelectorAll('.panel details').forEach(details => {
       const summary = details.querySelector(':scope > summary');
-      if (!summary || details.closest('#frp-mobile-devices') || details.matches('.lc-record,.lc-info,.lc-compose')) return;
+      if (!summary || details.closest('#frp-mobile-devices') || details.matches('.lc-record,.lc-info,.lc-compose,.kb-chat')) return;
       const fields = details.querySelectorAll('input:not([type=search]):not([type=hidden]),select,textarea');
       if (!fields.length) return;
       let count = summary.querySelector(':scope > .summary-count');

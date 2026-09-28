@@ -43,3 +43,9 @@ jobs:
           npm ci
           npm run check
           npm test
+
+      - name: Knowledge standalone smoke
+        working-directory: tools/knowledge
+        run: |
+          npm ci
+          npm test
