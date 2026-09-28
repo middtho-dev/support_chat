@@ -293,7 +293,7 @@ function bindStaticUi() {
 function login() { const token = $('tok').value.trim(); if (!token) return; S.token = token; $('lbtn').disabled = true; $('lerr').textContent = ''; setConn(''); socket.connect(); }
 function logout() {
   SafeStorage.session.removeItem('admin_token');
-  S.token = null; AdminShell.reset(); socket.disconnect();
+  S.token = null; window.KnowledgePanel?.reset(); AdminShell.reset(); socket.disconnect();
   Object.assign(S, { tickets: [], current: null, messages: [], settings: null, operators: [], maintenance: null, systemHealth: null, settingsDirty: false, settingsSaving: false, settingsDrafts:{}, settingsScope:null, file: null, pendingReply: null, permissions: { canManageSettings: false } });
   window.supportAdminSettings = null; window.adminResetTicketCard?.(); window.FrpPanel?.reset();
   clearInterval(miniRefreshTimer); miniRefreshTimer = null;
@@ -476,6 +476,8 @@ function setView(view) {
   if (S.view === 'lampac') window.LampacPanel?.open(); else window.LampacPanel?.pause();
   $('video').classList.toggle('on', S.view === 'video');
   if (S.view === 'video') window.VideoPanel?.open(); else window.VideoPanel?.pause();
+  $('knowledge').classList.toggle('on', S.view === 'knowledge');
+  if(S.view==='knowledge')window.KnowledgePanel?.open();else window.KnowledgePanel?.pause();
   $('editor').classList.toggle('on', S.view === 'editor');
   if(S.view==='editor')window.EditorPanel?.open();else window.EditorPanel?.pause();
   $('voice').classList.toggle('on', S.view === 'voice');
