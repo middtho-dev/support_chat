@@ -2,7 +2,7 @@
 :root{color-scheme:dark;--rail-width:188px}
 body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;line-height:1.5}
 button,a,input,textarea,select,summary{-webkit-tap-highlight-color:transparent}
-button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--blue);outline-offset:-3px}
 button{transition:background .15s,color .15s,border-color .15s}
 button:disabled{opacity:.5}
 .skip-link{position:fixed;left:16px;top:-80px;z-index:1000;padding:12px 20px;background:var(--blue);color:var(--accent-ink);border-radius:8px}
@@ -88,7 +88,7 @@ body.tg-mini .bubble{background:var(--panel3)!important}body.tg-mini .out .bubbl
 .voice-switch-track::after{content:'';display:block;width:14px;height:14px;border-radius:50%;background:#a5afc0;transform:translate(2px,2px);transition:transform .15s,background .15s}
 .voice-switch input:checked+.voice-switch-track{background:var(--blue);border-color:var(--blue)}
 .voice-switch input:checked+.voice-switch-track::after{transform:translate(18px,2px);background:#fff}
-.voice-switch input:focus-visible+.voice-switch-track{outline:2px solid #9aafff;outline-offset:3px}
+.voice-switch input:focus-visible+.voice-switch-track{outline:2px solid #9aafff;outline-offset:-3px}
 .voice-network{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .voice-network b{font-size:13px}.voice-network p{margin:5px 0 0}.voice-network button{flex-shrink:0}
 .voice-actions{gap:8px}.voice-actions button{padding:9px 13px}
