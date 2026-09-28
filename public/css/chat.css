@@ -180,7 +180,7 @@ input,textarea{
 .linp:focus{
   border-color:rgba(187,249,112,.8);
   background:#343a40;
-  box-shadow:0 0 0 3px rgba(187,249,112,.11);
+  box-shadow:inset 0 0 0 1px rgba(187,249,112,.35);
 }
 .linp::placeholder,#ti::placeholder{color:var(--muted)}
 
@@ -915,7 +915,7 @@ input,textarea{
 @keyframes statusIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
 @keyframes messageIn{from{opacity:0;transform:translate(-7px,5px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes messageOut{from{opacity:0;transform:translate(7px,5px) scale(.97)}to{opacity:1;transform:none}}
-@keyframes messageHighlight{0%,100%{filter:none}42%{filter:brightness(1.28);box-shadow:0 0 0 2px rgba(187,249,112,.42)}}
+@keyframes messageHighlight{0%,100%{filter:none}42%{filter:brightness(1.28);box-shadow:inset 0 0 0 2px rgba(187,249,112,.42)}}
 @keyframes typingIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @keyframes typingDot{0%,70%,100%{opacity:.32;transform:translateY(0)}35%{opacity:1;transform:translateY(-3px)}}
 @keyframes sendReady{from{opacity:.3;transform:translate(-3px,3px) scale(.8)}to{opacity:1;transform:none}}
@@ -979,7 +979,7 @@ input,textarea{
 }
 
 /* Shared visual language and accessible controls. */
-button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
 #ls{overflow:auto}.lcard{border-radius:18px}.hdr img{border-radius:12px}.lcard .linp{font-size:16px}
 .mbtns button{min-height:44px}.hbtn,.fprm{min-width:40px;min-height:40px}
 .lb img{max-height:90dvh;object-fit:contain}.mfile{overflow-wrap:anywhere}
