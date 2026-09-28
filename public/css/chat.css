@@ -911,7 +911,7 @@ input,textarea{
 }
 
 @keyframes screenIn{from{opacity:0}to{opacity:1}}
-@keyframes cardIn{from{opacity:0;transform:translateY(18px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes cardIn{from{opacity:0}to{opacity:1}}
 @keyframes statusIn{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
 @keyframes messageIn{from{opacity:0;transform:translate(-7px,5px) scale(.97)}to{opacity:1;transform:none}}
 @keyframes messageOut{from{opacity:0;transform:translate(7px,5px) scale(.97)}to{opacity:1;transform:none}}
@@ -1014,3 +1014,8 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-off
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 .mbo{color:var(--accent-ink)}
+
+/* Media queries see the layout viewport on iOS; keyboard height comes from visualViewport. */
+#app.short-viewport #ls .lcard img,#app.short-viewport #ls .lstatus{display:none}
+#app.short-viewport #ls .lcard{padding:14px 18px}
+#app.short-viewport .lsub.offhours{max-height:64px;overflow:auto}

@@ -31,7 +31,7 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
       },mode);
       assert.ok(Math.abs(state.app.height-height)<2,`${engine} ${mode}: expected height ${height}, got ${state.app.height}; top ${top}, inner ${inner}`);
       assert.ok(Math.abs(state.app.top-top)<2,`${engine} ${mode}: viewport offset lost`);
-      assert.ok(state.control.top>=top&&state.control.bottom<=top+height+1,`${engine} ${mode}: control outside visual viewport`);
+      assert.ok(state.control.top>=top&&state.control.bottom<=top+height+1,JSON.stringify({engine,mode,height,top,inner,state}));
       assert.ok(state.scrolls.filter(s=>s.id!=='ls').every(s=>s.top===0&&s.left===0),'A shell ancestor scrolled on focus');
       assert.ok(state.control.left>=state.app.left&&state.control.right<=state.app.right,'Control shifted horizontally');
       if(state.header)assert.ok(state.header.top>=top-1&&state.header.bottom<state.control.top,JSON.stringify({engine,mode,top,height,state}));
