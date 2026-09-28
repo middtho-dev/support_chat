@@ -12,7 +12,7 @@ const inventory=[],results=[];
  await page.goto(url);await page.getByLabel('Ключ доступа',{exact:true}).fill(process.env.AUDIT_TOKEN||'local-unified-admin-token');await page.getByRole('button',{name:'Войти',exact:true}).click();
  for(const width of [1440,820,390,360,2548]){
   await page.setViewportSize({width,height:960});await page.evaluate(w=>{document.body.classList.toggle('tg-mini',w<1000);document.documentElement.style.setProperty('--tg-top-ui',w<1000?'84px':'0px');document.documentElement.style.setProperty('--tg-bottom-ui','20px');},width);
-  for(const view of ['home','chat','frp','voice','lampac','settings']){
+  for(const view of ['home','chat','frp','voice','video','editor','lampac','settings']){
    await page.locator(`.navbtn[data-view=${view}]`).click();await page.waitForTimeout(160);
    const nav=page.locator(view==='chat'?'#support-nav':`#${view}-subnav`);
    const labels=await nav.count()?await nav.locator('button').allTextContents():[];

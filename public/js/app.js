@@ -656,7 +656,7 @@ function updateLoginHint(){
   sub.classList.toggle('offhours', offhours);
   status?.classList.toggle('offhours', offhours);
   if(!offhours){
-    sub.textContent='Представьтесь — и напишите вопрос в защищённом чате';
+    sub.textContent='Укажите имя и напишите, чем помочь.';
     if(status)status.textContent='Операторы на связи';
   }else{
     sub.textContent=CFG.offhoursBannerText||`Сейчас нерабочее время · ответим в ${String(CFG.workStartHour).padStart(2,'0')}:00 (${supportOpenText()}). Сообщение можно оставить сейчас.`;
