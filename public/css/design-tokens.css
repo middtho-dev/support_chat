@@ -1,0 +1,13 @@
+/* KV9RU: shared palette. Layout belongs to each component, never this file. */
+:root {
+  color-scheme: dark;
+  --bg: #101214; --page: #101214; --chat: #101214;
+  --panel: #191c1f; --panel2: #222629; --panel3: #2a3034;
+  --header: #191c1f; --header-soft: #2a3034; --composer: #191c1f;
+  --field: #222629; --incoming: #222629; --outgoing: #303e28;
+  --text: #eef0f2; --soft: #c5cbd0; --muted: #a6aeb5; --subtle: #a6aeb5;
+  --line: #343a40; --blue: #bbf970; --blue2: #a6e45c;
+  --accent: #bbf970; --accent-strong: #a6e45c; --accent-ink: #172011;
+  --green: #91d79c; --red: #ff8799; --danger: #ff8799; --amber: #f2c879;
+  --shadow: 0 12px 36px #0003;
+}

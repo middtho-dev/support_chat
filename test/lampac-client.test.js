@@ -74,13 +74,13 @@ test('brand theme toggles live with device precedence and restores stock CSS',()
  const storage={get:(k,f)=>data.has(k)?data.get(k):f,set:(k,v)=>data.set(k,v),remove:k=>data.delete(k)};
  const context={document:{getElementById:()=>style,createElement:()=>({}),head:{appendChild:n=>style=n}},Lampa:{Storage:storage},localStorage:{getItem:k=>data.get(k)??null}};context.window=context;
  vm.runInNewContext(script.replace('POLICY',JSON.stringify({mode:'always',revision:'1',values:{}})),context);
- context.workspaceApplyTheme(true);assert.match(style.textContent,/#2ED3B7/);
+ context.workspaceApplyTheme(true);assert.match(style.textContent,/#bbf970/);
  storage.set('workspace_device_access',{overrides:{workspace_kv9_theme:'false'}});
- context.workspaceApplyTheme(true);assert.doesNotMatch(style.textContent,/#2ED3B7/);
+ context.workspaceApplyTheme(true);assert.doesNotMatch(style.textContent,/#bbf970/);
  storage.set('workspace_device_access',{overrides:{workspace_kv9_theme:'true'}});
- context.workspaceApplyTheme(false);assert.match(style.textContent,/#2ED3B7/);
+ context.workspaceApplyTheme(false);assert.match(style.textContent,/#bbf970/);
  storage.set('workspace_device_access',{overrides:{}});context.workspaceApplyTheme(false);
- assert.doesNotMatch(style.textContent,/#2ED3B7|kv9-appear/);
+ assert.doesNotMatch(style.textContent,/#bbf970|kv9-appear/);
  assert.equal(data.get('source'),'cub');assert.equal(data.get('background'),'false');
 });
 

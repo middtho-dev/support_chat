@@ -199,7 +199,7 @@ async function loginWithTelegram() {
 
 function applyTelegramTheme() {
   // Keep one complete palette: partial Telegram overrides can make text unreadable.
-  try { TG?.setHeaderColor?.('#141b27'); TG?.setBackgroundColor?.('#0d111a'); } catch {}
+  try { TG?.setHeaderColor?.('#191c1f'); TG?.setBackgroundColor?.('#101214'); } catch {}
 }
 function applyTelegramViewport() {
   if (!IS_TG_MINI) return;
