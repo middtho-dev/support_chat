@@ -1,4 +1,3 @@
-const knowledgeRouter=require('./telegram-knowledge-router').createKnowledgeRouter();
 const {createVideoRouter,isVideoUpdate}=require('./telegram-video-router');
 const videoRouter=createVideoRouter();
 const {WebhookInbox, registerWebhook} = require('../tools/voice/webhook');
@@ -1390,7 +1389,7 @@ async function startBot() {
     });
     instance.on('guest_message', msg => { try { videoRouter.route({guest_message:msg},botUsername); } catch(error) { console.error('[TG private] video inbox unavailable'); } });
     instance.on('message', msg => {
-      try { if(knowledgeRouter.route({message:msg},botUsername)||videoRouter.route({message:msg},botUsername))return; } catch(error) { console.error('[TG private] module inbox unavailable'); return; }
+      try { if(videoRouter.route({message:msg},botUsername))return; } catch(error) { console.error('[TG private] video inbox unavailable'); return; }
       if(msg.chat?.type==='private') chatCleanup.track(msg.chat.id,msg);
       return queueIncomingMessage(msg).catch(error => {
         console.error('[TG private] message handling:', tgError(error));
@@ -1411,7 +1410,7 @@ async function startBot() {
         ready: () => !!bot && !!pollingLease?.isOwner(),
         partition: update => (isVideoUpdate(update,botUsername)?'video:':'support:')+String((update.guest_message||update.message||update.callback_query?.message)?.chat?.id||'other'),
         handle: async update => {
-          if(knowledgeRouter.route(update,botUsername)||videoRouter.route(update,botUsername))return;
+          if(videoRouter.route(update,botUsername))return;
           if(!tgEnabled())throw Error('Support processing disabled');
           if (update.message) {
             if(update.message.chat?.type==='private')chatCleanup.track(update.message.chat.id,update.message);
