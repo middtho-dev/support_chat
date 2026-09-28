@@ -219,6 +219,7 @@ function syncViewport(){
   root.style.setProperty('--app-height',`${height}px`);
   root.style.setProperty('--app-top',`${top}px`);
   app.classList.toggle('compact-viewport', height < 540);
+  app.classList.toggle('short-viewport', height < 400);
   if(S.tid&&_pinToBottom)scrollBot(false);
 }
 
