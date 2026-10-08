@@ -1,6 +1,6 @@
 'use strict';
 window.mountLampacAdvanced = function ({container, request, operation, toggle, publicUrl}) {
-  let alive = true, tab = 'overview', refreshing = false, settingsLoaded = false;
+  let alive = true, tab = 'overview', refreshing = false, refreshQueued = false, settingsLoaded = false;
   const section = container.querySelector('.voice-section');
   const heading = section.querySelector('.page-heading');
   const overview = document.createElement('div');
@@ -110,7 +110,29 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     });return {values,inherit};
   }
   function renderDevices(data) {
+    const pane=panes.devices, focus=document.activeElement, scroll=container.scrollTop;
+    const retained=new Map([...pane.querySelectorAll('[data-record-key]')]
+      .filter(record=>record.open||record.contains(focus))
+      .map(record=>[record.dataset.recordKey,record]));
+    // Keep only edited/expanded cards, then reconcile them by installation ID.
+    // Indices belong to the new response and must not identify another device.
     replaceRecords(panes.devices, `<p class="wk-note">Устройства регистрируются автоматически через <code>${esc(publicUrl + '/workspace-client.js')}</code>. ID относится к установке Lampa и меняется после очистки её данных.</p><div class="wk-list-heading"><span>Устройство</span><span>Состояние</span></div><div class="lc-list lc-record-list">${data.devices.map((d, i) => `<details class="card lc-record" data-record-key="${esc(d.id)}"><summary><span>${esc(d.name)}</span><small class="wk-badge" data-device-presence="${esc(d.id)}">${d.enabled===0?'Ожидает доступа':Date.now()/1000-d.last<90?'На связи':'Нет свежего сигнала'}</small></summary><div class="lc-record-body"><dl class="wk-metadata"><div><dt>ID установки</dt><dd><code>${esc(d.id)}</code></dd></div><div><dt>IP-адрес</dt><dd>${esc(d.ip)}</dd></div><div><dt>Последний ответ</dt><dd data-device-last="${esc(d.id)}">${esc(date(d.last))}</dd></div><div hidden data-device-film-row><dt>Видео</dt><dd class="lc-device-film" data-device-film="${esc(d.id)}"></dd></div><div><dt>Профиль</dt><dd>${d.applied < d.revision ? 'Ожидает применения' : 'Изменения подтверждены'}</dd></div></dl><form data-rename-form="${i}" class="wk-inline-form"><label class="voice-field">Название устройства<input name="deviceName" required maxlength="80" value="${esc(d.name)}"></label><button class="ghost">Переименовать</button></form><details class="lc-device-settings"><summary>Настройки устройства</summary><form data-device-form="${i}"><p class="wk-note">Значения устройства перекрывают общий профиль при каждом запуске. «Общий профиль» возвращает наследование.</p><label class="voice-field">Найти настройку<input type="search" data-pref-search placeholder="Например, меню или плеер"></label>${preferences(data.fields.filter(f=>!f.key.startsWith('workspace_ui_')||!Array.isArray(d.controls)||d.controls.includes(f.key)||Object.hasOwn(d.desired||{},f.key)),d.desired||{},d.snapshot||{},false,data.shared||{})}${toggle('device-reload-'+i,'Перезапустить Lampa после применения · прервёт просмотр',false)}<div class="wk-actions"><button class="save" ${d.applied < d.revision ? 'disabled' : ''}>Сохранить профиль</button></div></form></details><footer class="wk-actions wk-record-actions"><button class="${d.enabled===0?'save':'ghost'}" data-access="${i}">${d.enabled===0?'Включить доступ':'Отключить доступ'}</button><button class="danger" data-revoke="${i}">Удалить устройство</button></footer></div></details>`).join('') || empty('Запустите Lampa с плагином Workspace: устройство появится автоматически.')}</div>`);
+    for(const fresh of pane.querySelectorAll('[data-record-key]')) {
+      const record=retained.get(fresh.dataset.recordKey);if(!record)continue;
+      record.querySelector(':scope > summary > span').textContent=fresh.querySelector(':scope > summary > span').textContent;
+      record.querySelector(':scope > summary > small').textContent=fresh.querySelector(':scope > summary > small').textContent;
+      record.querySelector('.wk-metadata').replaceWith(fresh.querySelector('.wk-metadata'));
+      for(const attribute of ['data-rename-form','data-device-form','data-access','data-revoke']) {
+        const old=record.querySelector('['+attribute+']'), next=fresh.querySelector('['+attribute+']');
+        old.setAttribute(attribute,next.getAttribute(attribute));
+        if(attribute==='data-access'){old.textContent=next.textContent;old.className=next.className;}
+      }
+      record.querySelector('[id^="lc-device-reload-"]').id=fresh.querySelector('[id^="lc-device-reload-"]').id;
+      record.querySelector('[data-device-form] .save').disabled=fresh.querySelector('[data-device-form] .save').disabled;
+      fresh.replaceWith(record);
+    }
+    if(pane.contains(focus))focus.focus({preventScroll:true});
+    container.scrollTop=scroll;
     panes.devices.querySelectorAll('[data-rename-form]').forEach(form=>form.onsubmit=async e=>{e.preventDefault();if(await operation('/devices',{action:'rename',id:data.devices[Number(form.dataset.renameForm)].id,name:form.elements.deviceName.value.trim()},'Устройство переименовано'))refresh(true);});
     panes.devices.querySelectorAll('[data-access]').forEach(button=>button.onclick=async()=>{const d=data.devices[Number(button.dataset.access)];if(d.enabled!==0&&!confirm('Отключить доступ «'+d.name+'»? Его настройки сохранятся.'))return;if(await operation('/devices',{action:'access',id:d.id,enabled:d.enabled===0},d.enabled===0?'Доступ включён':'Доступ отключён'))refresh(true);});
     panes.devices.querySelectorAll('[data-device-form]').forEach(form=>{bindPreferences(form);});
@@ -207,7 +229,8 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     panes.playback.querySelectorAll('[data-remove-session]').forEach(button=>button.onclick=async()=>{const s=records[Number(button.dataset.removeSession)];if(await operation('/playback',{action:'remove',device:s.device,session:s.session},'Запись удалена'))refresh(true);});
   }
   async function refresh(force = false) {
-    if (!alive || refreshing || tab === 'overview') return;
+    if (!alive || tab === 'overview') return;
+    if (refreshing) {refreshQueued ||= force;return;}
     // Do not replace a focused input or expanded file list during automatic polling.
     const editing=!force&&(panes[tab].contains(document.activeElement)||panes[tab].querySelector('details[open]'));
     if(editing&&!['devices','playback'].includes(tab))return;
@@ -215,13 +238,13 @@ window.mountLampacAdvanced = function ({container, request, operation, toggle, p
     try {
       if (active === 'playback') {const data=await request('/playback');if(alive)renderPlayback(data);}
       else if (active === 'announcements') {const data=await request('/devices');if(alive)renderAnnouncements(data);}
-      else if (active === 'devices') { if(!editing){const data=await request('/devices');if(alive)renderDevices(data);}const live=await request('/playback');if(alive)updatePresence(live); }
+      else if (active === 'devices') {const data=await request('/devices');if(alive)renderDevices(data);const live=await request('/playback');if(alive)updatePresence(live);}
       else if (active === 'torrents') { const data = await request('/torrents'); if (alive) renderTorrents(data); }
       else if (active === 'clients') { const data = await request('/clients'); if (alive) renderClients(data); }
       else if (!settingsLoaded) { const data = await request('/advanced'); if (alive) renderSettings(data); }
       if (alive) message.textContent = '';
     } catch (e) { if (alive) message.textContent = e.message; }
-    finally { refreshing = false; }
+    finally {refreshing=false;if(refreshQueued){refreshQueued=false;refresh(true);}}
   }
   return {refresh, destroy() { alive = false; }};
 };
