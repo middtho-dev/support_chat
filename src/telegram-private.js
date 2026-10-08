@@ -9,6 +9,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./database');
+const {createSupportInbox}=require('./telegram-support-inbox');
 const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
 const push = require('./push');
 const { loadSettings, formatTemplate, isWithinWorkHours } = require('./settings');
@@ -1389,7 +1390,7 @@ async function startBot() {
     });
     instance.on('guest_message', msg => { try { videoRouter.route({guest_message:msg},botUsername); } catch(error) { console.error('[TG private] video inbox unavailable'); } });
     instance.on('message', msg => {
-      try { if(videoRouter.route({message:msg},botUsername))return; } catch(error) { console.error('[TG private] video inbox unavailable'); return; }
+      try { if(!supportReplyTarget(msg)&&videoRouter.route({message:msg},botUsername))return; } catch(error) { console.error('[TG private] video inbox unavailable'); return; }
       if(msg.chat?.type==='private') chatCleanup.track(msg.chat.id,msg);
       return queueIncomingMessage(msg).catch(error => {
         console.error('[TG private] message handling:', tgError(error));
@@ -1410,7 +1411,7 @@ async function startBot() {
         ready: () => !!bot && !!pollingLease?.isOwner(),
         partition: update => (isVideoUpdate(update,botUsername)?'video:':'support:')+String((update.guest_message||update.message||update.callback_query?.message)?.chat?.id||'other'),
         handle: async update => {
-          if(videoRouter.route(update,botUsername))return;
+          if(!(update.message&&supportReplyTarget(update.message))&&videoRouter.route(update,botUsername))return;
           if(!tgEnabled())throw Error('Support processing disabled');
           if (update.message) {
             if(update.message.chat?.type==='private')chatCleanup.track(update.message.chat.id,update.message);
@@ -2751,6 +2752,7 @@ async function handleCallbackQuery(query) {
     await bot.answerCallbackQuery(query.id, options).catch(() => {});
   };
   try {
+    if(data.startsWith('reply:'))return await beginSupportInboxReply(query,operator,answer);
     if (data === 'dashboard:clear' || data === 'dashboard:clear-confirm') {
       const chatId=String(query.message.chat.id);
       const dashboard=db.getTelegramOperatorDashboard.get(userId);
@@ -2913,6 +2915,18 @@ async function handleMessage(msg) {
     await deleteTelegramMessage(msg.chat.id, msg.message_id);
     return updateOperatorDashboard(operator, controlCenterModel());
   }
+  const inboxTarget=supportReplyTarget(msg);
+  if(inboxTarget) {
+    const source=db.getMessageById.get(inboxTarget.message_id),ticket=source&&db.getTicketById.get(source.ticket_id);
+    if(!ticket||ticket.status!=='open')return bot.sendMessage(msg.chat.id,'Тикет закрыт. Ответ не отправлен.');
+    if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id))return bot.sendMessage(msg.chat.id,'Тикет назначен другому оператору. Ответ не отправлен.');
+    if(!cfg().telegramForwardOperatorMessages)return;
+    if(command==='/close')return closeTicketFromTelegram(ticket);
+    await claimAndOpenTicket(ticket.id,operator.telegram_user_id);
+    const thread=db.getTelegramThreadForTicketOperator.get(ticket.id,operator.telegram_user_id);
+    if(thread)await forwardOperatorMessage(msg,ticket,thread,operator,{inboxTarget});
+    return;
+  }
   const threadId = msg.message_thread_id;
   const thread = threadId
     ? db.getTelegramThreadByDestination.get(String(msg.chat.id), threadId)
@@ -2929,7 +2943,7 @@ async function handleMessage(msg) {
       }
     }
     if (msg.text || msg.caption || msg.document || msg.photo || msg.video) {
-      await bot.sendMessage(msg.chat.id, 'Выберите тикет в очереди или откройте его тему. Команда: /queue');
+      await bot.sendMessage(msg.chat.id, 'Нажмите «Ответить» под сообщением клиента или ответьте на него через Reply. Также можно открыть тему тикета: /queue');
     }
     return;
   }
@@ -3030,7 +3044,7 @@ async function processIncomingRetryQueue() {
   }
 }
 
-async function forwardOperatorMessage(msg, ticket, thread, operator) {
+async function forwardOperatorMessage(msg, ticket, thread, operator, {inboxTarget=null} = {}) {
   const incomingKey = `${msg.chat.id}:${msg.message_id}`;
   if (incomingMessages.has(incomingKey) ||
       db.getMessageByTelegramDestination.get(String(msg.chat.id), msg.message_id)) {
@@ -3059,9 +3073,9 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
           `Telegram message_id=${msg.message_id}`
         );
         await bot.sendMessage(
-          thread.chat_id,
+          inboxTarget?msg.chat.id:thread.chat_id,
           '⚠️ Файл не доставлен клиенту. Отправьте его повторно или как документ.',
-          { message_thread_id: thread.thread_id }
+          inboxTarget?{}:{ message_thread_id: thread.thread_id }
         );
       }
     }
@@ -3075,6 +3089,10 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
         msg.reply_to_message.message_id
       );
       if (replyMessage?.ticket_id === ticket.id) replyToId = replyMessage.id;
+    }
+    if(inboxTarget) {
+      replyMessage=db.getMessageById.get(inboxTarget.message_id);
+      if(replyMessage?.ticket_id===ticket.id)replyToId=replyMessage.id;
     }
     const id = uuidv4();
     db.saveMessage.run(
@@ -3091,6 +3109,7 @@ async function forwardOperatorMessage(msg, ticket, thread, operator) {
       replyToId
     );
     db.updateTelegramDelivery.run(String(msg.chat.id), msg.message_id, id);
+    if(inboxTarget)supportInbox.remember(msg.chat.id,msg.message_id,inboxTarget.message_id,operator.telegram_user_id,msg.media_group_id?String(msg.media_group_id):null,id);
     const message = {
       id,
       ticket_id: ticket.id,
@@ -3290,6 +3309,8 @@ function customerDeliveryChatId(ticket, message) {
 }
 
 function queueOperatorMessageCleanup(message) {
+  const inboxCleanup=supportInbox.answered(message);
+  if(inboxCleanup){scheduleDeliveryQueue(0);return true;}
   if (message?.message_type !== 'text' || !message?.ticket_id ||
       !message?.telegram_chat_id || !message?.telegram_message_id) return false;
   db.enqueueOperatorMessageCleanup.run(
@@ -3396,12 +3417,81 @@ function deliverCustomerReply(ticket, message) {
   return queued;
 }
 
+const supportInbox=createSupportInbox({
+  db, send:sendSupportInboxMessage,
+  enabled:()=>tgEnabled()&&cfg().telegramForwardUserMessages,
+  authorized:isAuthorized,
+  operators:()=>db.getActiveTelegramOperators.all(),
+  retryDelay:(attempt,error)=>Math.max(deliveryRetryDelaySeconds(attempt),telegramRetryAfterSeconds(error)),
+  onError:error=>{console.warn('[TG private] support inbox:',tgError(error));scheduleDeliveryQueue(1000);},
+  remove:deleteTelegramMessage, expired:cleanupExpired
+});
+
+function supportReplyTarget(msg) {
+  if(!isAuthorized(msg.from?.id)||msg.chat?.type!=='private')return null;
+  return supportInbox.target(msg);
+}
+
+async function sendSupportInboxMessage(ticket,message,chatId,remember) {
+  const prefix=`👤 ${ticket.user_name||'Клиент'} · #${shortId(ticket)}`;
+  const content=String(message.content||'');
+  const options={disable_notification:false,reply_markup:{inline_keyboard:[[
+    {text:'Ответить',callback_data:'reply:'+message.id}
+  ]]}};
+  let sent;
+  let remaining=content;
+  const file=publicUploadPath(message.file_url);
+  if(message.message_type!=='text') {
+    if(!file)throw Error('Attachment file is unavailable');
+    const caption=prefix+'\n\n'+content.slice(0,900-prefix.length);
+    remaining=content.slice(900-prefix.length);
+    if(message.message_type==='image')sent=await sendWithDocumentFallback(()=>bot.sendPhoto(chatId,file,{...options,caption}),chatId,file,{...options,caption});
+    else if(message.message_type==='video')sent=await sendWithDocumentFallback(()=>bot.sendVideo(chatId,file,{...options,caption}),chatId,file,{...options,caption});
+    else if(message.message_type==='audio')sent=await sendWithDocumentFallback(()=>bot.sendAudio(chatId,file,{...options,caption}),chatId,file,{...options,caption});
+    else sent=await bot.sendDocument(chatId,file,{...options,caption});
+    remember(sent.message_id);
+  }
+  if(message.message_type==='text'||remaining) {
+    do {
+      const chunk=remaining.slice(0,3500);remaining=remaining.slice(3500);
+      sent=await bot.sendMessage(chatId,prefix+'\n\n'+(chunk||'Сообщение клиента'),options);
+      remember(sent.message_id);
+    }while(remaining);
+  }
+  return sent;
+}
+
+async function beginSupportInboxReply(query,operator,answer) {
+  const target=supportInbox.source(query.message.chat.id,query.message.message_id,operator.telegram_user_id);
+  if(!target||query.data!=='reply:'+target.message_id) {
+    await answer({text:'Сообщение недоступно. Выберите другое входящее сообщение.',show_alert:true});return;
+  }
+  const source=db.getMessageById.get(target.message_id),ticket=source&&db.getTicketById.get(source.ticket_id);
+  if(!ticket||ticket.status!=='open'){await answer({text:'Тикет закрыт',show_alert:true});return;}
+  if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id)) {
+    await answer({text:'Тикет назначен другому оператору',show_alert:true});return;
+  }
+  await answer();
+  await claimAndOpenTicket(ticket.id,operator.telegram_user_id);
+  const sent=await bot.sendMessage(query.message.chat.id,
+    `Ответ для ${ticket.user_name} · #${shortId(ticket)}. Напишите сообщение или прикрепите фото/файл в ответ на эту подсказку.`,
+    {reply_markup:{force_reply:true,input_field_placeholder:'Напишите ответ или прикрепите фото'}});
+  supportInbox.remember(query.message.chat.id,sent.message_id,source.id,operator.telegram_user_id);
+}
+
+function publishSupportInbox(ticket,message) {
+  if(message.sender==='user')supportInbox.publish(ticket,message).catch(error=>{
+    console.warn('[TG private] support inbox enqueue:',tgError(error));scheduleDeliveryQueue(1000);
+  });
+}
+
 async function forwardMessage(ticket, message, options = {}) {
   if(db.deliveryHeld.get('operator',String(message.id)))return null;
   const settings = cfg();
   if (!tgEnabled()) return null;
   if (message.sender === 'user' && !settings.telegramForwardUserMessages) return null;
   if (message.sender === 'support' && !settings.telegramForwardAdminMessages) return null;
+  publishSupportInbox(db.getTicketById.get(ticket.id)||ticket,message);
   if (message.telegram_message_id || forwardingMessages.has(message.id)) {
     return message.telegram_message_id || null;
   }
@@ -3419,6 +3509,7 @@ async function forwardMessage(ticket, message, options = {}) {
       }
     } else {
       deliveryStats.unassigned++;
+      publishSupportInbox(fresh,message);
       if (message.sender === 'user') {
         for (const operator of operators) {
           await sendAssignmentNotification(fresh, operator, {
@@ -3436,6 +3527,7 @@ async function forwardMessage(ticket, message, options = {}) {
     db.unassignTicket.run(fresh.id);
     return null;
   }
+  publishSupportInbox(fresh,message);
   let thread = db.getTelegramThreadForTicketOperator.get(fresh.id, operator.telegram_user_id);
   if (!thread) thread = await ensurePrivateThread(fresh, operator);
   if (!thread) return null;
@@ -3501,6 +3593,8 @@ async function processDeliveryQueue() {
       }
     }
     if (shuttingDown) return;
+    await supportInbox.retry();
+    await supportInbox.cleanup();
     const messages = db.getPendingPrivateTelegramMessages.all(20);
     for (const message of messages) {
       if (shuttingDown) break;

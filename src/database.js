@@ -109,6 +109,36 @@ db.exec(`
     ON messages(web_delivered_at, web_delivery_next_retry_at, created_at);
 `);
 
+// Main-chat copies and explicit reply targets are independent from topic delivery.
+// Cascading references also remove these records when a ticket/message is purged.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS telegram_support_inbox (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    operator_id TEXT NOT NULL,
+    sent_message_id INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, operator_id)
+  );
+  CREATE TABLE IF NOT EXISTS telegram_support_reply_targets (
+    chat_id TEXT NOT NULL,
+    telegram_message_id INTEGER NOT NULL,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    operator_id TEXT NOT NULL,
+    media_group_id TEXT,
+    response_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+    cleanup_pending INTEGER NOT NULL DEFAULT 0,
+    cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+    cleanup_retry_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    cleanup_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, telegram_message_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_support_reply_album
+    ON telegram_support_reply_targets(chat_id, media_group_id);
+`);
+
 // Only one process may consume getUpdates for a bot token. Keeping the lease in
 // the shared application database also covers overlapping containers during a
 // rolling restart, while allowing a standby process to take over after expiry.

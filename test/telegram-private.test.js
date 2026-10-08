@@ -16,6 +16,9 @@ process.env.PUBLIC_URL = 'https://support.example';
 process.env.UPLOADS_DIR = path.join(root, 'uploads');
 
 const sent = [];
+const media = [];
+let inboxFailuresRemaining=0;
+const deletionFailures=new Set();
 const rich = [];
 const richDrafts = [];
 const pins = [];
@@ -87,7 +90,18 @@ class FakeBot {
   getFileLink(fileId) {
     return Promise.resolve(`https://files.example/${fileId}`);
   }
+  sendPhoto(chatId,file,options) {
+    const sentMessageId=++messageId;
+    media.push({chatId:String(chatId),file,options,messageId:sentMessageId});
+    return Promise.resolve({message_id:sentMessageId});
+  }
+  sendDocument(...args){return this.sendPhoto(...args);}
+  sendVideo(...args){return this.sendPhoto(...args);}
+  sendAudio(...args){return this.sendPhoto(...args);}
   sendMessage(chatId, text, options) {
+    if(options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data?.startsWith('reply:'))&&inboxFailuresRemaining>0) {
+      inboxFailuresRemaining--;return Promise.reject(new Error('EFATAL: inbox transport failed'));
+    }
     if (sendMessageFailuresRemaining > 0) {
       sendMessageFailuresRemaining--;
       return Promise.reject(new Error('EFATAL: fetch failed'));
@@ -131,6 +145,7 @@ class FakeBot {
     return Promise.resolve();
   }
   deleteMessage(chatId, deletedMessageId) {
+    if(deletionFailures.has(Number(deletedMessageId)))return Promise.reject(new Error('EFATAL: delete failed'));
     deleted.push({ chatId: String(chatId), messageId: Number(deletedMessageId) });
     return Promise.resolve();
   }
@@ -231,6 +246,126 @@ test('empty ticket creates a topic after a transient Telegram failure', async ()
   assert.doesNotMatch(intro.markdown, /Клиент открыл новое обращение|^> /m);
   assert.match(intro.markdown, /Диалог/);
   assert.match(intro.markdown, /Пустой тикет/);
+});
+
+
+function inboxUserMessage(ticketId,id,text='Входящее сообщение',type='text',file=null) {
+  db.saveMessage.run(id,ticketId,'user','Клиент',text,type,file,file?'photo.jpg':null,file?'image/jpeg':null,null,null);
+  return db.getMessageById.get(id);
+}
+async function replyInMain(messageId,text,id,extra={}) {
+  await fakeBot.handlers.message({message_id:id,chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},
+    ...(text?{text}:{}),reply_to_message:{message_id:messageId},...extra});
+}
+const inboxButton=id=>sent.findLast(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id));
+
+test('each customer message appears in main chat with Reply while topic history remains',async()=>{
+  const ticketId='inbox-live';db.createTicket.run(ticketId,'Клиент ленты','session-inbox-live');
+  await telegram.createTopic(ticketId);
+  for(const id of ['inbox-first','inbox-second']) {
+    const message=inboxUserMessage(ticketId,id,'Сообщение '+id);
+    await telegram.forwardMessage(db.getTicketById.get(ticketId),message);
+    const item=inboxButton(id);assert.ok(item);assert.equal(item.options.message_thread_id,undefined);
+    assert.match(item.text,new RegExp(id));assert.ok(db.getMessageById.get(id).telegram_message_id);
+    const count=sent.filter(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id)).length;
+    await telegram.forwardMessage(db.getTicketById.get(ticketId),db.getMessageById.get(id));
+    assert.equal(sent.filter(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id)).length,count);
+  }
+});
+
+test('Reply button opens ForceReply and routes text to the exact customer',async()=>{
+  const source='inbox-first',item=inboxButton(source);
+  await fakeBot.handlers.callback_query({id:'inbox-callback',from:{id:7001,first_name:'Оператор'},message:{chat:{id:7001,type:'private'},message_id:item.messageId},data:'reply:'+source});
+  const prompt=sent.findLast(item=>item.options?.reply_markup?.force_reply);assert.ok(prompt);
+  await replyInMain(prompt.messageId,'Ответ из общей ленты',19001);
+  const response=db.getMessages.all('inbox-live').find(m=>m.content==='Ответ из общей ленты');
+  assert.equal(response.reply_to_id,source);assert.equal(response.sender,'support');
+  assert.ok(socketEmits.some(e=>e.room==='ticket:inbox-live'&&e.payload?.id===response.id));
+  assert.equal(deleted.some(e=>e.messageId===item.messageId),false,'Keep source until web delivery acknowledgement');
+  telegram.confirmWebCustomerDelivery('inbox-live',response.id);await telegram.processDeliveryQueue();
+  for(const id of [item.messageId,prompt.messageId,19001])assert.ok(deleted.some(e=>e.chatId==='7001'&&e.messageId===id),'Delete delivered conversation from main: '+id);
+  assert.ok(db.getMessageById.get(source));assert.ok(db.getMessageById.get(response.id));
+  assert.equal(deleted.some(e=>e.messageId===inboxButton('inbox-second').messageId),false,'Unanswered other message stays');
+});
+
+test('native Reply with a photo works and deletes both messages only after delivery',async()=>{
+  const item=inboxButton('inbox-second');await replyInMain(item.messageId,null,19002,{photo:[{file_id:'inbox-photo',file_size:18}]});
+  const response=db.getMessageByTelegramDestination.get('7001',19002);assert.equal(response.ticket_id,'inbox-live');
+  assert.equal(response.message_type,'image');assert.equal(response.reply_to_id,'inbox-second');assert.ok(fs.existsSync(path.join(process.env.UPLOADS_DIR,path.basename(response.file_url))));
+  assert.equal(deleted.some(e=>e.messageId===19002),false);
+  telegram.confirmWebCustomerDelivery('inbox-live',response.id);await telegram.processDeliveryQueue();
+  assert.ok(deleted.some(e=>e.messageId===19002));assert.ok(deleted.some(e=>e.messageId===item.messageId));
+});
+
+test('main inbox retries persist independently of successful topic delivery',async()=>{
+  const message=inboxUserMessage('inbox-live','inbox-retry','Повторная доставка');inboxFailuresRemaining=1;
+  await telegram.forwardMessage(db.getTicketById.get('inbox-live'),message);
+  assert.ok(db.getMessageById.get(message.id).telegram_message_id);assert.equal(inboxButton(message.id),undefined);
+  const row=db.db.prepare('SELECT * FROM telegram_support_inbox WHERE message_id=?').get(message.id);
+  assert.equal(row.attempts,1);assert.match(row.last_error,/inbox transport/);
+  db.db.prepare('UPDATE telegram_support_inbox SET next_retry_at=CURRENT_TIMESTAMP WHERE message_id=?').run(message.id);
+  await telegram.processDeliveryQueue();assert.ok(inboxButton(message.id));
+});
+
+test('closed/reassigned targets and untargeted text never leak to another customer',async()=>{
+  const item=inboxButton('inbox-retry'),count=db.getMessages.all('inbox-live').length;
+  await fakeBot.handlers.message({message_id:19003,chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},text:'Без адресата'});
+  assert.equal(db.getMessages.all('inbox-live').length,count);
+  db.assignTicketIfUnassigned.run('7001','inbox-live');
+  db.db.prepare('UPDATE tickets SET assigned_operator_id=? WHERE id=?').run('7002','inbox-live');
+  await replyInMain(item.messageId,'Чужой тикет',19004);assert.equal(db.getMessages.all('inbox-live').length,count);
+  db.db.prepare('UPDATE tickets SET assigned_operator_id=?,status=? WHERE id=?').run('7001','closed','inbox-live');
+  await replyInMain(item.messageId,'Закрытый тикет',19005);assert.equal(db.getMessages.all('inbox-live').length,count);
+  db.db.prepare('UPDATE tickets SET status=? WHERE id=?').run('open','inbox-live');
+});
+
+test('photo album keeps explicit recipient after its first delivered reply is cleaned',async()=>{
+  const item=inboxButton('inbox-retry');
+  await replyInMain(item.messageId,null,19006,{photo:[{file_id:'album-first',file_size:18}],media_group_id:'support-album'});
+  const first=db.getMessageByTelegramDestination.get('7001',19006);telegram.confirmWebCustomerDelivery('inbox-live',first.id);await telegram.processDeliveryQueue();
+  await fakeBot.handlers.message({message_id:19007,chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},photo:[{file_id:'album-second',file_size:18}],media_group_id:'support-album'});
+  const second=db.getMessageByTelegramDestination.get('7001',19007);assert.ok(second);assert.equal(second.reply_to_id,'inbox-retry');
+  assert.equal(second.ticket_id,'inbox-live');telegram.confirmWebCustomerDelivery('inbox-live',second.id);await telegram.processDeliveryQueue();
+  assert.ok(deleted.some(e=>e.messageId===19007));
+});
+
+test('incoming photo is copied to main with its own Reply button',async()=>{
+  fs.mkdirSync(process.env.UPLOADS_DIR,{recursive:true});fs.writeFileSync(path.join(process.env.UPLOADS_DIR,'inbox-fixture.jpg'),'test-photo');
+  const message=inboxUserMessage('inbox-live','inbox-image','Скриншот','image','/uploads/inbox-fixture.jpg');
+  await telegram.forwardMessage(db.getTicketById.get('inbox-live'),message);
+  const item=media.find(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='reply:'+message.id));
+  assert.ok(item);assert.equal(item.options.message_thread_id,undefined);assert.match(item.options.caption,/Скриншот/);
+  await replyInMain(item.messageId,'Спасибо за скриншот',19008);
+  assert.equal(db.getMessageByTelegramDestination.get('7001',19008).reply_to_id,message.id);
+});
+
+test('cleanup failure is persisted and retried without deleting an undelivered photo reply',async()=>{
+  const item=inboxButton('inbox-retry');await replyInMain(item.messageId,'Очередь удаления',19009);
+  const response=db.getMessageByTelegramDestination.get('7001',19009);
+  deletionFailures.add(19009);
+  try {
+    telegram.confirmWebCustomerDelivery('inbox-live',response.id);await telegram.processDeliveryQueue();
+    const record=db.db.prepare('SELECT * FROM telegram_support_reply_targets WHERE telegram_message_id=?').get(19009);
+    assert.equal(record.cleanup_pending,1);assert.equal(record.cleanup_attempts,1);assert.match(record.cleanup_error,/confirm deletion/);
+  }finally{deletionFailures.delete(19009);}
+  db.db.prepare('UPDATE telegram_support_reply_targets SET cleanup_retry_at=CURRENT_TIMESTAMP WHERE telegram_message_id=?').run(19009);
+  await telegram.processDeliveryQueue();assert.ok(deleted.some(e=>e.messageId===19009));
+});
+
+test('two operator inboxes preserve atomic claiming and reject the other operator reply',async()=>{
+  db.saveManagedTelegramOperator.run('7002','Второй оператор',null,1,0);
+  try {
+    const ticketId='inbox-unassigned';db.createTicket.run(ticketId,'Новый клиент','session-inbox-unassigned');
+    const message=inboxUserMessage(ticketId,'inbox-unassigned-message');await telegram.forwardMessage(db.getTicketById.get(ticketId),message);
+    const items=sent.filter(i=>i.options?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='reply:'+message.id));
+    assert.equal(items.length,2);assert.deepEqual(new Set(items.map(i=>i.chatId)),new Set(['7001','7002']));
+    const own=items.find(i=>i.chatId==='7001'),other=items.find(i=>i.chatId==='7002');
+    await fakeBot.handlers.callback_query({id:'claim-inbox',from:{id:7001,first_name:'Оператор'},message:{chat:{id:7001,type:'private'},message_id:own.messageId},data:'reply:'+message.id});
+    assert.equal(db.getTicketById.get(ticketId).assigned_operator_id,'7001');
+    await fakeBot.handlers.message({message_id:19010,chat:{id:7002,type:'private'},from:{id:7002,first_name:'Второй оператор'},text:'Не мой тикет',reply_to_message:{message_id:other.messageId}});
+    assert.equal(db.getMessages.all(ticketId).filter(m=>m.sender==='support').length,0);
+    db.db.prepare("UPDATE tickets SET status='closed' WHERE id=?").run(ticketId);
+  }finally{db.deactivateTelegramOperator.run('7002');}
 });
 
 test('an operator added from settings can use the bot without settings access', async () => {
@@ -754,6 +889,33 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.messageId === newTicketByButton.telegram_customer_control_message_id &&
     item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
   ));
+});
+
+test('main-chat answer to a Telegram customer is cleaned only after confirmed send',async()=>{
+  await fakeBot.handlers.message({message_id:19100,chat:{id:8199,type:'private'},from:{id:8199,first_name:'Клиент главной ленты'},text:'Тест доставки из ленты'});
+  const ticket=db.getOpenTicketByTelegramCustomer.get('8199');
+  let source;
+  for(let i=0;i<80;i++) {
+    source=db.getMessages.all(ticket.id).find(m=>m.sender==='user');
+    if(source&&inboxButton(source.id)&&db.getTicketById.get(ticket.id).assigned_operator_id)break;
+    await new Promise(r=>setTimeout(r,5));
+  }
+  const item=inboxButton(source.id);assert.ok(item);
+  const message={message_id:19101,chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},text:'Ответ с гарантией доставки',reply_to_message:{message_id:item.messageId}};
+  sendMessageFailuresRemaining=1;
+  await fakeBot.handlers.message(message);
+  let response=db.getMessageByTelegramDestination.get('7001',19101);
+  for(let i=0;i<80&&!response.telegram_customer_attempts;i++){await new Promise(r=>setTimeout(r,5));response=db.getMessageById.get(response.id);}
+  assert.equal(response.telegram_customer_message_id,null);assert.equal(deleted.some(e=>e.messageId===item.messageId),false);assert.equal(deleted.some(e=>e.messageId===19101),false);
+  db.db.prepare('UPDATE messages SET telegram_customer_next_retry_at=CURRENT_TIMESTAMP WHERE id=?').run(response.id);
+  for(let i=0;i<150;i++) {
+    await telegram.processDeliveryQueue();response=db.getMessageById.get(response.id);
+    if(response.telegram_customer_message_id&&deleted.some(e=>e.messageId===19101))break;
+    await new Promise(r=>setTimeout(r,20));
+  }
+  assert.ok(response.telegram_customer_message_id);assert.ok(deleted.some(e=>e.messageId===item.messageId));assert.ok(deleted.some(e=>e.messageId===19101));
+  const count=db.getMessages.all(ticket.id).length;await fakeBot.handlers.message(message);assert.equal(db.getMessages.all(ticket.id).length,count,'Duplicate Telegram update never sends twice');
+  db.db.prepare("UPDATE tickets SET status='closed' WHERE id=?").run(ticket.id);
 });
 
 test('rapid operator replies to one customer are serialized and kept in order', async () => {
