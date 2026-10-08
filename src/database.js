@@ -628,6 +628,10 @@ module.exports = {
     LEFT JOIN messages r ON r.id = m.reply_to_id
     WHERE m.ticket_id = ? ORDER BY m.created_at ASC
   `),
+  getLatestUserMessageForTicket: db.prepare(`
+    SELECT * FROM messages WHERE ticket_id=? AND sender='user'
+    ORDER BY created_at DESC,rowid DESC LIMIT 1
+  `),
   getLatestMessageForTicket: db.prepare(`
     SELECT id, created_at FROM messages
     WHERE ticket_id = ?
