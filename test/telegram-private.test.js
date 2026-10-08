@@ -111,6 +111,9 @@ class FakeBot {
     return Promise.resolve({ message_id: sentMessageId });
   }
   sendRichMessage(chatId, payload, options) {
+    if(options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data?.startsWith('reply:'))&&inboxFailuresRemaining>0) {
+      inboxFailuresRemaining--;return Promise.reject(new Error('EFATAL: inbox transport failed'));
+    }
     if (richMessageFailuresRemaining > 0) {
       richMessageFailuresRemaining--;
       return Promise.reject(new Error('EFATAL: fetch failed'));
@@ -257,7 +260,8 @@ async function replyInMain(messageId,text,id,extra={}) {
   await fakeBot.handlers.message({message_id:id,chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},
     ...(text?{text}:{}),reply_to_message:{message_id:messageId},...extra});
 }
-const inboxButton=id=>sent.findLast(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id));
+const inboxCopies=()=>[...sent,...rich];
+const inboxButton=id=>inboxCopies().findLast(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id));
 
 test('each customer message appears in main chat with Reply while topic history remains',async()=>{
   const ticketId='inbox-live';db.createTicket.run(ticketId,'Клиент ленты','session-inbox-live');
@@ -266,10 +270,12 @@ test('each customer message appears in main chat with Reply while topic history 
     const message=inboxUserMessage(ticketId,id,'Сообщение '+id);
     await telegram.forwardMessage(db.getTicketById.get(ticketId),message);
     const item=inboxButton(id);assert.ok(item);assert.equal(item.options.message_thread_id,undefined);
-    assert.match(item.text,new RegExp(id));assert.ok(db.getMessageById.get(id).telegram_message_id);
-    const count=sent.filter(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id)).length;
+    assert.match((item.text||item.markdown).replace(/\\/g,''),new RegExp(id));
+    for(let i=0;i<80&&!db.db.prepare('SELECT 1 FROM telegram_support_reply_targets WHERE chat_id=? AND telegram_message_id=?').get('7001',item.messageId);i++)await new Promise(r=>setTimeout(r,5));
+    assert.ok(item.markdown,'Inbox uses Rich messages with an attached Reply button');assert.ok(db.getMessageById.get(id).telegram_message_id);
+    const count=inboxCopies().filter(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id)).length;
     await telegram.forwardMessage(db.getTicketById.get(ticketId),db.getMessageById.get(id));
-    assert.equal(sent.filter(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id)).length,count);
+    assert.equal(inboxCopies().filter(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(button=>button.callback_data==='reply:'+id)).length,count);
   }
 });
 
@@ -279,8 +285,10 @@ test('Reply button opens ForceReply and routes text to the exact customer',async
   const prompt=sent.findLast(item=>item.options?.reply_markup?.force_reply);assert.ok(prompt);
   await replyInMain(prompt.messageId,'Ответ из общей ленты',19001);
   const response=db.getMessages.all('inbox-live').find(m=>m.content==='Ответ из общей ленты');
-  assert.equal(response.reply_to_id,source);assert.equal(response.sender,'support');
+  assert.equal(response.reply_to_id,null);assert.equal(response.sender,'support');
   assert.ok(socketEmits.some(e=>e.room==='ticket:inbox-live'&&e.payload?.id===response.id));
+  const emitted=socketEmits.find(e=>e.room==='ticket:inbox-live'&&e.payload?.id===response.id);
+  assert.equal(emitted.payload.reply_to_id,null);assert.equal(emitted.payload.reply_to_content,null);
   assert.equal(deleted.some(e=>e.messageId===item.messageId),false,'Keep source until web delivery acknowledgement');
   telegram.confirmWebCustomerDelivery('inbox-live',response.id);await telegram.processDeliveryQueue();
   for(const id of [item.messageId,prompt.messageId,19001])assert.ok(deleted.some(e=>e.chatId==='7001'&&e.messageId===id),'Delete delivered conversation from main: '+id);
@@ -291,7 +299,7 @@ test('Reply button opens ForceReply and routes text to the exact customer',async
 test('native Reply with a photo works and deletes both messages only after delivery',async()=>{
   const item=inboxButton('inbox-second');await replyInMain(item.messageId,null,19002,{photo:[{file_id:'inbox-photo',file_size:18}]});
   const response=db.getMessageByTelegramDestination.get('7001',19002);assert.equal(response.ticket_id,'inbox-live');
-  assert.equal(response.message_type,'image');assert.equal(response.reply_to_id,'inbox-second');assert.ok(fs.existsSync(path.join(process.env.UPLOADS_DIR,path.basename(response.file_url))));
+  assert.equal(response.message_type,'image');assert.equal(response.reply_to_id,null);assert.ok(fs.existsSync(path.join(process.env.UPLOADS_DIR,path.basename(response.file_url))));
   assert.equal(deleted.some(e=>e.messageId===19002),false);
   telegram.confirmWebCustomerDelivery('inbox-live',response.id);await telegram.processDeliveryQueue();
   assert.ok(deleted.some(e=>e.messageId===19002));assert.ok(deleted.some(e=>e.messageId===item.messageId));
@@ -324,7 +332,7 @@ test('photo album keeps explicit recipient after its first delivered reply is cl
   await replyInMain(item.messageId,null,19006,{photo:[{file_id:'album-first',file_size:18}],media_group_id:'support-album'});
   const first=db.getMessageByTelegramDestination.get('7001',19006);telegram.confirmWebCustomerDelivery('inbox-live',first.id);await telegram.processDeliveryQueue();
   await fakeBot.handlers.message({message_id:19007,chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},photo:[{file_id:'album-second',file_size:18}],media_group_id:'support-album'});
-  const second=db.getMessageByTelegramDestination.get('7001',19007);assert.ok(second);assert.equal(second.reply_to_id,'inbox-retry');
+  const second=db.getMessageByTelegramDestination.get('7001',19007);assert.ok(second);assert.equal(second.reply_to_id,null);
   assert.equal(second.ticket_id,'inbox-live');telegram.confirmWebCustomerDelivery('inbox-live',second.id);await telegram.processDeliveryQueue();
   assert.ok(deleted.some(e=>e.messageId===19007));
 });
@@ -336,7 +344,7 @@ test('incoming photo is copied to main with its own Reply button',async()=>{
   const item=media.find(item=>item.options?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='reply:'+message.id));
   assert.ok(item);assert.equal(item.options.message_thread_id,undefined);assert.match(item.options.caption,/Скриншот/);
   await replyInMain(item.messageId,'Спасибо за скриншот',19008);
-  assert.equal(db.getMessageByTelegramDestination.get('7001',19008).reply_to_id,message.id);
+  assert.equal(db.getMessageByTelegramDestination.get('7001',19008).reply_to_id,null);
 });
 
 test('cleanup failure is persisted and retried without deleting an undelivered photo reply',async()=>{
@@ -357,7 +365,7 @@ test('two operator inboxes preserve atomic claiming and reject the other operato
   try {
     const ticketId='inbox-unassigned';db.createTicket.run(ticketId,'Новый клиент','session-inbox-unassigned');
     const message=inboxUserMessage(ticketId,'inbox-unassigned-message');await telegram.forwardMessage(db.getTicketById.get(ticketId),message);
-    const items=sent.filter(i=>i.options?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='reply:'+message.id));
+    const items=inboxCopies().filter(i=>i.options?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='reply:'+message.id));
     assert.equal(items.length,2);assert.deepEqual(new Set(items.map(i=>i.chatId)),new Set(['7001','7002']));
     const own=items.find(i=>i.chatId==='7001'),other=items.find(i=>i.chatId==='7002');
     await fakeBot.handlers.callback_query({id:'claim-inbox',from:{id:7001,first_name:'Оператор'},message:{chat:{id:7001,type:'private'},message_id:own.messageId},data:'reply:'+message.id});
@@ -366,6 +374,19 @@ test('two operator inboxes preserve atomic claiming and reject the other operato
     assert.equal(db.getMessages.all(ticketId).filter(m=>m.sender==='support').length,0);
     db.db.prepare("UPDATE tickets SET status='closed' WHERE id=?").run(ticketId);
   }finally{db.deactivateTelegramOperator.run('7002');}
+});
+
+test('Rich dialog itself exposes Reply and opens a prompt in its topic',async()=>{
+  const ticket=db.getTicketById.get('inbox-live'),thread=db.getTelegramThreadForTicketOperator.get(ticket.id,'7001');
+  const buttons=(edits.findLast(e=>e.options?.message_id===thread.root_message_id)?.options?.reply_markup||rich.findLast(e=>e.messageId===thread.root_message_id)?.options?.reply_markup)?.inline_keyboard?.flat();
+  assert.ok(buttons?.some(b=>b.text==='Ответить'&&b.callback_data==='replyticket:'+ticket.id));
+  await fakeBot.handlers.callback_query({id:'rich-dialog-reply',from:{id:7001,first_name:'Оператор'},
+    message:{chat:{id:7001,type:'private'},message_id:thread.root_message_id,message_thread_id:thread.thread_id},data:'replyticket:'+ticket.id});
+  const prompt=sent.findLast(e=>e.options?.reply_markup?.force_reply);assert.equal(prompt.options.message_thread_id,thread.thread_id);
+  await replyInMain(prompt.messageId,'Обычный ответ из Rich-диалога',19201,{message_thread_id:thread.thread_id});
+  const response=db.getMessageByTelegramDestination.get('7001',19201);assert.equal(response.ticket_id,ticket.id);assert.equal(response.reply_to_id,null);
+  telegram.confirmWebCustomerDelivery(ticket.id,response.id);await telegram.processDeliveryQueue();
+  assert.equal(deleted.some(e=>e.messageId===thread.root_message_id),false,'Retain the Rich topic history');
 });
 
 test('an operator added from settings can use the bot without settings access', async () => {
@@ -482,6 +503,18 @@ test('an operator reply from a Telegram topic is persisted and emitted to the we
     text: 'Ответ через Telegram'
   });
   assert.equal(db.getMessages.all(ticketId).length, messagesBefore + 1);
+});
+
+test('native Reply inside an operator topic also delivers plain support text',async()=>{
+  const original=db.getMessageByTelegramDestination.get('7001',880);assert.ok(original);
+  await fakeBot.handlers.message({message_id:19200,message_thread_id:501,
+    chat:{id:7001,type:'private'},from:{id:7001,first_name:'Оператор'},
+    text:'Обычный ответ без цитаты',reply_to_message:{message_id:880}});
+  const response=db.getMessageByTelegramDestination.get('7001',19200);
+  assert.equal(response.ticket_id,original.ticket_id);assert.equal(response.reply_to_id,null);
+  const emitted=socketEmits.find(e=>e.event==='message'&&e.payload?.id===response.id);
+  assert.equal(emitted.payload.reply_to_content,null);assert.equal(emitted.payload.reply_to_sender_name,null);
+  telegram.confirmWebCustomerDelivery(response.ticket_id,response.id);await telegram.processDeliveryQueue();
 });
 
 test('rapid operator messages are processed in their Telegram order', async () => {
@@ -742,7 +775,7 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.match(transcript, /\*\*👤 Анна Клиент\*\* · _\d{2}:\d{2}_/);
   assert.equal(
     rich.filter(item =>
-      item.chatId === '7001' && item.markdown.includes('Нужна помощь с подключением')
+      item.chatId === '7001' && item.options?.message_thread_id && item.markdown.includes('Нужна помощь с подключением')
     ).length,
     1,
     'the customer text is kept in the single Rich transcript'
@@ -913,6 +946,8 @@ test('main-chat answer to a Telegram customer is cleaned only after confirmed se
     if(response.telegram_customer_message_id&&deleted.some(e=>e.messageId===19101))break;
     await new Promise(r=>setTimeout(r,20));
   }
+  const customer=sent.find(e=>e.chatId==='8199'&&e.text.includes('Ответ с гарантией доставки'));
+  assert.ok(customer);assert.equal(customer.options.reply_parameters,undefined);assert.equal(customer.options.reply_to_message_id,undefined);assert.equal(response.reply_to_id,null);
   assert.ok(response.telegram_customer_message_id);assert.ok(deleted.some(e=>e.messageId===item.messageId));assert.ok(deleted.some(e=>e.messageId===19101));
   const count=db.getMessages.all(ticket.id).length;await fakeBot.handlers.message(message);assert.equal(db.getMessages.all(ticket.id).length,count,'Duplicate Telegram update never sends twice');
   db.db.prepare("UPDATE tickets SET status='closed' WHERE id=?").run(ticket.id);

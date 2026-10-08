@@ -16,6 +16,7 @@ function createSupportInbox({db, send, enabled, authorized, operators, retryDela
   const target=sql.prepare('SELECT * FROM telegram_support_reply_targets WHERE chat_id=? AND telegram_message_id=? AND operator_id=?');
   const album=sql.prepare(`SELECT * FROM telegram_support_reply_targets WHERE chat_id=? AND media_group_id=?
     AND operator_id=? AND created_at>datetime('now','-10 minutes') ORDER BY created_at DESC LIMIT 1`);
+  const responseTarget=sql.prepare('SELECT message_id FROM telegram_support_reply_targets WHERE chat_id=? AND response_id=? LIMIT 1');
   const answered=sql.prepare(`UPDATE telegram_support_reply_targets SET cleanup_pending=1
     WHERE chat_id=? AND message_id=? AND (response_id IS NULL OR response_id=?) AND cleanup_pending!=2`);
   const cleanup=sql.prepare(`SELECT * FROM telegram_support_reply_targets WHERE cleanup_pending=1
@@ -52,8 +53,10 @@ function createSupportInbox({db, send, enabled, authorized, operators, retryDela
   return {
     remember,
     answered(message) {
-      if(!message?.reply_to_id||!message.telegram_chat_id)return;
-      return answered.run(String(message.telegram_chat_id),message.reply_to_id,message.id).changes>0;
+      if(!message?.telegram_chat_id)return;
+      const source=message.reply_to_id||responseTarget.get(String(message.telegram_chat_id),message.id)?.message_id;
+      if(!source)return;
+      return answered.run(String(message.telegram_chat_id),source,message.id).changes>0;
     },
     target:msg=>target.get(String(msg.chat?.id||''),Number(msg.reply_to_message?.message_id||0),String(msg.from?.id||''))||
       (msg.media_group_id?album.get(String(msg.chat?.id||''),String(msg.media_group_id),String(msg.from?.id||'')):null),

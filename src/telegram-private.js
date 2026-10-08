@@ -469,6 +469,9 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
   if (state === 'unassigned') {
     rows.push([tgButton('🙋 Взять тикет', `take:${ticket.id}`, 'primary')]);
   }
+  if(state!=='closed'&&db.getLatestUserMessageForTicket.get(ticket.id)) {
+    rows.push([tgButton('Ответить',`replyticket:${ticket.id}`,'primary')]);
+  }
   const webAppUrl = adminWebAppUrl(ticket.id);
   if (!menu) {
     const quickActions = [];
@@ -2830,6 +2833,11 @@ async function handleCallbackQuery(query) {
       }
       return;
     }
+    if(action==='replyticket') {
+      const source=db.getLatestUserMessageForTicket.get(ticket.id);
+      if(!source){await answer({text:'Сообщений клиента пока нет',show_alert:true});return;}
+      return await sendSupportReplyPrompt(query,operator,answer,ticket,source);
+    }
     if (!operatorCanControlTicket(ticket, userId, query)) {
       await bot.answerCallbackQuery(query.id, { text: 'Тикет назначен другому оператору', show_alert: true });
       return;
@@ -3081,19 +3089,10 @@ async function forwardOperatorMessage(msg, ticket, thread, operator, {inboxTarge
     }
     if (!rawText && !fileUrl) return;
 
-    let replyToId = null;
-    let replyMessage = null;
-    if (msg.reply_to_message) {
-      replyMessage = db.getMessageByTelegramDestination.get(
-        String(msg.chat.id),
-        msg.reply_to_message.message_id
-      );
-      if (replyMessage?.ticket_id === ticket.id) replyToId = replyMessage.id;
-    }
-    if(inboxTarget) {
-      replyMessage=db.getMessageById.get(inboxTarget.message_id);
-      if(replyMessage?.ticket_id===ticket.id)replyToId=replyMessage.id;
-    }
+    // Telegram Reply selects the destination only. The customer receives a
+    // regular support message, without the operator's routing quote.
+    const replyToId = null;
+    const replyMessage = null;
     const id = uuidv4();
     db.saveMessage.run(
       id,
@@ -3454,7 +3453,7 @@ async function sendSupportInboxMessage(ticket,message,chatId,remember) {
   if(message.message_type==='text'||remaining) {
     do {
       const chunk=remaining.slice(0,3500);remaining=remaining.slice(3500);
-      sent=await bot.sendMessage(chatId,prefix+'\n\n'+(chunk||'Сообщение клиента'),options);
+      sent=await sendRichOrText(chatId,`**${markdownEscape(prefix)}**\n\n${markdownEscape(chunk||'Сообщение клиента')}`,options,prefix+'\n\n'+(chunk||'Сообщение клиента'));
       remember(sent.message_id);
     }while(remaining);
   }
@@ -3467,15 +3466,21 @@ async function beginSupportInboxReply(query,operator,answer) {
     await answer({text:'Сообщение недоступно. Выберите другое входящее сообщение.',show_alert:true});return;
   }
   const source=db.getMessageById.get(target.message_id),ticket=source&&db.getTicketById.get(source.ticket_id);
+  return sendSupportReplyPrompt(query,operator,answer,ticket,source);
+}
+
+async function sendSupportReplyPrompt(query,operator,answer,ticket,source) {
   if(!ticket||ticket.status!=='open'){await answer({text:'Тикет закрыт',show_alert:true});return;}
   if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id)) {
     await answer({text:'Тикет назначен другому оператору',show_alert:true});return;
   }
   await answer();
   await claimAndOpenTicket(ticket.id,operator.telegram_user_id);
+  const thread=db.getTelegramThreadByDestination.get(String(query.message.chat.id),Number(query.message.message_thread_id||0));
+  const options={reply_markup:{force_reply:true,input_field_placeholder:'Напишите ответ или прикрепите фото'}};
+  if(thread?.ticket_id===ticket.id&&String(thread.operator_id)===String(operator.telegram_user_id))options.message_thread_id=thread.thread_id;
   const sent=await bot.sendMessage(query.message.chat.id,
-    `Ответ для ${ticket.user_name} · #${shortId(ticket)}. Напишите сообщение или прикрепите фото/файл в ответ на эту подсказку.`,
-    {reply_markup:{force_reply:true,input_field_placeholder:'Напишите ответ или прикрепите фото'}});
+    `Ответ для ${ticket.user_name} · #${shortId(ticket)}. Напишите сообщение или прикрепите фото/файл в ответ на эту подсказку.`,options);
   supportInbox.remember(query.message.chat.id,sent.message_id,source.id,operator.telegram_user_id);
 }
 
