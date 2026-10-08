@@ -248,8 +248,8 @@ input[type=checkbox]{accent-color:var(--blue)}
 .lc-device-film{color:var(--soft);font-size:12px;overflow-wrap:anywhere}
 @media(max-width:560px){#app .panel details{padding-inline:10px}#app .panel details details{margin-left:4px}#app .panel .lc-pref-row{padding:10px;gap:10px}}
 
-/* Native WebKit select chrome clips text when combined with fixed-height padding. */
-#app .panel select{appearance:none;-webkit-appearance:none;padding-block:0;padding-right:30px;line-height:normal;background-color:var(--bg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4 3 3 3-3' fill='none' stroke='%238fa7ad' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+/* Keep WebKit select text readable and long native options inside the field width. */
+#app .panel select{appearance:none;-webkit-appearance:none;padding-block:0;padding-right:30px;line-height:normal;background-color:var(--bg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4 3 3 3-3' fill='none' stroke='%238fa7ad' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;overflow:hidden;text-overflow:ellipsis}
 
 /* Motion never transforms a page shell: fixed dialogs and keyboard geometry stay stable. */
 .navbtn,.support-nav button,summary{transition:background-color .2s,border-color .2s,color .2s}
