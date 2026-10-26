@@ -3,7 +3,7 @@
 ## First install
 
 Before deployment, create a bot with
-[@BotFather](https://t.me/BotFather), enable **Threaded Mode** for it, and
+[@BotFather](https://t.me/BotFather), and
 collect the numeric Telegram user IDs of all operators.
 
 ```bash
@@ -24,7 +24,8 @@ PUBLIC_URL=https://support.example.com
 
 After the container starts, every ID listed in `TELEGRAM_ADMIN_IDS` must open a
 private chat with the bot and send `/start`. This registers the operator and
-allows the bot to create per-ticket private topics. No Telegram group is needed.
+allows the bot to send one Rich dialog per ticket in the main private chat.
+Threaded Mode is not required. No Telegram group is needed.
 Users not listed in `TELEGRAM_ADMIN_IDS` can contact support through the same
 private bot chat. Their first message creates a Telegram-source ticket, while
 operator replies are delivered back to that chat. This channel and its texts
@@ -48,8 +49,7 @@ TELEGRAM_MODE=private
 TELEGRAM_ADMIN_IDS=123456789,987654321
 ```
 
-`TELEGRAM_GROUP_ID` is ignored in private mode and may be removed. Then enable
-Threaded Mode in @BotFather and run:
+`TELEGRAM_GROUP_ID` is ignored in private mode and may be removed. Then run:
 
 ```bash
 git pull --rebase origin main
@@ -156,3 +156,15 @@ the final volume synchronization; start only the destination containers.
 The previous host can temporarily relay HTTP/HTTPS and FRP traffic while DNS
 propagates. Do not run both Telegram pollers or accept writes into both databases.
 Remove the old relay only after DNS and device reconnections are verified.
+
+## Single Rich dialog upgrade
+
+`TELEGRAM_OPERATOR_LAYOUT=dialog` is the default. Build the image, make a
+consistent SQLite backup and recreate only `support-chat`. Existing open
+tickets migrate to main-chat cards; persisted cleanup retires their old topics
+and duplicate notifications. Closed-ticket operator cleanup is independent of
+the former delayed topic-cleanup setting. Customer/web history remains in SQLite.
+Check authenticated health `telegram.operatorLayout` and `telegram.dialogs` for
+refresh/cleanup queues. Telegram deletion restrictions can leave old messages;
+blocked cleanup is counted separately. Roll back with `TELEGRAM_OPERATOR_LAYOUT=topics`
+and the previous image if needed; never run both layouts as separate bot owners.
