@@ -7,6 +7,8 @@ const path = require('path');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'support-telegram-test-'));
 process.env.DB_PATH = path.join(root, 'support.db');
 process.env.TELEGRAM_BOT_TOKEN = 'fake-token';
+// Historical topic layout remains covered for rollback; new default has its own suite.
+process.env.TELEGRAM_OPERATOR_LAYOUT = 'topics';
 process.env.TELEGRAM_ADMIN_IDS = '7001';
 process.env.TELEGRAM_TOPIC_CREATE_RETRY_MS = '100';
 process.env.TELEGRAM_TOPIC_CREATE_ATTEMPTS = '3';
