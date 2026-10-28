@@ -1,0 +1,4 @@
+interface:
+  display_name: "KV9RU Telegram Support"
+  short_description: "Rich-диалоги и операторская панель KV9RU"
+  default_prompt: "Используй $kv9ru-telegram-support для доработки Telegram-поддержки KV9RU Workspace."
