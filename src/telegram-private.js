@@ -13,6 +13,9 @@ const {createSupportInbox}=require('./telegram-support-inbox');
 const {createSupportDialogs}=require('./telegram-support-dialogs');
 const {supportDeliveryStatus}=require('./support-delivery-status');
 const {buildAdminMenu}=require('./telegram-admin-menu');
+const {paragraph,heading,divider,richPanel}=require('./telegram-rich-ui');
+const {createLivePanels}=require('./telegram-live-panels');
+const {createServerMetrics}=require('./server-metrics');
 const SINGLE_DIALOG=process.env.TELEGRAM_OPERATOR_LAYOUT!=='topics';
 const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
 const push = require('./push');
@@ -137,6 +140,8 @@ let cleanupTimer = null;
 let deliveryTimer = null;
 let incomingRetryTimer = null;
 let reminderTimer = null;
+let livePanelsTimer = null;
+let livePanelsRefreshing=false;
 let deliveryWakeTimer = null;
 let deliveryWakeAt = 0;
 let deliveryRunning = false;
@@ -577,7 +582,11 @@ function dashboardCounts(operator) {
 }
 
 function dashboardModel(operator) {
-  return buildAdminMenu({name:operator.display_name,counts:dashboardCounts(operator),webAppUrl:adminWebAppUrl()});
+  const metrics=serverMetrics.sample();
+  const cpu=metrics.cpuPercent===null?'…':metrics.cpuPercent.toFixed(1)+'%';
+  const memory=metrics.totalMemory?Math.round(metrics.usedMemory/metrics.totalMemory*100)+'%':'—';
+  const disk=metrics.disk?compactBytes(metrics.disk.available):'—';
+  return buildAdminMenu({name:operator.display_name,counts:dashboardCounts(operator),webAppUrl:adminWebAppUrl(),serverSummary:`Сервер · CPU ${cpu} · RAM ${memory} · свободно ${disk}`});
 }
 
 function compactDuration(seconds) {
@@ -599,7 +608,6 @@ function compactBytes(bytes) {
 }
 
 function controlCenterModel() {
-  const settings = cfg();
   let snapshot = {};
   try {
     snapshot = lifecycle.getControlCenterStatus?.() || {};
@@ -629,41 +637,28 @@ function controlCenterModel() {
       : maintenance.lastBackupAt
         ? `готов · ${compactDuration((Date.now() - new Date(maintenance.lastBackupAt).getTime()) / 1000)} назад`
         : 'ожидается';
-  const diskLabel = maintenance.disk
-    ? `${Number(maintenance.disk.usedPercent || 0)}% · свободно ${compactBytes(maintenance.disk.freeBytes)}`
-    : 'нет данных';
-  const lines = [
-    '## ⚙️ Система и настройки',
-    '',
-    `**${botOk ? '🟢' : '🔴'} Telegram:** ${botOk ? 'на связи' : 'требует внимания'}${botUsername ? ` · @${markdownEscape(botUsername)}` : ''}`,
-    `**${queue ? '🟠' : '🟢'} Очередь:** ${queue} · вход ${Number(delivery.pendingIncomingMessages || 0)} / оператор ${Number(delivery.pendingMessages || 0)} / клиент ${Number(delivery.pendingCustomerReplies || 0)}`,
-    `**${Number(delivery.mediaFailures || 0) ? '🟠' : '🟢'} Медиа:** ошибок ${Number(delivery.mediaFailures || 0)}`,
-    `**${reminders.pausedOutsideWorkHours ? '🌙' : '🔔'} Напоминания:** ${reminderLabel}`,
-    `> ${Number(reminders.workStartHour ?? settings.workStartHour)}:00–${Number(reminders.workEndHour ?? settings.workEndHour)}:00 · ${markdownEscape(reminders.timezone || settings.timezone)}`,
-    '',
-    `**🌐 Realtime:** ${Number(realtime.connectedClients || 0)} подключено · WS ${Number(transports.websocket || 0)} / polling ${Number(transports.polling || 0)}`,
-    `**💾 Backup:** ${markdownEscape(backupLabel)}`,
-    `**💿 Диск:** ${markdownEscape(diskLabel)}`,
-    '',
-    '**Основные настройки**',
-    `- Файлы до **${Number(settings.uploadMaxMb || 0)} МБ** · лимит **${Number(settings.messageRateLimitPerMinute || 0)}/мин**`,
-    `- Неактивность: предупреждение **${Number(settings.inactivityWarnMinutes || 0)} мин**, закрытие **${Number(settings.inactivityCloseMinutes || 0)} мин**`,
-    `- Напоминание: через **${Number(settings.telegramUnansweredReminderMinutes || 0)} мин**, повтор **${Number(settings.telegramUnansweredRepeatMinutes || 0)} мин**`,
-    `- Клиентский Telegram: ${settings.telegramCustomerEnabled ? 'включён' : 'выключен'} · файлы ${settings.telegramCustomerFilesEnabled ? 'да' : 'нет'}`,
-    '',
-    `_Версия: ${markdownEscape(health.version || 'unknown')} · uptime ${compactDuration(health.uptime)}_`
-  ];
-  const fallback = lines
-    .map(line => line.replace(/^##\s*/, '').replace(/^>\s*/, '').replace(/[*_`]/g, ''))
-    .join('\n');
-  const rows = [[
-    { text: '🔄 Обновить', callback_data: 'system:refresh' },
-    { text: '↩️ Панель', callback_data: 'dashboard:show' }
-  ]];
+  const rows=[[{text:'✅ Архив обращений',callback_data:'list:closed:0'}],[{text:'Главное меню',callback_data:'dashboard:show'}]];
   rows.push([{text:'🧹 Очистить чат',callback_data:'dashboard:clear',style:'danger'}]);
   const webAppUrl = adminWebAppUrl();
   if (webAppUrl) rows.push([{ text: '🖥 Центр управления', web_app: { url: webAppUrl } }]);
-  return { markdown: lines.join('\n'), fallback, replyMarkup: { inline_keyboard: rows } };
+  const metrics=serverMetrics.sample();
+  const memoryPercent=metrics.totalMemory?Math.round(metrics.usedMemory/metrics.totalMemory*100):0;
+  const liveDisk=metrics.disk;
+  const blocks=[
+    heading('Сервер и обслуживание'),
+    paragraph(`${botOk?'🟢':'🔴'} Telegram · ${botOk?'на связи':'требует внимания'}`),
+    heading('Сервер',4),
+    paragraph(`CPU · ${metrics.cpuPercent===null?'сбор данных':metrics.cpuPercent.toFixed(1)+'%'}`),paragraph(`Память · ${compactBytes(metrics.usedMemory)} / ${compactBytes(metrics.totalMemory)} (${memoryPercent}%)`),
+    paragraph(liveDisk?`Диск · свободно ${compactBytes(liveDisk.available)} из ${compactBytes(liveDisk.total)}`:'Диск · данные недоступны'),
+    paragraph(`Без перезагрузки · ${compactDuration(metrics.uptime)}`),paragraph(`Версия · ${health.version||process.env.APP_VERSION||'unknown'}`),
+    divider(),heading('Доставка и сохранность',4),
+    paragraph(`Очередь · ${queue}`),paragraph(`Входящие · ${Number(delivery.pendingIncomingMessages||0)} · оператору · ${Number(delivery.pendingMessages||0)} · клиенту · ${Number(delivery.pendingCustomerReplies||0)}`),
+    paragraph(`Backup · ${backupLabel}`),paragraph(`Напоминания · ${reminderLabel}`),
+    paragraph(`Realtime · ${Number(realtime.connectedClients||0)} подключено · WS ${Number(transports.websocket||0)} / polling ${Number(transports.polling||0)}`),
+    {type:'footer',text:`Обновлено ${transcriptClock(new Date(metrics.at).toISOString())} · автоматически каждые 15 секунд`}
+  ];
+  const fallback=blocks.filter(block=>typeof block.text==='string').map(block=>block.text).join('\n\n');
+  return richPanel({view:'system',blocks,rows,markdown:fallback,fallback});
 }
 
 function ticketListQuery(operator, view, page) {
@@ -778,7 +773,7 @@ function ticketListModel(operator, view, requestedPage = 0) {
       fallback.push('Кнопка «Поднять тему» переместит её наверх списка тем Telegram.');
     }
   }
-  return {
+  const model={
     markdown: lines.filter((line, index, source) =>
       line !== '' || source[index - 1] !== ''
     ).join('\n'),
@@ -786,26 +781,29 @@ function ticketListModel(operator, view, requestedPage = 0) {
     replyMarkup: ticketListKeyboard(result.tickets, view, page, result.total),
     page
   };
+  const blocks=[heading(listTitle(view)),paragraph(`Всего: ${result.total}${pageLabel}`)],actionRows=[];
+  if(!result.tickets.length)blocks.push(paragraph('Здесь пока нет обращений'));
+  for(const ticket of result.tickets){
+    blocks.push(heading(ticket.user_name||'Клиент',4),paragraph(listPreview(ticket)));
+    const button=listTicketButton(ticket,view,page);
+    const url=adminWebAppUrl(ticket.id);
+    const actions=button?[button]:url?[{text:'Открыть историю',web_app:{url}}]:[];
+    if(actions.length){blocks.push({type:'buttons',buttons:actions});actionRows.push(actions);}
+  }
+  const navigation=ticketListKeyboard([],view,page,result.total).inline_keyboard;
+  const resultModel=richPanel({view:'list:'+view,page,blocks,rows:navigation,markdown:model.markdown,fallback:model.fallback});
+  resultModel.replyMarkup={inline_keyboard:[...actionRows,...navigation]};return resultModel;
 }
 
 async function editPanel(message, model) {
-  return editRichOrDisable(
-    String(message.chat.id),
-    message.message_id,
-    model.rich||model.markdown,
-    model.replyMarkup,
-    model.fallback
-  );
+  const operator=db.getTelegramOperator.get(String(message.chat.id));
+  if(operator&&model.view)return updateOperatorDashboard(operator,model);
+  return editRichOrDisable(String(message.chat.id),message.message_id,model.rich||model.markdown,model.replyMarkup,model.fallback);
 }
 
-async function editTicketActionKeyboard(message, ticket, state, menu) {
-  return bot.editMessageReplyMarkup(
-    ticketKeyboard(ticket, state, { menu }),
-    {
-      chat_id: String(message.chat.id),
-      message_id: message.message_id
-    }
-  );
+async function editTicketActionKeyboard(message,ticket,state,menu) {
+  if(SINGLE_DIALOG){supportDialogs.setView(ticket.id,String(message.chat.id),'dialog');return supportDialogs.sync(ticket,String(message.chat.id));}
+  return bot.editMessageReplyMarkup(ticketKeyboard(ticket,state,{menu}),{chat_id:String(message.chat.id),message_id:message.message_id});
 }
 
 async function updateOperatorDashboard(operator,model,options={}) {
@@ -816,9 +814,13 @@ async function updateOperatorDashboard(operator,model,options={}) {
   try{return await task;}finally{if(dashboardUpdates.get(key)===task)dashboardUpdates.delete(key);}
 }
 
-async function applyOperatorDashboard(operator, model, {forceNew=false}={}) {
+async function applyOperatorDashboard(operator, model, {forceNew=false,background=false,expectedView=null,expectedPage=0}={}) {
   const operatorId = String(operator.telegram_user_id);
+  const current=livePanels.get(operatorId);
+  if(background&&(current?.view!==expectedView||(current?.page||0)!==expectedPage))return null;
+  if(!background)livePanels.select(operatorId,model);
   const dashboard = db.getTelegramOperatorDashboard.get(operatorId);
+  if(background&&!forceNew&&dashboard?.dashboard_message_id&&livePanels.unchanged(operatorId,model,dashboard.dashboard_message_id)){livePanels.rendered(operatorId,model,dashboard.dashboard_message_id);return dashboard.dashboard_message_id;}
   if(forceNew&&dashboard?.dashboard_chat_id&&dashboard.dashboard_message_id){
     // A message deleted only in the user's client may still be editable by the
     // bot. An explicit /start must therefore issue a fresh visible panel.
@@ -833,7 +835,7 @@ async function applyOperatorDashboard(operator, model, {forceNew=false}={}) {
       model.replyMarkup,
       model.fallback
     );
-    if (updated) return dashboard.dashboard_message_id;
+    if(updated){livePanels.rendered(operatorId,model,dashboard.dashboard_message_id);return dashboard.dashboard_message_id;}
 
     // Telegram can reject edits for a message deleted by the operator. Remove
     // the stale reference before creating the single replacement panel.
@@ -857,6 +859,7 @@ async function applyOperatorDashboard(operator, model, {forceNew=false}={}) {
       Number(sent.message_id),
       operatorId
     );
+    livePanels.rendered(operatorId,model,sent.message_id);
   }
   return sent?.message_id || null;
 }
@@ -951,6 +954,15 @@ function richMarkdownStyle(text, style) {
   return text;
 }
 
+function richTextStyle(text,style){
+  const type={bold:'bold',italic:'italic',muted:'italic',code:'code'}[style];
+  return type?{type,text}:text;
+}
+function nativeHeading(text,size,style){
+  const styled=richTextStyle(text,style),level={large:1,medium:2,small:3}[size];
+  return level?heading(styled,level):paragraph(styled);
+}
+
 function richHeading(text, size, style) {
   const styled = richMarkdownStyle(text, style);
   const prefix = size === 'large' ? '# ' : size === 'medium' ? '## ' : size === 'small' ? '### ' : '';
@@ -1035,7 +1047,13 @@ function ticketTranscriptModel(ticket) {
       const sizedMarkdown = settings.telegramRichTranscriptMessageSize === 'large'
         ? [markdownHeader, richHeading(bodyMarkdown, 'small', 'plain')].filter(Boolean).join('\n')
         : normalMarkdown;
+      const header=[...(showAuthor?[richTextStyle(sender,settings.telegramRichTranscriptMessageHeaderStyle)]:[]),...(showTime?[...(showAuthor?[' · ']:[]),{type:'italic',text:timestamp}]:[])];
+      const nativeBody=settings.telegramRichTranscriptMessageSize==='large'?heading(body||'Сообщение',3):paragraph(body||'Сообщение');
+      let blocks=[...(header.length?[paragraph(header)]:[]),nativeBody];
+      if(settings.telegramRichTranscriptMessageLayout==='compact')blocks=[paragraph([...header,...(header.length?[' — ']:[]),body||'Сообщение'])];
+      if(settings.telegramRichTranscriptMessageLayout==='quote')blocks=[{type:'blockquote',blocks}];
       return {
+        blocks,
         markdown: settings.telegramRichTranscriptMessageLayout === 'compact'
           ? compactMarkdown
           : settings.telegramRichTranscriptMessageLayout === 'quote'
@@ -1056,7 +1074,8 @@ function ticketTranscriptModel(ticket) {
       markdown: entry.markdown,
       fallback: entry.fallback,
       standaloneMarkdown: standalone.markdown,
-      standaloneFallback: standalone.fallback
+      standaloneFallback: standalone.fallback,
+      blocks:entry.blocks,standaloneBlocks:standalone.blocks
     };
   });
   const selectedSeparator = settings.telegramRichTranscriptSeparator === 'dots'
@@ -1079,6 +1098,7 @@ function ticketTranscriptModel(ticket) {
       entries[0].grouped = false;
       entries[0].markdown = entries[0].standaloneMarkdown;
       entries[0].fallback = entries[0].standaloneFallback;
+      entries[0].blocks = entries[0].standaloneBlocks;
     }
   }
   const omitted = sourceMessages.length - entries.length;
@@ -1112,7 +1132,14 @@ function ticketTranscriptModel(ticket) {
     entries.length ? transcriptEntriesMarkdown(entries, separator, groupSeparator, 'fallback') : settings.telegramRichTranscriptEmptyText,
     footer
   ].filter(Boolean).join('\n\n');
-  return { markdown, fallback };
+  const blocks=[
+    ...(settings.telegramRichTranscriptShowHeader?[nativeHeading(title,settings.telegramRichTranscriptTitleSize,settings.telegramRichTranscriptTitleStyle)]:[]),
+    ...(settings.telegramRichTranscriptShowSubtitle&&subtitle?[paragraph(richTextStyle(subtitle,settings.telegramRichTranscriptSubtitleStyle))]:[]),
+    ...(omitted>0&&settings.telegramRichTranscriptShowOmittedNotice?[paragraph(`Показаны последние ${entries.length} сообщений`)]:[]),
+    ...(entries.length?entries.flatMap((e,index)=>[...(index&&!e.grouped&&settings.telegramRichTranscriptSeparator==='line'?[divider()]:index&&!e.grouped&&settings.telegramRichTranscriptSeparator==='dots'?[paragraph('· · ·')]:[]),...e.blocks]):[paragraph(settings.telegramRichTranscriptEmptyText)]),
+    ...(footer?[{type:'footer',text:footer}]:[])
+  ];
+  return {markdown,fallback,rich:{blocks}};
 }
 
 async function publishTicketTranscript(ticket, thread) {
@@ -1350,6 +1377,7 @@ function init(socketIo, hooks = {}) {
   });
   pollingLease.start();
   deliveryTimer = backgroundTimer(setInterval(processDeliveryQueue, 15 * 1000));
+  livePanelsTimer=backgroundTimer(setInterval(refreshOperatorPanels,15000));
   incomingRetryTimer = backgroundTimer(setInterval(processIncomingRetryQueue, 15 * 1000));
   scheduleDeliveryQueue(1000);
   backgroundTimer(setTimeout(processIncomingRetryQueue, 1000));
@@ -1524,7 +1552,7 @@ async function configureBot(instance = bot) {
   for(const operator of db.getActiveTelegramOperators.all()) {
     if(!isAuthorized(operator.telegram_user_id))continue;
     const panel=db.getTelegramOperatorDashboard.get(operator.telegram_user_id);
-    if(panel?.dashboard_message_id)await updateOperatorDashboard(operator,dashboardModel(operator)).catch(()=>{});
+    if(panel?.dashboard_message_id){const selected=livePanels.get(operator.telegram_user_id);if(!selected||selected.pause_until<=Date.now())await updateOperatorDashboard(operator,panelModelFor(operator,selected?.view,selected?.page)).catch(()=>{});}
   }
 
 }
@@ -2808,6 +2836,10 @@ async function handleCallbackQuery(query) {
   };
   try {
     if(data.startsWith('reply:'))return await beginSupportInboxReply(query,operator,answer);
+    if(SINGLE_DIALOG&&data.startsWith('dialogreply:')){
+      const source=db.getMessageById.get(data.slice('dialogreply:'.length));
+      return await sendSupportReplyPrompt(query,operator,answer,source&&db.getTicketById.get(source.ticket_id),source);
+    }
     if(SINGLE_DIALOG&&(data.startsWith('dialogfiles:')||data.startsWith('dialogfile:')))return await dialogAttachmentAction(query,operator,answer);
     if (data === 'dashboard:clear' || data === 'dashboard:clear-confirm') {
       const chatId=String(query.message.chat.id);
@@ -2819,13 +2851,13 @@ async function handleCallbackQuery(query) {
         chatCleanupConfirmations.set(chatId,{id:query.message.message_id,expires:Date.now()+60000});
         await answer();
         const text='Очистить этот чат? Главное меню останется. Удалятся известные боту сообщения за последние 48 часов, включая сообщения в темах. Telegram не позволяет боту удалить более старые сообщения или получить всю историю. История обращений в Workspace сохранится.';
-        await editPanel(query.message,{markdown:text,fallback:text,replyMarkup:{inline_keyboard:[[{text:'Удалить сообщения',callback_data:'dashboard:clear-confirm'}],[{text:'Отмена',callback_data:'dashboard:show'}]]}});return;
+        await editPanel(query.message,richPanel({view:'confirm-clear',pauseUntil:Date.now()+60000,blocks:[heading('Очистить чат?'),paragraph(text)],rows:[[{text:'Удалить сообщения',callback_data:'dashboard:clear-confirm',style:'danger'}],[{text:'Отмена',callback_data:'system:show'}]],markdown:text,fallback:text}));return;
       }
       const confirmation=chatCleanupConfirmations.get(chatId);chatCleanupConfirmations.delete(chatId);
       if(!confirmation || confirmation.id!==query.message.message_id || confirmation.expires<Date.now()) {await answer({text:'Подтверждение истекло. Нажмите «Очистить чат» ещё раз.',show_alert:true});return;}
       await answer({text:'Очищаю чат…'});
       const result=await chatCleanup.clear(bot,chatId,query.message.message_id);
-      const model=dashboardModel(operator);
+      const model=controlCenterModel();
       const report=`Удалено сообщений: ${result.removed}. Не удалось удалить: ${result.failed}. Старые и неизвестные боту сообщения могли остаться.`;
       model.markdown+='\n\n'+report;model.fallback+='\n\n'+report;
       if(model.rich)model.rich.blocks.push({type:'paragraph',text:report});
@@ -2838,6 +2870,7 @@ async function handleCallbackQuery(query) {
       return;
     }
     if (data === 'system:show' || data === 'system:refresh') {
+      chatCleanupConfirmations.delete(userId);
       await answer();
       await editPanel(query.message, controlCenterModel());
       return;
@@ -3495,7 +3528,8 @@ function deliverCustomerReply(ticket, message) {
   return queued;
 }
 
-function operatorDialogModel(ticket) {
+function operatorDialogModel(ticket,{view='dialog'}={}) {
+  if(view.startsWith('files:'))return dialogFilesModel(ticket,Number(view.slice(6))||0);
   const content=ticketTranscriptModel(ticket);
   const latest=db.db.prepare("SELECT sender FROM messages WHERE ticket_id=? AND sender!='system' AND COALESCE(is_auto,0)=0 ORDER BY created_at DESC,rowid DESC LIMIT 1").get(ticket.id);
   const counts=db.db.prepare(`SELECT COUNT(*) total,
@@ -3504,7 +3538,10 @@ function operatorDialogModel(ticket) {
     FROM messages WHERE ticket_id=? AND sender='support' AND COALESCE(is_auto,0)=0`).get(ticket.source,ticket.id);
   const label=supportDeliveryStatus({source:ticket.source,online:!!lifecycle.isCustomerInChat?.(ticket.id),
     pending:counts.pending,total:counts.total,failed:ticket.source==='telegram'?counts.failed:0,waitingForOperator:latest?.sender==='user'});
-  return {markdown:label.split('\n').map((line,index)=>index===0?'**'+markdownEscape(line)+'**':'_'+markdownEscape(line)+'_').join('\n\n')+'\n\n'+content.markdown,fallback:label+'\n\n'+content.fallback};
+  const fallback=label+'\n\n'+content.fallback;
+  const rows=ticketKeyboard(ticket,ticket.assigned_operator_id?'open':'unassigned').inline_keyboard;
+  return richPanel({blocks:[...label.split('\n').map((line,index)=>paragraph(index===0?{type:'bold',text:line}:line)),divider(),...content.rich.blocks],rows,
+    markdown:label.split('\n').map((line,index)=>index===0?'**'+markdownEscape(line)+'**':'_'+markdownEscape(line)+'_').join('\n\n')+'\n\n'+content.markdown,fallback});
 }
 
 async function refreshTicketDialog(ticketId) {
@@ -3512,6 +3549,26 @@ async function refreshTicketDialog(ticketId) {
   const ticket=db.getTicketById.get(ticketId);if(!ticket||ticket.status!=='open')return;
   const rows=db.db.prepare('SELECT operator_id FROM telegram_operator_dialogs WHERE ticket_id=? AND message_id IS NOT NULL').all(ticketId);
   for(const row of rows)await supportDialogs.sync(ticket,row.operator_id);
+}
+
+const serverMetrics=createServerMetrics();
+const livePanels=createLivePanels(db.db);
+
+function panelModelFor(operator,view='home',page=0){
+  if(view==='system'||view==='confirm-clear')return controlCenterModel();
+  if(view.startsWith('list:'))return ticketListModel(operator,view.slice(5),page);
+  return dashboardModel(operator);
+}
+
+async function refreshOperatorPanels(){
+  if(!tgEnabled()||shuttingDown||livePanelsRefreshing)return;
+  livePanelsRefreshing=true;
+  try{for(const row of livePanels.due()){
+    if(!isAuthorized(row.operator_id))continue;
+    const operator=db.getTelegramOperator.get(row.operator_id);if(!operator?.active)continue;
+    try{const model=panelModelFor(operator,row.view,row.page);await updateOperatorDashboard(operator,model,{background:true,expectedView:row.view,expectedPage:row.page});}
+    catch(error){livePanels.failed(row.operator_id,Math.max(15000,telegramRetryAfterSeconds(error)*1000));}
+  }}finally{livePanelsRefreshing=false;}
 }
 
 const supportDialogs=createSupportDialogs({
@@ -3554,30 +3611,63 @@ async function reconcileDialogCleanup() {
   await supportDialogs.retry();
 }
 
+function dialogFilesModel(ticket,requestedPage=0) {
+  const files=db.getMessages.all(ticket.id).filter(m=>m.file_url).reverse();
+  const size=6,maxPage=Math.max(0,Math.ceil(files.length/size)-1),page=Math.max(0,Math.min(requestedPage,maxPage));
+  const blocks=[heading('Вложения · '+(ticket.user_name||'Клиент')),paragraph(`Всего: ${files.length} · страница ${page+1}/${maxPage+1}`)];
+  const rows=[];
+  for(const file of files.slice(page*size,(page+1)*size)){
+    blocks.push(paragraph([{type:'bold',text:file.file_name||transcriptAttachmentLabel(file)},` · ${file.sender==='user'?'клиент':'поддержка'}`]));
+    const actions=[{text:'Открыть',callback_data:'dialogfile:'+file.id},{text:'Ответить',callback_data:'dialogreply:'+file.id}];
+    blocks.push({type:'buttons',buttons:actions});rows.push(actions);
+  }
+  if(!files.length)blocks.push(paragraph('Вложений пока нет'));
+  const navigation=[];
+  if(page>0)navigation.push({text:'← Назад',callback_data:`dialogfiles:${ticket.id}:${page-1}`});
+  if(page<maxPage)navigation.push({text:'Дальше →',callback_data:`dialogfiles:${ticket.id}:${page+1}`});
+  const bottom=[...(navigation.length?[navigation]:[]),[{text:'К диалогу',callback_data:'ticketmain:'+ticket.id}]];
+  const fallback=['Вложения · '+ticket.user_name,...files.slice(page*size,(page+1)*size).map(m=>m.file_name||transcriptAttachmentLabel(m))].join('\n');
+  const model=richPanel({blocks,rows:bottom,markdown:fallback,fallback});
+  model.replyMarkup={inline_keyboard:[...rows,...bottom]};return model;
+}
+
 async function dialogAttachmentAction(query,operator,answer) {
   const action=String(query.data),single=action.startsWith('dialogfile:');
   const file=single?db.getMessageById.get(action.slice('dialogfile:'.length)):null;
-  const ticket=db.getTicketById.get(single?(file?.ticket_id||''):action.slice('dialogfiles:'.length));
+  const [,ticketId,page]=action.split(':');
+  const ticket=db.getTicketById.get(single?(file?.ticket_id||''):ticketId);
   if(!ticket||ticket.status!=='open'){await answer({text:'Обращение закрыто',show_alert:true});return;}
   if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id)){await answer({text:'Обращение у другого оператора',show_alert:true});return;}
-  await answer();
-  if(!single) {
-    const files=db.getMessages.all(ticket.id).filter(m=>m.file_url).slice(-10).reverse();
-    const rows=files.map(m=>[{text:(m.file_name||transcriptAttachmentLabel(m)).slice(0,60),callback_data:'dialogfile:'+m.id}]);
-    rows.push([{text:'Назад к диалогу',callback_data:'ticketmain:'+ticket.id}]);
-    await bot.editMessageReplyMarkup({inline_keyboard:rows},{chat_id:query.message.chat.id,message_id:query.message.message_id});return;
+  if(!single){
+    await answer();supportDialogs.setView(ticket.id,operator.telegram_user_id,'files:'+Math.max(0,Number(page)||0));
+    await supportDialogs.sync(ticket,operator.telegram_user_id);return;
   }
-  const path=publicUploadPath(file?.file_url);
-  if(!path){await bot.answerCallbackQuery(query.id,{text:'Файл недоступен',show_alert:true}).catch(()=>{});return;}
+  const localPath=publicUploadPath(file?.file_url);
+  if(!localPath||!fs.existsSync(localPath)){await answer({text:'Файл недоступен',show_alert:true});return;}
+  await answer();
   supportDialogs.retire(ticket.id,operator.telegram_user_id,'preview');await supportDialogs.cleanup();
-  const options={caption:(file.content||file.file_name||'Вложение').slice(0,1000),disable_notification:true,
-    reply_markup:{inline_keyboard:[[{text:'Ответить / отправить файл',callback_data:'replyticket:'+ticket.id}],[{text:'Убрать вложение',callback_data:'dialoghide:'+ticket.id}]]}};
+  const rows=[[{text:'Ответить / отправить файл',callback_data:'dialogreply:'+file.id}],[{text:'Убрать вложение',callback_data:'dialoghide:'+ticket.id}]];
+  const title=file.file_name||transcriptAttachmentLabel(file),text=file.content||'Вложение';
+  const options={caption:(text||title).slice(0,1000),disable_notification:true,reply_markup:{inline_keyboard:rows}};
   let sent;
-  if(file.message_type==='image')sent=await sendWithDocumentFallback(()=>bot.sendPhoto(query.message.chat.id,path,options),query.message.chat.id,path,options);
-  else if(file.message_type==='video')sent=await sendWithDocumentFallback(()=>bot.sendVideo(query.message.chat.id,path,options),query.message.chat.id,path,options);
-  else if(file.message_type==='audio')sent=await sendWithDocumentFallback(()=>bot.sendAudio(query.message.chat.id,path,options),query.message.chat.id,path,options);
-  else sent=await bot.sendDocument(query.message.chat.id,path,options);
-  supportDialogs.remember(query.message.chat.id,sent.message_id,ticket.id,operator.telegram_user_id,'preview',file.sender==='user'?file.id:null);
+  const base=String(process.env.PUBLIC_URL||'').replace(/\/$/,'');
+  const mediaType=({image:'photo',video:'video',audio:'audio'})[file.message_type]||'document';
+  if(base&&richMessagesAvailable&&richBlocksAvailable){
+    const media={type:mediaType,[mediaType]:{type:mediaType,media:base+file.file_url}};
+    const model=richPanel({blocks:[heading(title,4),media,paragraph(text)],rows,fallback:title+'\n'+text});
+    try{sent=await bot.sendRichMessage(query.message.chat.id,model.rich,{disable_notification:true,reply_markup:{inline_keyboard:[]}});}
+    catch(error){
+      // A rejected media block says nothing about support for native menu buttons.
+      if(Number(error?.response?.body?.error_code)!==400)throw error;
+    }
+  }
+  if(!sent){
+    if(file.message_type==='image')sent=await sendWithDocumentFallback(()=>bot.sendPhoto(query.message.chat.id,localPath,options),query.message.chat.id,localPath,options);
+    else if(file.message_type==='video')sent=await sendWithDocumentFallback(()=>bot.sendVideo(query.message.chat.id,localPath,options),query.message.chat.id,localPath,options);
+    else if(file.message_type==='audio')sent=await sendWithDocumentFallback(()=>bot.sendAudio(query.message.chat.id,localPath,options),query.message.chat.id,localPath,options);
+    else sent=await bot.sendDocument(query.message.chat.id,localPath,options);
+  }
+  supportDialogs.remember(query.message.chat.id,sent.message_id,ticket.id,operator.telegram_user_id,'preview',file.id);
   scheduleDeliveryQueue(3000);
 }
 
@@ -4350,6 +4440,7 @@ async function shutdown() {
   shuttingDown = true;
   clearTimeout(cleanupTimer);
   clearInterval(deliveryTimer);
+  clearInterval(livePanelsTimer);
   clearInterval(incomingRetryTimer);
   clearInterval(reminderTimer);
   clearTimeout(deliveryWakeTimer);
@@ -4442,6 +4533,7 @@ module.exports = {
   sendCustomerClosePrompt,
   refreshOpenTicketTranscripts,
   refreshTicketDialog,
+  refreshOperatorPanels,
   clearTicketReminders,
   notifyTicketClosed,
   autoCloseTicket,

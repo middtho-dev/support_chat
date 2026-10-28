@@ -32,9 +32,11 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
       PRIMARY KEY(chat_id,thread_id)
     );
   `);
+  if(!sql.prepare('PRAGMA table_info(telegram_operator_dialogs)').all().some(c=>c.name==='view'))sql.exec("ALTER TABLE telegram_operator_dialogs ADD COLUMN view TEXT NOT NULL DEFAULT 'dialog'");
   const state=sql.prepare('SELECT * FROM telegram_operator_dialogs WHERE ticket_id=? AND operator_id=?');
   const request=sql.prepare(`INSERT INTO telegram_operator_dialogs(ticket_id,operator_id,notify) VALUES (?,?,?)
-    ON CONFLICT(ticket_id,operator_id) DO UPDATE SET dirty=1,notify=MAX(notify,excluded.notify)`);
+    ON CONFLICT(ticket_id,operator_id) DO UPDATE SET dirty=1,notify=MAX(notify,excluded.notify),
+      view=CASE WHEN excluded.notify=1 THEN 'dialog' ELSE view END`);
   const track=sql.prepare(`INSERT OR IGNORE INTO telegram_operator_dialog_messages
     (chat_id,message_id,ticket_id,operator_id,kind,source_message_id,response_id,media_group_id,created_at)
     VALUES (?,?,?,?,?,?,?,?,?)`);
@@ -90,7 +92,7 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
     const notification=!!row.notify&&!!user&&latest?.sender==='user'&&(forceNotify||row.last_user_id!==user.id);
     const due=notification&&(forceNotify||clock()-row.last_alert_at>=3000);
     try {
-      const content=model(ticket),markup=keyboard(ticket,ticket.assigned_operator_id?'open':'unassigned');
+      const content=model(ticket,{view:row.view}),markup=content.replyMarkup||keyboard(ticket,ticket.assigned_operator_id?'open':'unassigned');
       let id=row.message_id;
       const oldCard=id?route.get(operator,id,operator):null;
       const rotate=oldCard&&clock()-oldCard.created_at>=24*60*60*1000;
@@ -100,11 +102,11 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
         sql.prepare('UPDATE telegram_operator_dialogs SET message_id=NULL WHERE ticket_id=? AND operator_id=?').run(ticketId,operator);id=null;
       }
       if(id) {
-        const ok=await edit(operator,id,content.markdown,markup,content.fallback);
+        const ok=await edit(operator,id,content.rich||content.markdown,markup,content.fallback);
         if(!ok){enqueue.run(operator,id);id=null;}
       }
       if(!id) {
-        const sent=await send(operator,content.markdown,{reply_markup:markup,disable_notification:!notification},content.fallback);
+        const sent=await send(operator,content.rich||content.markdown,{reply_markup:markup,disable_notification:!notification},content.fallback);
         if(!sent?.message_id)throw Error('Telegram did not confirm dialog delivery');
         id=sent.message_id;remember(operator,id,ticketId,operator,'card');
       }
@@ -129,6 +131,7 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
   }
   return {
     remember,
+    setView(ticket,op,view){sql.prepare('UPDATE telegram_operator_dialogs SET view=?,dirty=1,next_retry_at=0 WHERE ticket_id=? AND operator_id=?').run(view,ticket,String(op));},
     get:(ticket,op)=>state.get(ticket,String(op)),
     sync(ticket,op,{notify=false,reminder=false}={}) {
       const operator=String(op);request.run(ticket.id,operator,notify||reminder?1:0);
