@@ -962,12 +962,16 @@ io.on('connection', (socket) => {
     if (!socket.isAdmin) return ack?.({ error: 'Unauthorized' });
     if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для изменения настроек' });
     try {
+      const previousSettings=loadSettings();
       const cfg = saveSettings(payload);
       const visibleCfg = {
         ...cfg,
         telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
       };
       emitToSettingsManagers('admin_settings_updated', visibleCfg, socket.id);
+      if(previousSettings.telegramSharedTickets!==cfg.telegramSharedTickets){
+        telegram.reconcileOperatorAccess?.().catch(error=>console.warn('[Settings] Operator access refresh:',error.message));
+      }
       if (typeof telegram.refreshOpenTicketTranscripts === 'function') {
         telegram.refreshOpenTicketTranscripts().catch(error => {
           console.warn('[Settings] Telegram Rich refresh:', error?.message || error);

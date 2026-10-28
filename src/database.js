@@ -774,7 +774,7 @@ module.exports = {
       AND m.telegram_message_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='operator' AND h.item_id=m.id)
       AND t.status = 'open'
-      AND t.assigned_operator_id IS NOT NULL
+      AND (t.assigned_operator_id IS NOT NULL OR (SELECT value FROM settings WHERE key='telegram_shared_tickets')='1')
       AND (m.telegram_next_retry_at IS NULL OR m.telegram_next_retry_at <= CURRENT_TIMESTAMP)
     ORDER BY m.created_at ASC
     LIMIT ?

@@ -307,6 +307,71 @@ test('automatic refresh preserves active list, native controls and panel ID; cle
  db.closeTicket.run('live-list-ticket');await callback('dashboard:show',id);
 });
 
+test('shared mode lets both operators answer assigned and unassigned tickets; switching off restores ownership',async()=>{
+ const second={id:7002,first_name:'Второй оператор'};
+ db.saveManagedTelegramOperator.run('7002','Второй оператор',null,1,0);
+ const getCard=(id,op)=>db.db.prepare('SELECT message_id FROM telegram_operator_dialogs WHERE ticket_id=? AND operator_id=?').get(id,String(op))?.message_id;
+ const secondReply=(target,text,id,extra={})=>bot.handlers.message({message_id:id,chat:{id:7002,type:'private'},from:second,text,reply_to_message:{message_id:target},...extra});
+ try{
+  const ticket=fresh('shared-existing');db.assignTicketIfUnassigned.run('7001',ticket.id);
+  await telegram.forwardMessage(db.getTicketById.get(ticket.id),source(ticket.id,'shared-question','Общий вопрос'));
+  assert.equal(getCard(ticket.id,'7002'),undefined);
+  saveSettings({telegramSharedTickets:true});await telegram.reconcileOperatorAccess();
+  assert.ok(getCard(ticket.id,'7002'));assert.ok(getCard(ticket.id,'7001'));
+  assert.equal(db.getTicketById.get(ticket.id).assigned_operator_id,'7001','existing assignment is preserved');
+  const native=effects.findLast(e=>e.kind==='rich'&&e.id===getCard(ticket.id,'7002')).rich;
+  assert.ok(!native.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons).some(b=>b.callback_data==='take:'+ticket.id));
+  await callback('replyticket:'+ticket.id,getCard(ticket.id,'7002'),second);
+  const prompt=effects.findLast(e=>e.chat==='7002'&&e.options?.reply_markup?.force_reply);
+  assert.ok(prompt);await secondReply(prompt.id,'Ответ второго оператора',9201);
+  await reply(getCard(ticket.id,'7001'),'Ответ первого оператора',9202);
+  assert.equal(db.getMessageByTelegramDestination.get('7002',9201).ticket_id,ticket.id);
+  assert.equal(db.getMessageByTelegramDestination.get('7001',9202).ticket_id,ticket.id);
+  assert.notEqual(db.getMessageByTelegramDestination.get('7002',9201).sender_name,db.getMessageByTelegramDestination.get('7001',9202).sender_name);
+  await secondReply(getCard(ticket.id,'7002'),null,9203,{photo:[{file_id:'shared-file',file_size:5}]});
+  assert.equal(db.getMessageByTelegramDestination.get('7002',9203).message_type,'image');
+  await telegram.refreshTicketDialog(ticket.id);
+  for(const op of ['7001','7002'])assert.match(JSON.stringify(effects.findLast(e=>e.kind==='edit'&&e.text?.message_id===getCard(ticket.id,op)).text.rich_message),/Ответ первого оператора/);
+  await callback('dialogfiles:'+ticket.id,getCard(ticket.id,'7002'),second);
+  assert.match(JSON.stringify(effects.findLast(e=>e.kind==='edit').text.rich_message),/Вложения/);
+  const unassigned=fresh('shared-unassigned');await telegram.forwardMessage(unassigned,source(unassigned.id,'shared-unassigned-question'));
+  await secondReply(getCard(unassigned.id,'7002'),'Ответ без назначения',9204);
+  assert.equal(db.getMessageByTelegramDestination.get('7002',9204).ticket_id,unassigned.id);
+  assert.equal(db.getTicketById.get(unassigned.id).assigned_operator_id,null);
+  const retry=fresh('shared-retry');const retryMessage=source(retry.id,'shared-retry-question');sendFailures=1;
+  await assert.rejects(()=>telegram.forwardMessage(retry,retryMessage),/unavailable/);
+  db.db.prepare('UPDATE telegram_operator_dialogs SET next_retry_at=0 WHERE ticket_id=?').run(retry.id);
+  db.db.prepare('UPDATE messages SET telegram_next_retry_at=NULL WHERE id=?').run(retryMessage.id);
+  assert.ok(db.getPendingPrivateTelegramMessages.all(100).some(m=>m.id===retryMessage.id));
+  await telegram.processDeliveryQueue();assert.ok(db.getMessageById.get(retryMessage.id).telegram_message_id);
+  assert.ok(getCard(retry.id,'7001'));assert.ok(getCard(retry.id,'7002'));assert.equal(db.getTicketById.get(retry.id).assigned_operator_id,null);
+  db.closeTicket.run(retry.id);await telegram.notifyTicketClosed(db.getTicketById.get(retry.id));
+  source(ticket.id,'shared-reminder-question','Вопрос всей команде');
+  db.db.prepare("UPDATE messages SET created_at=datetime('now','-20 minutes') WHERE ticket_id=?").run(ticket.id);
+  db.db.prepare("UPDATE messages SET created_at=datetime('now','-5 minutes') WHERE id='shared-reminder-question'").run();
+  const beforeReminder=['7001','7002'].map(op=>getCard(ticket.id,op));await telegram.processUnansweredReminders();
+  for(const [i,op] of ['7001','7002'].entries())assert.notEqual(getCard(ticket.id,op),beforeReminder[i]);
+  const oldOther=getCard(ticket.id,'7002'),oldOwner=getCard(ticket.id,'7001');
+  const previousFetch=global.fetch;let releaseDownload,downloadStarted;
+  const started=new Promise(resolve=>{downloadStarted=resolve;});
+  global.fetch=async url=>{if(String(url).endsWith('/shared-delayed')){downloadStarted();await new Promise(resolve=>{releaseDownload=resolve;});return new Response(Buffer.from('photo'),{headers:{'content-type':'image/jpeg'}});}return previousFetch(url);};
+  const inFlight=secondReply(oldOther,null,9206,{photo:[{file_id:'shared-delayed',file_size:5}]});
+  await started;
+  try{saveSettings({telegramSharedTickets:false});await telegram.reconcileOperatorAccess();}
+  finally{releaseDownload();global.fetch=previousFetch;}
+  await inFlight;assert.equal(db.getMessageByTelegramDestination.get('7002',9206),undefined,'access is rechecked after downloading a file');
+  assert.equal(getCard(ticket.id,'7002'),null);assert.ok(removed(oldOther));assert.equal(getCard(ticket.id,'7001'),oldOwner);
+  await secondReply(oldOther,'Запрещённый ответ',9205);assert.equal(db.getMessageByTelegramDestination.get('7002',9205),undefined);
+  await callback('close:'+ticket.id,oldOther,second);assert.equal(db.db.prepare('SELECT * FROM customer_close_requests WHERE ticket_id=?').get(ticket.id),undefined);
+  saveSettings({telegramSharedTickets:true});await telegram.reconcileOperatorAccess();
+  const cards=['7001','7002'].map(op=>getCard(ticket.id,op));assert.ok(cards.every(Boolean));
+  await callback('close:'+ticket.id,getCard(ticket.id,'7002'),second);assert.equal(db.getTicketById.get(ticket.id).status,'open');
+  await expireClose(ticket.id);assert.equal(db.getTicketById.get(ticket.id).status,'closed');
+  assert.ok(cards.every(removed));
+  db.closeTicket.run(unassigned.id);await telegram.notifyTicketClosed(db.getTicketById.get(unassigned.id));
+ }finally{saveSettings({telegramSharedTickets:false});db.deactivateTelegramOperator.run('7002');await telegram.reconcileOperatorAccess();}
+});
+
 test('native menu transport failure retries without downgrading Rich or replacing the panel',async()=>{
  const panel=db.getTelegramOperatorDashboard.get('7001'),count=effects.filter(e=>e.kind==='rich').length;
  nativeNetworkFailures=1;

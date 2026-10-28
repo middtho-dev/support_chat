@@ -1,9 +1,9 @@
 'use strict';
 
 // Rich controls live inside the panel; the same actions form its plain fallback.
-function buildAdminMenu({name,counts={},webAppUrl='',serverSummary=''}) {
+function buildAdminMenu({name,counts={},webAppUrl='',serverSummary='',shared=false}) {
   const n=key=>Math.max(0,Number(counts[key])||0);
-  const rows=[
+  const rows=shared?[[{text:`💬 Общие обращения · ${n('mine')}`,callback_data:'list:mine:0'}],[{text:`⏳ Ждут ответа · ${n('unanswered')}`,callback_data:'list:unanswered:0'}]]:[
     [{text:`🔔 Новые · ${n('waiting')}`,callback_data:'list:waiting:0',...(n('waiting')?{style:'primary'}:{})},
       {text:`💬 Мои обращения · ${n('mine')}`,callback_data:'list:mine:0'}],
     [{text:`⏳ Ждут ответа · ${n('unanswered')}`,callback_data:'list:unanswered:0',...(n('unanswered')?{style:'primary'}:{})}]

@@ -11,8 +11,8 @@ function createSupportQueue({database, authorize, service, settings}) {
     FROM telegram_incoming_message_queue q
     UNION ALL
     SELECT 'operator',m.id,t.id,t.user_name,m.content,m.message_type,m.created_at,m.telegram_attempts,m.telegram_last_error,m.telegram_next_retry_at,
-      CASE WHEN (CASE WHEN ?='private' THEN t.status='open' AND t.assigned_operator_id IS NOT NULL ELSE COALESCE(t.telegram_topic_deleted,0)=0 END) THEN 1 ELSE 0 END,
-      CASE WHEN t.status!='open' THEN 'Обращение закрыто' WHEN ?='private' AND t.assigned_operator_id IS NULL THEN 'Оператор ещё не назначен' ELSE 'Тема Telegram недоступна' END
+      CASE WHEN (CASE WHEN ?='private' THEN t.status='open' AND (t.assigned_operator_id IS NOT NULL OR (SELECT value FROM settings WHERE key='telegram_shared_tickets')='1') ELSE COALESCE(t.telegram_topic_deleted,0)=0 END) THEN 1 ELSE 0 END,
+      CASE WHEN t.status!='open' THEN 'Обращение закрыто' WHEN ?='private' AND t.assigned_operator_id IS NULL AND COALESCE((SELECT value FROM settings WHERE key='telegram_shared_tickets'),'0')!='1' THEN 'Оператор ещё не назначен' ELSE 'Тема Telegram недоступна' END
     FROM messages m JOIN tickets t ON t.id=m.ticket_id
     WHERE m.sender!='system' AND COALESCE(m.is_auto,0)=0 AND m.telegram_message_id IS NULL
     UNION ALL

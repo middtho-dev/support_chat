@@ -19,3 +19,9 @@ test('absent web URL and empty counts produce usable menu without broken links',
  assert.ok(buttons(menu).filter(b=>b.callback_data?.startsWith('list:')).every(b=>b.text.endsWith('· 0')));
  for(const row of menu.rich.blocks.filter(b=>b.type==='buttons')){assert.ok(row.buttons.length<=8);for(const b of row.buttons)if(b.callback_data)assert.ok(Buffer.byteLength(b.callback_data)<=64);}
 });
+
+test('shared menu presents the common queue without take-ownership actions',()=>{
+ const controls=buttons(buildAdminMenu({shared:true,counts:{mine:5,unanswered:2}}));
+ assert.ok(controls.some(b=>b.callback_data==='list:mine:0'&&b.text==='💬 Общие обращения · 5'));
+ assert.ok(!controls.some(b=>b.callback_data==='list:waiting:0'));
+});

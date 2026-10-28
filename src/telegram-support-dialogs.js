@@ -3,7 +3,7 @@
 // One active operator card per ticket. Telegram effects are serialized per card;
 // refreshes, routing aliases and cleanup survive a process/container restart.
 function createSupportDialogs({db, enabled, authorized, send, edit, model, keyboard, remove,
-  removeTopic, expired, retryDelay, errorText, onError, clock=Date.now}) {
+  removeTopic, expired, retryDelay, errorText, onError, shared=()=>false, clock=Date.now}) {
   const sql=db.db;
   sql.exec(`
     CREATE TABLE IF NOT EXISTS telegram_operator_dialogs (
@@ -83,7 +83,7 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
   async function render(ticketId,operator,forceNotify=false) {
     let row=state.get(ticketId,operator),ticket=db.getTicketById.get(ticketId);
     if(!row||!enabled()||!authorized(operator))return null;
-    if(!ticket||ticket.status!=='open'||(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==operator)) {
+    if(!ticket||ticket.status!=='open'||(!shared()&&ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==operator)) {
       await closeForOperator(ticketId,operator);return null;
     }
     if(row.next_retry_at>clock()&&(!forceNotify||row.attempts>0))return row.attempts?null:(row.message_id?{message_id:row.message_id}:null);
@@ -131,6 +131,7 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
   }
   return {
     remember,
+    queue(ticket,op){request.run(ticket.id,String(op),0);},
     setView(ticket,op,view){sql.prepare('UPDATE telegram_operator_dialogs SET view=?,dirty=1,next_retry_at=0 WHERE ticket_id=? AND operator_id=?').run(view,ticket,String(op));},
     get:(ticket,op)=>state.get(ticket,String(op)),
     sync(ticket,op,{notify=false,reminder=false}={}) {

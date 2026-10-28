@@ -2,7 +2,7 @@
 
 // Every main-chat reply names a persisted source message. Never route plain
 // messages to a mutable "currently selected" ticket, including photo albums.
-function createSupportInbox({db, send, enabled, authorized, operators, retryDelay, onError, remove, expired}) {
+function createSupportInbox({db, send, enabled, authorized, operators, retryDelay, onError, remove, expired, shared=()=>false}) {
   const sql=db.db;
   const enqueue=sql.prepare('INSERT OR IGNORE INTO telegram_support_inbox(message_id,operator_id) VALUES (?,?)');
   const get=sql.prepare('SELECT *,next_retry_at<=CURRENT_TIMESTAMP AS ready FROM telegram_support_inbox WHERE message_id=? AND operator_id=?');
@@ -36,7 +36,7 @@ function createSupportInbox({db, send, enabled, authorized, operators, retryDela
       const message=db.getMessageById.get(job.message_id),ticket=message&&db.getTicketById.get(message.ticket_id);
       const operator=db.getTelegramOperator.get(job.operator_id);
       if(!ticket||ticket.status!=='open'||!operator?.active||
-        (ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==job.operator_id))return;
+        (!shared()&&ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==job.operator_id))return;
       if(db.deliveryHeld.get('operator',message.id))return;
       try {
         const sent=await send(ticket,message,job.operator_id,id=>remember(job.operator_id,id,message.id,job.operator_id));
@@ -63,7 +63,7 @@ function createSupportInbox({db, send, enabled, authorized, operators, retryDela
     source:(chatId,messageId,operatorId)=>target.get(String(chatId),messageId,String(operatorId)),
     async publish(ticket,message) {
       if(message.sender!=='user'||!enabled())return;
-      const recipients=ticket.assigned_operator_id
+      const recipients=!shared()&&ticket.assigned_operator_id
         ? [db.getTelegramOperator.get(String(ticket.assigned_operator_id))]
         : operators();
       const jobs=recipients.filter(op=>op?.active&&authorized(op.telegram_user_id)).map(op=>{
