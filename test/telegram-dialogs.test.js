@@ -94,6 +94,7 @@ test('Rich header counts every pending reply and refreshes presence/delivery qui
   const first=db.getMessageByTelegramDestination.get('7001',511),second=db.getMessageByTelegramDestination.get('7001',512);
   const text=()=>{const item=effects.findLast(e=>e.kind==='edit'&&(e.options?.message_id||e.text?.message_id)===active('dialog-one'));return item?.text?.rich_message?.markdown||item?.text||'';};
   await telegram.refreshTicketDialog('dialog-one');assert.match(text(),/🔴 Клиент не в чате/);assert.match(text(),/Ещё не получено клиентом: 2/);
+  assert.match(text(),/\*\*🔴 Клиент не в чате\*\*\n\n_📨 Ещё не получено клиентом: 2_\n\n_Ответы сохранены/,'Rich Markdown needs separate paragraphs, not soft line breaks');
   assert.equal(first.web_delivered_at,null);assert.equal(second.web_delivered_at,null);await wait(()=>removed(511)&&removed(512));
   const sends=effects.filter(e=>e.kind==='rich').length;customerOnline=true;
   telegram.confirmWebCustomerDelivery('dialog-one',first.id);await telegram.refreshTicketDialog('dialog-one');
