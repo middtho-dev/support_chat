@@ -16,6 +16,9 @@ const {buildAdminMenu}=require('./telegram-admin-menu');
 const {paragraph,heading,divider,richPanel}=require('./telegram-rich-ui');
 const {createLivePanels}=require('./telegram-live-panels');
 const {createServerMetrics}=require('./server-metrics');
+const {createCustomerCloseRequests}=require('./customer-close-requests');
+const closeRequests=createCustomerCloseRequests(db.db);
+const closePromptOperations=new Map();
 const SINGLE_DIALOG=process.env.TELEGRAM_OPERATOR_LAYOUT!=='topics';
 const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
 const push = require('./push');
@@ -484,7 +487,7 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
     const files=db.getMessages.all(ticket.id).filter(m=>m.file_url);
     if(files.length)rows.push([tgButton(`Вложения · ${files.length}`,`dialogfiles:${ticket.id}`)]);
     if(state==='unassigned')rows.push([tgButton('Взять обращение',`take:${ticket.id}`,'primary')]);
-    rows.push([tgButton('Закрыть обращение',`close:${ticket.id}`)]);
+    rows.push([tgButton(closeRequests.pending(ticket.id)?'⏳ Ожидаем завершения клиентом':'Закрыть обращение',`close:${ticket.id}`)]);
     const url=adminWebAppUrl(ticket.id);
     if(url)rows.push([{text:'Вся история',web_app:{url}}]);
     return {inline_keyboard:rows};
@@ -1630,7 +1633,10 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
   }
   if (showClosePrompt) {
     const prompt = customerClosePromptText(ticket, reason);
-    return { markdown: prompt, fallback: prompt };
+    return richPanel({blocks:[heading('Всё решено?',3),...prompt.split('\n\n').map(paragraph)],rows:[[
+      {text:settings.telegramCustomerCloseButtonText,callback_data:'customer:close'},
+      {text:'Продолжить',callback_data:'customer:continue:'+ticket.id}
+    ]],markdown:prompt,fallback:prompt});
   }
   const body = formatTemplate(settings.telegramCustomerNewTicketText, values);
   return {
@@ -1660,9 +1666,12 @@ function customerClosePromptText(ticket, reason = '') {
     reason
   };
   const configured = formatTemplate(settings.telegramCustomerClosePromptText, values);
-  return /спасибо/i.test(configured)
-    ? configured
-    : `Спасибо за обращение!\n\n${configured}`;
+  const body=/спасибо/i.test(configured)?configured:`Спасибо за обращение!\n\n${configured}`;
+  const pending=closeRequests.pending(ticket.id);
+  const minutes=pending?Math.max(0,Math.ceil((pending.deadline-Date.now())/60000)):5;
+  const delay=minutes?`через ${minutes} мин.`:'в ближайшее время';
+  const continuation=ticket.source==='telegram'?'нажмите «Продолжить» или отправьте сообщение':'отправьте сообщение в чат';
+  return body+`\n\nЕсли всё решено, закройте обращение. Если нужна помощь, ${continuation}.\n\nЕсли вы больше ничего не напишете, обращение автоматически закроется ${pending?delay:'через 5 минут'}.`;
 }
 
 async function pinCustomerControl(chatId, messageId, { repin = false } = {}) {
@@ -1803,7 +1812,7 @@ async function ensureCustomerControlMessage(ticket, {
   forceNew = false,
   preserveExisting = false,
   reason = '',
-  showClosePrompt = false
+  showClosePrompt = false,continued=false
 } = {}) {
   const fresh = db.getTicketById.get(ticket?.id);
   if (!tgEnabled() || fresh?.source !== 'telegram' || !fresh.telegram_customer_chat_id) {
@@ -1814,8 +1823,9 @@ async function ensureCustomerControlMessage(ticket, {
   }
   const task = (async () => {
     const chatId = String(fresh.telegram_customer_chat_id);
-    const model = customerControlModel(fresh, reason, { showClosePrompt });
-    const replyMarkup = customerKeyboard(fresh);
+    showClosePrompt=showClosePrompt||!!closeRequests.pending(fresh.id);
+    const model = continued?richPanel({blocks:[heading('Продолжаем обращение'),paragraph(reason)],rows:customerKeyboard(fresh).inline_keyboard,fallback:reason}):customerControlModel(fresh, reason, { showClosePrompt });
+    const replyMarkup = model.replyMarkup||customerKeyboard(fresh);
     let controlMessageId = Number(fresh.telegram_customer_control_message_id || 0) || null;
     if (preserveExisting && controlMessageId) {
       await pinCustomerControl(chatId, controlMessageId, { repin });
@@ -1829,7 +1839,7 @@ async function ensureCustomerControlMessage(ticket, {
       const edited = await editRichOrDisable(
         chatId,
         controlMessageId,
-        model.markdown,
+        model.rich||model.markdown,
         replyMarkup,
         model.fallback
       );
@@ -1841,7 +1851,7 @@ async function ensureCustomerControlMessage(ticket, {
     if (!controlMessageId) {
       const sent = await sendRichOrText(
         chatId,
-        model.markdown,
+        model.rich||model.markdown,
         { reply_markup: replyMarkup, disable_notification: false },
         model.fallback
       );
@@ -1977,17 +1987,52 @@ async function recordCustomerClosePrompt(ticket, content) {
 }
 
 async function sendCustomerClosePrompt(ticket, options = {}) {
-  const fresh = db.getTicketById.get(ticket?.id) || ticket;
-  if (!fresh || fresh.status !== 'open') throw new Error('Ticket is closed');
-  const content = customerClosePromptText(fresh);
-  if (fresh.source === 'telegram') {
-    const messageId = await sendCustomerControl(fresh, options);
-    await recordCustomerClosePrompt(fresh, content);
-    return { messageId, telegram: true };
-  }
+  if(closePromptOperations.has(ticket?.id))return closePromptOperations.get(ticket.id);
+  const operation=(async()=>{
+    const fresh=db.getTicketById.get(ticket?.id);
+    if(!fresh||fresh.status!=='open')throw new Error('Ticket is closed');
+    const existing=closeRequests.pending(fresh.id);
+    if(existing)return {messageId:existing.prompt_id,pending:true};
+    const baseline=closeRequests.sequence(fresh.id),content=customerClosePromptText(fresh);
+    let telegramId=null;
+    if(fresh.source==='telegram'){
+      telegramId=await sendCustomerControl(fresh,options);
+      if(!telegramId)throw new Error('Telegram did not confirm close proposal delivery');
+    }
+    const message=await recordCustomerClosePrompt(fresh,content);
+    closeRequests.arm(fresh.id,message.id,baseline);
+    await refreshTicketDialog(fresh.id);
+    return {messageId:telegramId||message.id,telegram:!!telegramId,web:!telegramId};
+  })();
+  closePromptOperations.set(ticket?.id,operation);
+  try{return await operation;}finally{closePromptOperations.delete(ticket?.id);}
+}
 
-  const message = await recordCustomerClosePrompt(fresh, content);
-  return { messageId: message.id, web: true };
+async function processCustomerCloseRequests(){
+  return closeRequests.process(async ticket=>{
+    lifecycle.cancelOperatorWait?.(ticket.id);
+    const content='Обращение автоматически закрыто: после предложения завершить диалог в течение 5 минут не поступило новых сообщений.';
+    const id=uuidv4();db.saveMessage.run(id,ticket.id,'system',cfg().supportName,content,'text',null,null,null,null,null);
+    io?.to(`ticket:${ticket.id}`).emit('message',db.getMessageById.get(id));
+    io?.to(`ticket:${ticket.id}`).emit('ticket_closed',{by:'inactivity'});
+    io?.to('admin').emit('admin_ticket_status',{ticketId:ticket.id,status:'closed'});
+    io?.to('admin').emit('admin_tickets',db.getTicketsForAdmin.all());
+    await notifyTicketClosed(ticket,{customerReason:content});
+  });
+}
+
+async function continueCustomerCloseRequest(query){
+  const ticket=db.getTicketById.get(String(query.data).slice('customer:continue:'.length));
+  if(!ticket||ticket.status!=='open'||String(ticket.telegram_customer_id)!==String(query.from.id)||
+    Number(ticket.telegram_customer_control_message_id)!==Number(query.message.message_id)||!closeRequests.pending(ticket.id))return;
+  const id=uuidv4();db.saveMessage.run(id,ticket.id,'user',ticket.user_name,'Клиент выбрал «Продолжить»: вопрос ещё не решён.','text',null,null,null,null,null);
+  const message=db.getMessageById.get(id);
+  io?.to(`ticket:${ticket.id}`).emit('message',message);
+  io?.to('admin').emit('admin_new_message',{ticketId:ticket.id,message});
+  io?.to('admin').emit('admin_tickets',db.getTicketsForAdmin.all());
+  await ensureCustomerControlMessage(ticket,{reason:'Автоматическое закрытие отменено. Напишите, какая помощь ещё нужна.',continued:true});
+  lifecycle.scheduleOperatorWaitMessage?.(ticket.id,id);
+  await forwardMessage(ticket,message);
 }
 
 async function removePreviousCustomerLauncher(customerId) {
@@ -2164,6 +2209,7 @@ async function handleCustomerMessage(msg) {
     return handleCustomerStart(msg);
   }
   const currentTicket = db.getOpenTicketByTelegramCustomer.get(String(msg.from.id));
+  const hadCloseRequest=currentTicket&&!!closeRequests.pending(currentTicket.id);
   if (customerRateLimited(String(msg.from.id))) {
     const markdown = '## ⏳ Слишком много сообщений\n\nПодождите минуту и попробуйте снова.';
     const fallback = 'Слишком много сообщений. Подождите минуту и попробуйте снова.';
@@ -2242,6 +2288,7 @@ async function handleCustomerMessage(msg) {
     replyToId
   );
   db.setTelegramMessageSource.run(String(msg.chat.id), msg.message_id, id);
+  if(hadCloseRequest&&closeRequests.get(ticket.id)?.state==='cancelled')await ensureCustomerControlMessage(ticket,{continued:true,reason:'Автоматическое закрытие отменено. Продолжаем обращение.'}).catch(()=>{});
   const message = {
     id,
     ticket_id: ticket.id,
@@ -2799,6 +2846,7 @@ async function handleCallbackQuery(query) {
     await bot.answerCallbackQuery(query.id).catch(() => {});
     if (!cfg().telegramCustomerEnabled) return;
     try {
+      if(action.startsWith('customer:continue:'))return continueCustomerCloseRequest(query);
       if (action === 'customer:close') return closeCustomerTicket({
         from: query.from,
         chat: query.message.chat,
@@ -2930,8 +2978,8 @@ async function handleCallbackQuery(query) {
       return await sendSupportReplyPrompt(query,operator,answer,ticket,source);
     }
     if(SINGLE_DIALOG&&action==='close'&&!ticket.assigned_operator_id) {
-      await answer({text:'Закрываю обращение…'});await claimAndOpenTicket(ticket.id,userId);
-      return closeTicketFromTelegram(db.getTicketById.get(ticket.id));
+      await answer({text:'Отправляю предложение завершить обращение…'});await claimAndOpenTicket(ticket.id,userId);
+      return sendCustomerClosePrompt(db.getTicketById.get(ticket.id));
     }
     if (!operatorCanControlTicket(ticket, userId, query)) {
       await bot.answerCallbackQuery(query.id, { text: 'Тикет назначен другому оператору', show_alert: true });
@@ -2960,8 +3008,8 @@ async function handleCallbackQuery(query) {
       if (ticket.status === 'closed') {
         await bot.answerCallbackQuery(query.id, { text: 'Тикет уже закрыт' });
       } else {
-        await answer({ text: 'Закрываю тикет…' });
-        await closeTicketFromTelegram(ticket);
+        await answer({ text: 'Отправляю предложение завершить обращение…' });
+        await sendCustomerClosePrompt(ticket);
       }
       return;
     }
@@ -3540,7 +3588,9 @@ function operatorDialogModel(ticket,{view='dialog'}={}) {
     pending:counts.pending,total:counts.total,failed:ticket.source==='telegram'?counts.failed:0,waitingForOperator:latest?.sender==='user'});
   const fallback=label+'\n\n'+content.fallback;
   const rows=ticketKeyboard(ticket,ticket.assigned_operator_id?'open':'unassigned').inline_keyboard;
-  return richPanel({blocks:[...label.split('\n').map((line,index)=>paragraph(index===0?{type:'bold',text:line}:line)),divider(),...content.rich.blocks],rows,
+  const closing=closeRequests.pending(ticket.id);
+  const closingBlocks=closing?[paragraph(`⏳ Клиенту предложено завершить обращение. Автоматическое закрытие в ${transcriptClock(new Date(closing.deadline).toISOString())}, если клиент не продолжит разговор.`)]:[];
+  return richPanel({blocks:[...label.split('\n').map((line,index)=>paragraph(index===0?{type:'bold',text:line}:line)),...closingBlocks,divider(),...content.rich.blocks],rows,
     markdown:label.split('\n').map((line,index)=>index===0?'**'+markdownEscape(line)+'**':'_'+markdownEscape(line)+'_').join('\n\n')+'\n\n'+content.markdown,fallback});
 }
 
@@ -4531,6 +4581,7 @@ module.exports = {
   processIncomingRetryQueue,
   sendCustomerControl,
   sendCustomerClosePrompt,
+  processCustomerCloseRequests,
   refreshOpenTicketTranscripts,
   refreshTicketDialog,
   refreshOperatorPanels,

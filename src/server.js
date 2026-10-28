@@ -1155,6 +1155,7 @@ const staleTicketsQuery = db.db.prepare(`
     ORDER BY created_at DESC LIMIT 1
   )
   WHERE t.status = 'open'
+  AND NOT EXISTS (SELECT 1 FROM customer_close_requests r WHERE r.ticket_id=t.id AND r.state='pending')
   AND m.sender = 'support'
   AND m.created_at < datetime('now', ?)
   AND EXISTS (SELECT 1 FROM messages u WHERE u.ticket_id = t.id AND u.sender = 'user')
@@ -1168,6 +1169,7 @@ const warnTicketsQuery = db.db.prepare(`
     ORDER BY created_at DESC LIMIT 1
   )
   WHERE t.status = 'open'
+  AND NOT EXISTS (SELECT 1 FROM customer_close_requests r WHERE r.ticket_id=t.id AND r.state='pending')
   AND m.sender = 'support'
   AND m.created_at < datetime('now', ?)
   AND m.created_at >= datetime('now', ?)
@@ -1220,6 +1222,7 @@ async function inactivityCheck() {
   }
 }
 setInterval(inactivityCheck, 60 * 1000);
+setInterval(()=>telegram.processCustomerCloseRequests?.().catch(error=>console.error('[Auto] customer close:',error.message)),5000);
 
 app.use((err, req, res, next) => {
   if (!err) return next();

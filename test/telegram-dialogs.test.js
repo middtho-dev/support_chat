@@ -48,6 +48,7 @@ const op={id:7001,first_name:'Оператор'};
 const wait=async predicate=>{for(let i=0;i<200;i++){if(predicate())return;await new Promise(r=>setTimeout(r,10));}assert.ok(predicate(),'Timed out');};
 const state=id=>db.db.prepare('SELECT * FROM telegram_operator_dialogs WHERE ticket_id=? AND operator_id=?').get(id,'7001');
 const active=id=>state(id)?.message_id;
+async function expireClose(id){db.db.prepare('UPDATE customer_close_requests SET deadline=0 WHERE ticket_id=?').run(id);await telegram.processCustomerCloseRequests();}
 const removed=id=>effects.some(e=>e.kind==='delete'&&e.id===id);
 const callback=async(data,id,from=op)=>bot.handlers.callback_query({id:'q'+(++next),from,data,message:{message_id:id,chat:{id:from.id,type:'private'}}});
 function source(ticket,id,text='Вопрос',type='text',file=null){db.saveMessage.run(id,ticket,'user','Клиент',text,type,file,file?'photo.jpg':null,file?'image/jpeg':null,null,null);return db.getMessageById.get(id);}
@@ -82,7 +83,7 @@ test('start menu native buttons navigate and return on the same panel, with an a
   assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
   await callback('list:waiting:0',panel.dashboard_message_id);await callback('claim:menu-new:0',panel.dashboard_message_id);
   assert.equal(db.getTicketById.get('menu-new').assigned_operator_id,'7001');await wait(()=>active('menu-new'));
-  await callback('close:menu-new',active('menu-new'));
+  await callback('close:menu-new',active('menu-new'));await expireClose('menu-new');
   for(const id of ['menu-pending','menu-answered'])db.closeTicket.run(id);
   await callback('dashboard:show',panel.dashboard_message_id);
 });
@@ -178,6 +179,34 @@ test('Rich media rejection preserves buttons globally; an ambiguous timeout neve
  assert.equal(telegram.status().richBlocksAvailable,true);
 });
 
+test('customer Rich proposal offers close and continue, repeat clicks keep the deadline and Continue cancels it',async()=>{
+ const customer='8101',id='customer-countdown';
+ db.createTelegramTicket.run(id,'Клиент таймера','session-'+id,customer,customer,null,null,null,null);
+ source(id,'customer-countdown-q','Вопрос');await telegram.createTopic(id);const card=active(id);
+ await callback('close:'+id,card);assert.equal(db.getTicketById.get(id).status,'open');
+ const request=db.db.prepare('SELECT * FROM customer_close_requests WHERE ticket_id=?').get(id);
+ assert.equal(request.state,'pending');assert.ok(request.deadline-Date.now()>295000);
+ const control=db.getTicketById.get(id).telegram_customer_control_message_id;
+ const proposal=effects.find(e=>e.kind==='rich'&&e.id===control);
+ const controls=proposal.rich.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons);
+ assert.ok(controls.some(b=>b.callback_data==='customer:close'));assert.ok(controls.some(b=>b.callback_data==='customer:continue:'+id));
+ assert.match(JSON.stringify(proposal.rich.blocks),/через 5 минут/);assert.deepEqual(proposal.options.reply_markup.inline_keyboard,[]);
+ const count=db.getMessages.all(id).filter(m=>m.message_type==='close_prompt').length;
+ await callback('close:'+id,card);assert.equal(db.db.prepare('SELECT deadline FROM customer_close_requests WHERE ticket_id=?').get(id).deadline,request.deadline);
+ assert.equal(db.getMessages.all(id).filter(m=>m.message_type==='close_prompt').length,count);
+ await callback('customer:continue:'+id,control,{id:8102,first_name:'Другой клиент'});
+ assert.equal(db.db.prepare('SELECT state FROM customer_close_requests WHERE ticket_id=?').get(id).state,'pending');
+ await callback('customer:continue:'+id,control,{id:8101,first_name:'Клиент'});
+ assert.equal(db.db.prepare('SELECT state FROM customer_close_requests WHERE ticket_id=?').get(id).state,'cancelled');
+ await expireClose(id);assert.equal(db.getTicketById.get(id).status,'open');
+ await callback('close:'+id,active(id));
+ await bot.handlers.message({message_id:8701,from:{id:8101,first_name:'Клиент'},chat:{id:8101,type:'private'},text:'Ещё нужна помощь'});
+ assert.equal(db.db.prepare('SELECT state FROM customer_close_requests WHERE ticket_id=?').get(id).state,'cancelled');
+ await expireClose(id);assert.equal(db.getTicketById.get(id).status,'open');
+ await callback('close:'+id,active(id));await callback('customer:close',db.getTicketById.get(id).telegram_customer_control_message_id,{id:8101,first_name:'Клиент'});
+ assert.equal(db.getTicketById.get(id).status,'closed');assert.equal(active(id),null);
+});
+
 test('unanswered reminder recreates the card with sound and no separate reminder message',async()=>{
   const old=active('dialog-one');db.db.prepare("UPDATE messages SET created_at=datetime('now','-10 minutes') WHERE id='client-image'").run();
   // Make the live last message unambiguously the client's pending question.
@@ -198,7 +227,10 @@ test('transient send failure persists and recovers without a duplicate active ca
 test('close removes card, unanswered previews, prompts and undelivered responses with durable retry',async()=>{
   await callback('replyticket:dialog-one',active('dialog-one'));const prompt=effects.findLast(e=>e.options?.reply_markup?.force_reply);
   await reply(prompt.id,'Ответ перед закрытием',505);const card=active('dialog-one');deleteFailures.add(card);
-  await callback('close:dialog-one',card);assert.equal(db.getTicketById.get('dialog-one').status,'closed');assert.equal(active('dialog-one'),null);
+  await callback('close:dialog-one',card);
+  assert.equal(db.getTicketById.get('dialog-one').status,'open');assert.equal(active('dialog-one'),card);
+  const proposal=db.getMessages.all('dialog-one').find(m=>m.message_type==='close_prompt');assert.match(proposal.content,/через 5 минут/);
+  await expireClose('dialog-one');assert.equal(db.getTicketById.get('dialog-one').status,'closed');assert.equal(active('dialog-one'),null);
   assert.ok(removed(prompt.id));assert.ok(removed(505));assert.equal(removed(card),false);
   assert.ok(telegram.status().dialogs.cleanupPending>0);deleteFailures.delete(card);
   db.db.prepare('UPDATE telegram_operator_dialog_messages SET next_retry_at=0 WHERE message_id=?').run(card);
@@ -236,7 +268,7 @@ test('multiple operators share unassigned cards but only the atomic assignee can
     await bot.handlers.message({message_id:508,chat:{id:7002,type:'private'},from:{id:7002,first_name:'Другой оператор'},text:'Чужой ответ',reply_to_message:{message_id:other.message_id}});
     assert.equal(db.getMessageByTelegramDestination.get('7002',508),undefined);
     await wait(()=>db.db.prepare('SELECT message_id FROM telegram_operator_dialogs WHERE ticket_id=? AND operator_id=?').get(ticket.id,'7002').message_id===null);
-    await callback('close:'+ticket.id,active(ticket.id));assert.equal(active(ticket.id),null);
+    await callback('close:'+ticket.id,active(ticket.id));await expireClose(ticket.id);assert.equal(active(ticket.id),null);
   }finally{db.deactivateTelegramOperator.run('7002');}
 });
 

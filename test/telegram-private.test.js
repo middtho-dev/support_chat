@@ -881,9 +881,11 @@ test('Telegram customer creates a ticket and receives the support reply', async 
     item.messageId === refreshedTicket.telegram_customer_control_message_id
   );
   assert.ok(db.getMessages.all(ticket.id).some(message => message.message_type === 'close_prompt'));
-  assert.match(closePrompt.markdown, /Спасибо за обращение/);
-  assert.match(closePrompt.markdown, /Если ваш вопрос решён/);
-  assert.doesNotMatch(closePrompt.markdown, /Тикет #|Оператор уже получил|Статус:/);
+  const proposalText=JSON.stringify(closePrompt.blocks);
+  assert.match(proposalText, /Спасибо за обращение/);
+  assert.match(proposalText, /Если ваш вопрос решён/);
+  assert.doesNotMatch(proposalText, /Тикет #|Оператор уже получил|Статус:/);
+  assert.ok(closePrompt.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons).some(b=>b.callback_data==='customer:continue:'+ticket.id));
 
   const activeControlMessageId = refreshedTicket.telegram_customer_control_message_id;
   await fakeBot.handlers.callback_query({
@@ -1044,7 +1046,7 @@ test('a customer message opens a new ticket after a previous ticket was closed',
   );
 });
 
-test('close button responds immediately and closes a ticket from its operator topic', async () => {
+test('close button acknowledges immediately and proposes closure before the five minute deadline', async () => {
   const id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   db.createTicket.run(id, 'Закрытие из темы', 'session-close-button');
   db.saveTelegramThread.run(id, '7001', '7001', 909, null);
@@ -1062,16 +1064,13 @@ test('close button responds immediately and closes a ticket from its operator to
 
   assert.equal(callbackAnswers.length, answersBefore + 1);
   assert.equal(callbackAnswers.at(-1).id, 'close-ticket-query');
-  assert.match(callbackAnswers.at(-1).options.text, /Закрываю тикет/);
-  assert.equal(db.getTicketById.get(id).status, 'closed');
-  const closeNotice = rich.findLast(item =>
-    item.chatId === '7001' && item.options?.message_thread_id === 909
-  );
-  assert.ok(closeNotice);
-  assert.equal(
-    closeNotice.options?.reply_markup?.inline_keyboard?.flat().some(button => button.callback_data),
-    false
-  );
+  assert.match(callbackAnswers.at(-1).options.text, /предложение/);
+  assert.equal(db.getTicketById.get(id).status,'open');
+  const request=db.db.prepare('SELECT * FROM customer_close_requests WHERE ticket_id=?').get(id);
+  assert.equal(request.state,'pending');assert.ok(request.deadline>Date.now());
+  await telegram.processCustomerCloseRequests();assert.equal(db.getTicketById.get(id).status,'open');
+  db.db.prepare('UPDATE customer_close_requests SET deadline=0 WHERE ticket_id=?').run(id);
+  await telegram.processCustomerCloseRequests();assert.equal(db.getTicketById.get(id).status,'closed');
 });
 
 test('operator menu sends a gratitude close prompt to a website customer', async () => {
