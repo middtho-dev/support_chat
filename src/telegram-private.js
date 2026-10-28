@@ -3486,7 +3486,7 @@ function operatorDialogModel(ticket) {
     FROM messages WHERE ticket_id=? AND sender='support' AND COALESCE(is_auto,0)=0`).get(ticket.source,ticket.id);
   const label=supportDeliveryStatus({source:ticket.source,online:!!lifecycle.isCustomerInChat?.(ticket.id),
     pending:counts.pending,total:counts.total,failed:ticket.source==='telegram'?counts.failed:0,waitingForOperator:latest?.sender==='user'});
-  return {markdown:label.split('\n').map(line=>'_'+markdownEscape(line)+'_').join('\n')+'\n\n'+content.markdown,fallback:label+'\n\n'+content.fallback};
+  return {markdown:label.split('\n').map((line,index)=>index===0?'**'+markdownEscape(line)+'**':'_'+markdownEscape(line)+'_').join('\n\n')+'\n\n'+content.markdown,fallback:label+'\n\n'+content.fallback};
 }
 
 async function refreshTicketDialog(ticketId) {
