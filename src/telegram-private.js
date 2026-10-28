@@ -486,7 +486,7 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
     rows.push([tgButton('Ответить / отправить файл',`replyticket:${ticket.id}`,'primary')]);
     const files=db.getMessages.all(ticket.id).filter(m=>m.file_url);
     if(files.length)rows.push([tgButton(`Вложения · ${files.length}`,`dialogfiles:${ticket.id}`)]);
-    if(state==='unassigned')rows.push([tgButton('Взять обращение',`take:${ticket.id}`,'primary')]);
+    if(state==='unassigned'&&!sharedTickets())rows.push([tgButton('Взять обращение',`take:${ticket.id}`,'primary')]);
     rows.push([tgButton(closeRequests.pending(ticket.id)?'⏳ Ожидаем завершения клиентом':'Закрыть обращение',`close:${ticket.id}`)]);
     const url=adminWebAppUrl(ticket.id);
     if(url)rows.push([{text:'Вся история',web_app:{url}}]);
@@ -542,9 +542,16 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
   return { inline_keyboard: rows };
 }
 
+function sharedTickets(){return cfg().telegramSharedTickets;}
+function ticketAccessible(ticket,operatorId){
+  return sharedTickets()||!ticket.assigned_operator_id||String(ticket.assigned_operator_id)===String(operatorId);
+}
+
 function operatorCanControlTicket(ticket, operatorId, query) {
+  if(sharedTickets()&&isAuthorized(operatorId))return true;
   if (String(ticket.assigned_operator_id || '') === String(operatorId)) return true;
 
+  if(ticket.assigned_operator_id)return false;
   const chatId = String(query?.message?.chat?.id || '');
   const threadId = Number(query?.message?.message_thread_id || 0);
   if (!chatId || !threadId) return false;
@@ -559,18 +566,18 @@ function operatorCanControlTicket(ticket, operatorId, query) {
 
 
 function unansweredTickets(operator,{page=0,countOnly=false}={}) {
-  const where=`t.status='open' AND t.assigned_operator_id=? AND
+  const where=`t.status='open' AND (?=1 OR t.assigned_operator_id=?) AND
     (SELECT CASE WHEN m.message_type='close_prompt' THEN 'support' ELSE m.sender END
      FROM messages m WHERE m.ticket_id=t.id AND (m.sender!='system' OR m.message_type='close_prompt') AND COALESCE(m.is_auto,0)=0
      ORDER BY m.created_at DESC,m.rowid DESC LIMIT 1)='user'`;
-  if(countOnly)return db.db.prepare('SELECT COUNT(*) n FROM tickets t WHERE '+where).get(operator.telegram_user_id).n;
+  if(countOnly)return db.db.prepare('SELECT COUNT(*) n FROM tickets t WHERE '+where).get(sharedTickets()?1:0,operator.telegram_user_id).n;
   return db.db.prepare(`SELECT t.*,
     (SELECT content FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_msg,
     (SELECT message_type FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_msg_type,
     (SELECT file_name FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_file_name,
     (SELECT created_at FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_activity
     FROM tickets t WHERE ${where} ORDER BY last_activity ASC,t.id LIMIT ? OFFSET ?`)
-    .all(operator.telegram_user_id,TICKET_LIST_PAGE_SIZE,Math.max(0,page)*TICKET_LIST_PAGE_SIZE);
+    .all(sharedTickets()?1:0,operator.telegram_user_id,TICKET_LIST_PAGE_SIZE,Math.max(0,page)*TICKET_LIST_PAGE_SIZE);
 }
 
 function dashboardCounts(operator) {
@@ -581,6 +588,7 @@ function dashboardCounts(operator) {
       SUM(CASE WHEN status = 'closed' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS closed
     FROM tickets
   `).get(operator.telegram_user_id, operator.telegram_user_id);
+  if(sharedTickets()){counts.mine=db.db.prepare("SELECT COUNT(*) n FROM tickets WHERE status='open'").get().n;counts.closed=db.db.prepare("SELECT COUNT(*) n FROM tickets WHERE status='closed'").get().n;}
   return {...counts,unanswered:unansweredTickets(operator,{countOnly:true})};
 }
 
@@ -589,7 +597,7 @@ function dashboardModel(operator) {
   const cpu=metrics.cpuPercent===null?'…':metrics.cpuPercent.toFixed(1)+'%';
   const memory=metrics.totalMemory?Math.round(metrics.usedMemory/metrics.totalMemory*100)+'%':'—';
   const disk=metrics.disk?compactBytes(metrics.disk.available):'—';
-  return buildAdminMenu({name:operator.display_name,counts:dashboardCounts(operator),webAppUrl:adminWebAppUrl(),serverSummary:`Сервер · CPU ${cpu} · RAM ${memory} · свободно ${disk}`});
+  return buildAdminMenu({shared:sharedTickets(),name:operator.display_name,counts:dashboardCounts(operator),webAppUrl:adminWebAppUrl(),serverSummary:`Сервер · CPU ${cpu} · RAM ${memory} · свободно ${disk}`});
 }
 
 function compactDuration(seconds) {
@@ -667,6 +675,16 @@ function controlCenterModel() {
 function ticketListQuery(operator, view, page) {
   const offset = Math.max(0, page) * TICKET_LIST_PAGE_SIZE;
   if(view==='unanswered')return {total:unansweredTickets(operator,{countOnly:true}),tickets:unansweredTickets(operator,{page})};
+  if(sharedTickets()){
+    const status=view==='closed'?'closed':'open';
+    return {total:db.db.prepare('SELECT COUNT(*) n FROM tickets WHERE status=?').get(status).n,
+      tickets:db.db.prepare(`SELECT t.*,
+       (SELECT content FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_msg,
+       (SELECT message_type FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_msg_type,
+       (SELECT file_name FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_file_name,
+       (SELECT created_at FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_activity
+       FROM tickets t WHERE status=? ORDER BY t.updated_at DESC,t.id LIMIT ? OFFSET ?`).all(status,TICKET_LIST_PAGE_SIZE,offset)};
+  }
   if (view === 'waiting') {
     return {
       total: Number(db.countOpenUnassignedTickets.get()?.count || 0),
@@ -694,7 +712,8 @@ function ticketListQuery(operator, view, page) {
 }
 
 function listTitle(view) {
-  if(view==='unanswered')return '⏳ Ждут вашего ответа';
+  if(view==='unanswered')return sharedTickets()?'⏳ Ждут ответа команды':'⏳ Ждут вашего ответа';
+  if(sharedTickets()&&view!=='closed')return '💬 Общие обращения';
   if (view === 'waiting') return '🔔 Новые тикеты';
   if (view === 'closed') return '✅ Закрытые тикеты';
   return '🔵 Мои открытые';
@@ -712,7 +731,7 @@ function listPreview(ticket) {
 
 function listTicketButton(ticket, view, page) {
   const name = String(ticket.user_name || 'Клиент').replace(/\s+/g, ' ').slice(0, 34);
-  if (view === 'waiting') {
+  if (view === 'waiting'&&!sharedTickets()) {
     return tgButton(`🙋 Взять · ${name}`, `claim:${ticket.id}:${page}`, 'primary');
   }
   if (view === 'closed') return null;
@@ -1248,6 +1267,7 @@ async function showRichTranscriptEntryEffect(thread, model) {
 
 async function refreshOpenTicketTranscripts(limit = 30) {
   if (!tgEnabled() || !bot) return 0;
+  if(SINGLE_DIALOG&&sharedTickets())return reconcileOperatorAccess();
   const tickets = db.getAllOpenTickets.all().slice(0, Math.max(1, Math.min(100, Number(limit) || 30)));
   let refreshed = 0;
   for (const ticket of tickets) {
@@ -1557,7 +1577,7 @@ async function configureBot(instance = bot) {
     const panel=db.getTelegramOperatorDashboard.get(operator.telegram_user_id);
     if(panel?.dashboard_message_id){const selected=livePanels.get(operator.telegram_user_id);if(!selected||selected.pause_until<=Date.now())await updateOperatorDashboard(operator,panelModelFor(operator,selected?.view,selected?.page)).catch(()=>{});}
   }
-
+  if(sharedTickets())await reconcileOperatorAccess();
 }
 
 function registerOperator(from) {
@@ -2367,7 +2387,7 @@ async function processUnansweredReminders(now = new Date()) {
       const assigned = operators.find(operator =>
         String(operator.telegram_user_id) === String(ticket.assigned_operator_id || '')
       );
-      const targets = assigned ? [assigned] : operators;
+      const targets = !sharedTickets()&&assigned ? [assigned] : operators;
       if (!targets.length) {
         reminderStats.failed++;
         reminderStats.lastError = `No registered operator for ${shortId(ticket)}`;
@@ -2489,7 +2509,27 @@ async function autoAssignTicket(ticket, operator, options = {}) {
   return assignment;
 }
 
+async function reconcileOperatorAccess(){
+  if(!tgEnabled())return 0;
+  const operators=await registeredAuthorizedOperators({discover:true});
+  const tickets=db.getAllOpenTickets.all();
+  if(SINGLE_DIALOG){
+    for(const ticket of tickets){
+      const existing=db.db.prepare('SELECT operator_id FROM telegram_operator_dialogs WHERE ticket_id=?').all(ticket.id);
+      const targets=new Set(existing.map(row=>row.operator_id));
+      for(const op of operators)if(ticketAccessible(ticket,op.telegram_user_id))targets.add(String(op.telegram_user_id));
+      for(const op of targets)supportDialogs.queue(ticket,op);
+    }
+    await supportDialogs.retry();
+  }else if(sharedTickets()){
+    for(const ticket of tickets)for(const op of operators)await ensurePrivateThread(ticket,op).catch(()=>{});
+  }
+  db.db.prepare('UPDATE telegram_operator_panel_views SET next_refresh=0').run();
+  await refreshOperatorPanels();return tickets.length;
+}
+
 async function reconcileOperator(operator) {
+  if(sharedTickets())return reconcileOperatorAccess();
   const tickets = db.getOpenUnassignedTickets.all(50);
   const operators = await registeredAuthorizedOperators();
   if (!cfg().telegramAutoAssignSingleOperator ||
@@ -2503,6 +2543,7 @@ async function reconcileOperator(operator) {
 
 async function reconcileUnassignedTickets() {
   if (!tgEnabled()) return;
+  if(sharedTickets())return reconcileOperatorAccess();
   const operators = await registeredAuthorizedOperators({ discover: true });
   if (!operators.length) {
     const waiting = db.getOpenUnassignedTickets.all(1);
@@ -2624,12 +2665,13 @@ async function claimAndOpenTicket(ticketId, operatorId, options = {}) {
   }
   const before = db.getTicketById.get(ticketId);
   if (!before || before.status !== 'open') throw new Error('Ticket is not open');
+  if(sharedTickets()){const thread=await ensurePrivateThread(before,operator);return thread;}
   const assignedHere = !before.assigned_operator_id;
   if (assignedHere) {
     db.assignTicketIfUnassigned.run(operator.telegram_user_id, ticketId);
   }
   const ticket = db.getTicketById.get(ticketId);
-  if (String(ticket.assigned_operator_id || '') !== String(operator.telegram_user_id)) {
+  if (!ticketAccessible(ticket,operator.telegram_user_id)) {
     const owner = db.getTelegramOperator.get(String(ticket.assigned_operator_id || ''));
     const error = new Error(`Тикет уже взял ${owner?.display_name || 'другой оператор'}`);
     error.alreadyAssigned = true;
@@ -2806,7 +2848,7 @@ function scheduleTopicStatusVerification(key, desired) {
 async function focusTicketTopic(ticket, operator) {
   if(SINGLE_DIALOG)return supportDialogs.sync(ticket,operator.telegram_user_id,{notify:true,reminder:true});
   if (!ticket || ticket.status !== 'open') throw new Error('Ticket is not open');
-  if (String(ticket.assigned_operator_id || '') !== String(operator.telegram_user_id)) {
+  if (!ticketAccessible(ticket,operator.telegram_user_id)) {
     const error = new Error('Тикет назначен другому оператору');
     error.alreadyAssigned = true;
     throw error;
@@ -3071,7 +3113,7 @@ async function handleMessage(msg) {
     const source=inboxTarget.message_id?db.getMessageById.get(inboxTarget.message_id):null;
     const ticket=db.getTicketById.get(inboxTarget.ticket_id||source?.ticket_id);
     if(!ticket||ticket.status!=='open')return bot.sendMessage(msg.chat.id,'Тикет закрыт. Ответ не отправлен.');
-    if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id))return bot.sendMessage(msg.chat.id,'Тикет назначен другому оператору. Ответ не отправлен.');
+    if(!ticketAccessible(ticket,operator.telegram_user_id))return bot.sendMessage(msg.chat.id,'Тикет назначен другому оператору. Ответ не отправлен.');
     if(!cfg().telegramForwardOperatorMessages)return;
     if(command==='/close')return closeTicketFromTelegram(ticket);
     const opened=await claimAndOpenTicket(ticket.id,operator.telegram_user_id);
@@ -3102,7 +3144,7 @@ async function handleMessage(msg) {
 
   const ticket = db.getTicketById.get(thread.ticket_id);
   if (!ticket) return;
-  if (String(ticket.assigned_operator_id || '') !== String(operator.telegram_user_id)) {
+  if (!ticketAccessible(ticket,operator.telegram_user_id)) {
     await bot.sendMessage(msg.chat.id, 'Тикет больше не назначен вам.', { message_thread_id: threadId });
     return;
   }
@@ -3232,6 +3274,10 @@ async function forwardOperatorMessage(msg, ticket, thread, operator, {inboxTarge
       }
     }
     if (!rawText && !fileUrl) return;
+    const current=db.getTicketById.get(ticket.id);
+    if(!current||current.status!=='open'||!isAuthorized(operator.telegram_user_id)||!ticketAccessible(current,operator.telegram_user_id)){
+      await bot.sendMessage(msg.chat.id,'Обращение закрыто или доступ изменён. Ответ не отправлен.');return;
+    }
 
     // Telegram Reply selects the destination only. The customer receives a
     // regular support message, without the operator's routing quote.
@@ -3301,7 +3347,9 @@ async function forwardOperatorMessage(msg, ticket, thread, operator, {inboxTarge
       scheduleDeliveryQueue(2 * 1000);
     }
 
-    if (type === 'text') {
+    if(SINGLE_DIALOG&&sharedTickets()){
+      refreshTicketDialog(ticket.id).catch(error=>console.warn('[TG private] shared transcript:',tgError(error)));
+    }else if (type === 'text') {
       publishTicketTranscript(ticket, thread).catch(error => {
         console.warn('[TG private] operator transcript refresh:', tgError(error));
       });
@@ -3622,7 +3670,7 @@ async function refreshOperatorPanels(){
 }
 
 const supportDialogs=createSupportDialogs({
-  db,enabled:tgEnabled,authorized:isAuthorized,send:sendRichOrText,edit:editRichOrDisable,
+  db,shared:sharedTickets,enabled:tgEnabled,authorized:isAuthorized,send:sendRichOrText,edit:editRichOrDisable,
   model:operatorDialogModel,keyboard:ticketKeyboard,remove:deleteTelegramMessage,
   removeTopic:(chat,id)=>bot.deleteForumTopic(chat,id),expired:cleanupExpired,
   retryDelay:(attempt,error)=>Math.max(deliveryRetryDelaySeconds(attempt),telegramRetryAfterSeconds(error)),
@@ -3636,10 +3684,10 @@ async function forwardSingleDialog(ticket,message) {
     let fresh=db.getTicketById.get(ticket.id);
     if(!fresh||fresh.status!=='open')return null;
     const operators=await registeredAuthorizedOperators({discover:true});
-    if(!fresh.assigned_operator_id&&operators.length===1&&cfg().telegramAutoAssignSingleOperator) {
+    if(!sharedTickets()&&!fresh.assigned_operator_id&&operators.length===1&&cfg().telegramAutoAssignSingleOperator) {
       db.assignTicketIfUnassigned.run(operators[0].telegram_user_id,fresh.id);fresh=db.getTicketById.get(fresh.id);
     }
-    const recipients=fresh.assigned_operator_id?operators.filter(op=>String(op.telegram_user_id)===String(fresh.assigned_operator_id)):operators;
+    const recipients=!sharedTickets()&&fresh.assigned_operator_id?operators.filter(op=>String(op.telegram_user_id)===String(fresh.assigned_operator_id)):operators;
     if(!recipients.length)return null;
     let delivered=null;
     for(const op of recipients)delivered=await supportDialogs.sync(fresh,op.telegram_user_id,{notify:message.sender==='user'});
@@ -3687,7 +3735,7 @@ async function dialogAttachmentAction(query,operator,answer) {
   const [,ticketId,page]=action.split(':');
   const ticket=db.getTicketById.get(single?(file?.ticket_id||''):ticketId);
   if(!ticket||ticket.status!=='open'){await answer({text:'Обращение закрыто',show_alert:true});return;}
-  if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id)){await answer({text:'Обращение у другого оператора',show_alert:true});return;}
+  if(!ticketAccessible(ticket,operator.telegram_user_id)){await answer({text:'Обращение у другого оператора',show_alert:true});return;}
   if(!single){
     await answer();supportDialogs.setView(ticket.id,operator.telegram_user_id,'files:'+Math.max(0,Number(page)||0));
     await supportDialogs.sync(ticket,operator.telegram_user_id);return;
@@ -3722,7 +3770,7 @@ async function dialogAttachmentAction(query,operator,answer) {
 }
 
 const supportInbox=createSupportInbox({
-  db, send:sendSupportInboxMessage,
+  db,shared:sharedTickets, send:sendSupportInboxMessage,
   enabled:()=>tgEnabled()&&cfg().telegramForwardUserMessages,
   authorized:isAuthorized,
   operators:()=>db.getActiveTelegramOperators.all(),
@@ -3776,7 +3824,7 @@ async function beginSupportInboxReply(query,operator,answer) {
 
 async function sendSupportReplyPrompt(query,operator,answer,ticket,source) {
   if(!ticket||ticket.status!=='open'){await answer({text:'Тикет закрыт',show_alert:true});return;}
-  if(ticket.assigned_operator_id&&String(ticket.assigned_operator_id)!==String(operator.telegram_user_id)) {
+  if(!ticketAccessible(ticket,operator.telegram_user_id)) {
     await answer({text:'Тикет назначен другому оператору',show_alert:true});return;
   }
   await answer();
@@ -3809,6 +3857,13 @@ async function forwardMessage(ticket, message, options = {}) {
   if (message.sender === 'support' && !settings.telegramForwardAdminMessages) return null;
   if(SINGLE_DIALOG)return forwardSingleDialog(ticket,message);
   publishSupportInbox(db.getTicketById.get(ticket.id)||ticket,message);
+  if(sharedTickets()){
+    const fresh=db.getTicketById.get(ticket.id);if(!fresh||fresh.status!=='open')return null;
+    const operators=await registeredAuthorizedOperators({discover:true});let sent=null;
+    for(const op of operators){const thread=await ensurePrivateThread(fresh,op);if(thread)sent=await publishTicketTranscript(fresh,thread);}
+    if(sent?.message_id)db.updateTelegramDelivery.run(String(operators.at(-1).telegram_user_id),sent.message_id,message.id);
+    return sent?.message_id||null;
+  }
   if (message.telegram_message_id || forwardingMessages.has(message.id)) {
     return message.telegram_message_id || null;
   }
@@ -4374,12 +4429,12 @@ function status(now = new Date()) {
       FROM messages m
       JOIN tickets t ON t.id = m.ticket_id
       WHERE t.status = 'open'
-        AND t.assigned_operator_id IS NOT NULL
+        AND (?=1 OR t.assigned_operator_id IS NOT NULL)
         AND m.sender != 'system'
         AND COALESCE(m.is_auto, 0) = 0
         AND m.telegram_message_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='operator' AND h.item_id=m.id)
-    `).get();
+    `).get(sharedTickets()?1:0);
     pendingMessages = Number(pending?.count || 0);
     if (pending?.oldest) {
       oldestPendingSeconds = Math.max(
@@ -4420,6 +4475,7 @@ function status(now = new Date()) {
   return {
     mode: 'private',
     operatorLayout:SINGLE_DIALOG?'dialog':'topics',
+    sharedTickets:!!sharedTickets(),
     dialogs:SINGLE_DIALOG?supportDialogs.diagnostics():null,
     configured: !!TOKEN,
     operatorAccessConfigured: ADMIN_IDS.size > 0 || db.getActiveTelegramOperators.all().length > 0,
@@ -4522,6 +4578,7 @@ async function createTopic(ticketId) {
     try {
       const operators = await registeredAuthorizedOperators({ discover: true });
       if (!operators.length) throw new Error('No registered Telegram operator');
+      if(sharedTickets()){let result=null;for(const operator of operators)result=await ensurePrivateThread(ticket,operator);return (SINGLE_DIALOG?result?.root_message_id:result?.thread_id)||null;}
       if (operators.length === 1 && cfg().telegramAutoAssignSingleOperator) {
         const thread = await autoAssignTicket(ticket, operators[0], {
           suppressFailureReport: true
@@ -4584,6 +4641,7 @@ module.exports = {
   processCustomerCloseRequests,
   refreshOpenTicketTranscripts,
   refreshTicketDialog,
+  reconcileOperatorAccess,
   refreshOperatorPanels,
   clearTicketReminders,
   notifyTicketClosed,

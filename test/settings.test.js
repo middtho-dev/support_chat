@@ -222,3 +222,11 @@ test('permanent Telegram cleanup failures retain a reason without repeated attem
   assert.equal(db.getPendingTelegramCustomerCleanup.all(100).some(x => x.message_id === 43), false);
   assert.equal(db.db.prepare('SELECT last_error FROM telegram_customer_cleanup_queue WHERE message_id = 43').get().last_error, '48 hour limit');
 });
+
+ test('shared Telegram tickets setting persists independently and can be switched back',()=>{
+ assert.equal(loadSettings().telegramSharedTickets,false);
+ assert.equal(saveSettings({telegramSharedTickets:true}).telegramSharedTickets,true);
+ assert.equal(loadSettings().telegramSharedTickets,true);
+ assert.equal(saveSettings({supportName:'Общая поддержка'}).telegramSharedTickets,true);
+ assert.equal(saveSettings({telegramSharedTickets:false}).telegramSharedTickets,false);
+ });
