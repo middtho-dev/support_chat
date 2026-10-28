@@ -155,7 +155,7 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
     answered(message) {
       if(!message?.telegram_chat_id)return false;
       const item=sql.prepare('SELECT * FROM telegram_operator_dialog_messages WHERE chat_id=? AND response_id=? LIMIT 1').get(String(message.telegram_chat_id),message.id);
-      if(!item)return false;
+      if(!item||item.cleanup!==0)return false;
       enqueue.run(item.chat_id,item.message_id);
       retire(item.ticket_id,item.operator_id,'prompt');retire(item.ticket_id,item.operator_id,'preview');
       return true;
@@ -187,6 +187,9 @@ function createSupportDialogs({db, enabled, authorized, send, edit, model, keybo
     },
     async retry() {
       if(!enabled())return;
+      // Upgrade already-saved responses too; their delivery receipt stays independent.
+      for(const row of sql.prepare(`SELECT m.* FROM messages m JOIN telegram_operator_dialog_messages d
+        ON d.response_id=m.id WHERE d.kind='response' AND d.cleanup=0 LIMIT 100`).all())this.answered(row);
       sql.prepare(`UPDATE telegram_operator_dialogs SET dirty=1 WHERE message_id IN
         (SELECT message_id FROM telegram_operator_dialog_messages WHERE kind='card' AND cleanup=0 AND created_at<?)`).run(clock()-24*60*60*1000);
       for(const row of sql.prepare('SELECT * FROM telegram_operator_dialogs WHERE dirty=1 AND next_retry_at<=? LIMIT 30').all(clock())) {

@@ -7,7 +7,7 @@ if(!['localhost','127.0.0.1'].includes(new URL(url).hostname))throw Error('Local
 const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recursive:true});
 (async()=>{
  for(const engine of (process.env.AUDIT_ENGINES||'chromium,webkit').split(',')){
-  const browser=await ({chromium,webkit}[engine]).launch(engine==='chromium'?{channel:'msedge',headless:true}:{headless:true});
+  const browser=await ({chromium,webkit}[engine]).launch(engine==='chromium'?{...(process.env.AUDIT_CHROMIUM_PATH?{executablePath:process.env.AUDIT_CHROMIUM_PATH}:{channel:'msedge'}),args:process.getuid?.()===0?['--no-sandbox']:[],headless:true}:{headless:true});
   try{
    const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
    await page.route('https://telegram.org/**',r=>r.abort());
@@ -63,10 +63,12 @@ const output=process.env.AUDIT_OUTPUT||'audit-output';fs.mkdirSync(output,{recur
    for(const [width,height] of [[2513,457],[1920,1080],[1366,768],[1089,1272],[390,844],[360,640],[390,340],[844,320]]){
     await page.setViewportSize({width,height});
     await page.evaluate(()=>{renderMsgs([{id:'a',sender:'support',content:'Добро пожаловать в службу поддержки KV9RU!',type:'text',created_at:new Date().toISOString()}]);});
-    await page.waitForTimeout(200);
-    const state=await page.evaluate(()=>{const rect=id=>document.getElementById(id).getBoundingClientRect().toJSON();return{app:rect('app'),composer:rect('ia'),field:rect('ti'),wrap:rect('mwrap'),first:document.querySelector('#ml .msg').getBoundingClientRect().toJSON(),overflow:document.documentElement.scrollWidth>innerWidth};});
+    // WebKit can dispatch its viewport resize after the compositor resize.
+    // Wait for the real application listener, without calling syncViewport here.
+    await page.waitForFunction(()=>Math.abs(parseFloat(document.documentElement.style.getPropertyValue('--app-height'))-Math.min(visualViewport.height,innerHeight))<2,{},{timeout:3000,polling:50});
+    const state=await page.evaluate(()=>{const rect=id=>document.getElementById(id).getBoundingClientRect().toJSON();return{viewport:{inner:innerHeight,visual:visualViewport.height,scale:visualViewport.scale,css:document.documentElement.style.getPropertyValue('--app-height')},app:rect('app'),composer:rect('ia'),field:rect('ti'),wrap:rect('mwrap'),first:document.querySelector('#ml .msg').getBoundingClientRect().toJSON(),overflow:document.documentElement.scrollWidth>innerWidth};});
     assert.ok(!state.overflow,`${engine} ${width}: horizontal overflow`);
-    assert.ok(state.composer.bottom<=height+1&&state.field.height>20,`${engine} ${width}: composer clipped`);
+    assert.ok(state.composer.bottom<=height+1&&state.field.height>20,`${engine} ${width}: composer clipped ${JSON.stringify(state)}`);
     assert.ok(state.first.top-state.wrap.top<100,`${engine} ${width}: excessive empty space`);
     assert.ok(state.wrap.height>100,`${engine} ${width}: messages collapsed`);
     await page.locator('#ti').fill('Вопрос\nДополнительная строка\nЕщё одна строка');
