@@ -152,6 +152,7 @@ let botUsername = '';
 let pollingLease = null;
 
 const creatingThreads = new Map();
+const dashboardUpdates = new Map();
 const assigningTickets = new Map();
 const forwardingMessages = new Set();
 const customerDeliveryMessages = new Set();
@@ -807,10 +808,24 @@ async function editTicketActionKeyboard(message, ticket, state, menu) {
   );
 }
 
-async function updateOperatorDashboard(operator, model) {
+async function updateOperatorDashboard(operator,model,options={}) {
+  const key=String(operator.telegram_user_id);
+  const previous=dashboardUpdates.get(key)||Promise.resolve();
+  const task=previous.catch(()=>{}).then(()=>applyOperatorDashboard(operator,model,options));
+  dashboardUpdates.set(key,task);
+  try{return await task;}finally{if(dashboardUpdates.get(key)===task)dashboardUpdates.delete(key);}
+}
+
+async function applyOperatorDashboard(operator, model, {forceNew=false}={}) {
   const operatorId = String(operator.telegram_user_id);
   const dashboard = db.getTelegramOperatorDashboard.get(operatorId);
-  if (dashboard?.dashboard_chat_id && dashboard.dashboard_message_id) {
+  if(forceNew&&dashboard?.dashboard_chat_id&&dashboard.dashboard_message_id){
+    // A message deleted only in the user's client may still be editable by the
+    // bot. An explicit /start must therefore issue a fresh visible panel.
+    await deleteTelegramMessage(dashboard.dashboard_chat_id,dashboard.dashboard_message_id);
+    db.clearTelegramOperatorDashboard.run(operatorId);
+  }
+  if (!forceNew&&dashboard?.dashboard_chat_id && dashboard.dashboard_message_id) {
     const updated = await editRichOrDisable(
       dashboard.dashboard_chat_id,
       dashboard.dashboard_message_id,
@@ -1278,6 +1293,7 @@ async function editRichOrDisable(chatId, messageId, markdown, replyMarkup, fallb
     });
   } catch (error) {
     if (tgError(error).toLowerCase().includes('message is not modified')) return true;
+    if(/message to edit not found|message_id_invalid|message identifier is not specified|message (?:can't|cannot) be edited/i.test(tgError(error)))return null;
     if(native&&rejectedRichBlocks(error)){
       richBlocksAvailable=false;
       return bot.editMessageText(fallbackText,{chat_id:chatId,message_id:messageId,reply_markup:replyMarkup});
@@ -1523,8 +1539,8 @@ function registerOperator(from) {
   return db.getTelegramOperator.get(String(from.id));
 }
 
-async function sendDashboard(operator) {
-  return updateOperatorDashboard(operator, dashboardModel(operator));
+async function sendDashboard(operator,options={}) {
+  return updateOperatorDashboard(operator, dashboardModel(operator),options);
 }
 
 async function sendTicketList(operator, view, page = 0) {
@@ -1537,7 +1553,7 @@ async function handleStart(msg) {
     return;
   }
   const operator = registerOperator(msg.from);
-  await sendDashboard(operator);
+  await sendDashboard(operator,{forceNew:true});
   await deleteTelegramMessage(msg.chat.id, msg.message_id);
   await reconcileOperator(operator);
 }

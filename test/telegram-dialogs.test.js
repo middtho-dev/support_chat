@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'support-dialogs-'));
 process.env.DB_PATH=path.join(root,'support.db');process.env.UPLOADS_DIR=path.join(root,'uploads');
 process.env.TELEGRAM_BOT_TOKEN='fake-token';process.env.TELEGRAM_ADMIN_IDS='7001';
 process.env.TELEGRAM_OPERATOR_LAYOUT='dialog';process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS='1';process.env.PUBLIC_URL='https://support.test';
-let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false,nativeNetworkFailures=0,nativeValidationFailure=false;
+let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false,nativeNetworkFailures=0,nativeValidationFailure=false,missingEdits=new Set();
 const effects=[],emits=[];
 class FakeBot {
   constructor(){this.handlers={};bot=this;}
@@ -21,6 +21,8 @@ class FakeBot {
   async sendDocument(chat,file,options){return this.send('file',chat,String(file),options);}
   send(kind,chat,text,options){if(sendFailures){sendFailures--;throw Error('EFATAL: unavailable');}const id=++next;effects.push({kind,chat:String(chat),text,options,id});return {message_id:id};}
   async editMessageText(text,options){
+    const messageId=text?.message_id||options?.message_id;
+    if(missingEdits.has(messageId)){const error=new Error('Bad Request: message to edit not found');error.response={body:{error_code:400,description:'Bad Request: message to edit not found'}};throw error;}
     if(text?.rich_message?.blocks&&nativeNetworkFailures){nativeNetworkFailures--;throw Error('EFATAL: rich network timeout');}
     if(text?.rich_message?.blocks&&nativeValidationFailure){const error=new Error('Unsupported rich block buttons');error.response={body:{error_code:400,description:'Unsupported rich block buttons'}};throw error;}
     effects.push({kind:'edit',text,options});return {};}
@@ -228,6 +230,26 @@ test('native menu transport failure retries without downgrading Rich or replacin
  assert.equal(nativeNetworkFailures,0);assert.equal(telegram.status().richBlocksAvailable,true);
  assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
  assert.equal(effects.filter(e=>e.kind==='rich').length,count);assert.equal(removed(panel.dashboard_message_id),false);
+});
+
+test('/admin replaces a deleted remote panel and keeps Rich blocks enabled',async()=>{
+ const old=db.getTelegramOperatorDashboard.get('7001').dashboard_message_id;missingEdits.add(old);
+ const before=effects.filter(e=>e.kind==='rich').length;
+ await bot.handlers.message({message_id:611,chat:{id:7001,type:'private'},from:op,text:'/admin'});
+ const panel=db.getTelegramOperatorDashboard.get('7001');assert.notEqual(panel.dashboard_message_id,old);
+ assert.equal(effects.filter(e=>e.kind==='rich').length,before+1);assert.equal(telegram.status().richBlocksAvailable,true);
+ await bot.handlers.message({message_id:612,chat:{id:7001,type:'private'},from:op,text:'/queue'});
+ assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
+ assert.equal(effects.filter(e=>e.kind==='rich').length,before+1);missingEdits.delete(old);
+});
+
+test('/start reissues a fresh panel even when Telegram still accepts edits of the hidden old message',async()=>{
+ const old=db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,before=effects.filter(e=>e.kind==='rich').length;
+ await bot.handlers.message({message_id:613,chat:{id:7001,type:'private'},from:op,text:'/start'});
+ const panel=db.getTelegramOperatorDashboard.get('7001');assert.notEqual(panel.dashboard_message_id,old);assert.ok(removed(old));
+ const sent=effects.find(e=>e.id===panel.dashboard_message_id&&e.kind==='rich');assert.ok(sent.rich.blocks.some(b=>b.type==='buttons'));
+ assert.equal(effects.filter(e=>e.kind==='rich').length,before+1);
+ await callback('dashboard:refresh',panel.dashboard_message_id);assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
 });
 
 test('unsupported native blocks fall back on the same panel without disabling Rich conversations',async()=>{
