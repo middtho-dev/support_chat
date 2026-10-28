@@ -59,6 +59,16 @@ test('daily quiet replacement keeps long-lived cards within Telegram deletion wi
   assert.equal(effects.findLast(e=>e.kind==='send').opts.disable_notification,true);
 });
 
+test('native attachment view survives restart and UI selection bypasses coalescing delay',async()=>{
+ const t=ticket('persistent-files');question(t,'persistent-files-q');await dialogs.sync(t,'7001');
+ db.db.prepare('UPDATE telegram_operator_dialogs SET next_retry_at=? WHERE ticket_id=?').run(now+3000,t.id);
+ dialogs.setView(t.id,'7001','files:2');assert.equal(row(t).next_retry_at,0);
+ dialogs=createSupportDialogs(options);let selected;
+ const native=createSupportDialogs({...options,model:(ticket,context)=>{selected=context.view;return {rich:{blocks:[{type:'paragraph',text:'Файлы'}]},fallback:'Файлы',replyMarkup:{inline_keyboard:[[{text:'Назад',callback_data:'ticketmain:'+ticket.id}]]}};},edit:async(chat,id,content,markup)=>{assert.ok(content.blocks);assert.match(markup.inline_keyboard[0][0].callback_data,/ticketmain/);return true;}});
+ await native.sync(t,'7001');assert.equal(selected,'files:2');
+ question(t,'persistent-files-new');await native.sync(t,'7001',{notify:true});assert.equal(selected,'dialog','a new question returns to the conversation, unlike a quiet presence update');
+});
+
 test('closed-ticket cleanup remains durable across manager restart',async()=>{
   const t=ticket('cleanup-restart');question(t,'q-cleanup');await dialogs.sync(t,'7001',{notify:true});const card=row(t).message_id;
   dialogs.remember('7001',9000,t.id,'7001','preview');db.closeTicket.run(t.id);failDelete=true;

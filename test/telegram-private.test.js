@@ -421,11 +421,11 @@ test('an operator added from settings can use the bot without settings access', 
     item.options?.message_id === dashboard.dashboard_message_id ||
     item.text?.message_id === dashboard.dashboard_message_id
   );
-  const systemText = systemPanel.text?.rich_message?.markdown || systemPanel.text;
-  assert.match(systemText, /Система и настройки/);
+  const systemText = JSON.stringify(systemPanel.text?.rich_message?.blocks || systemPanel.text);
+  assert.match(systemText, /Сервер и обслуживание/);
   assert.match(systemText, /Напоминания/);
-  assert.match(systemText, /Realtime:\*\* 3 подключено · WS 2 \/ polling 1/);
-  assert.ok(systemText.includes('test\\-version'));
+  assert.match(systemText, /Realtime · 3 подключено · WS 2 \/ polling 1/);
+  assert.ok(systemText.includes('test-version'));
   const richBeforeQueue = rich.length;
   await fakeBot.handlers.message({
     message_id: 703,

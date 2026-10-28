@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'support-dialogs-'));
 process.env.DB_PATH=path.join(root,'support.db');process.env.UPLOADS_DIR=path.join(root,'uploads');
 process.env.TELEGRAM_BOT_TOKEN='fake-token';process.env.TELEGRAM_ADMIN_IDS='7001';
 process.env.TELEGRAM_OPERATOR_LAYOUT='dialog';process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS='1';process.env.PUBLIC_URL='https://support.test';
-let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false,nativeNetworkFailures=0,nativeValidationFailure=false,missingEdits=new Set();
+let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false,nativeNetworkFailures=0,nativeValidationFailure=false,mediaRejection=false,mediaTimeout=false,missingEdits=new Set();
 const effects=[],emits=[];
 class FakeBot {
   constructor(){this.handlers={};bot=this;}
@@ -14,7 +14,12 @@ class FakeBot {
   setMyCommands(){return Promise.resolve();} setChatMenuButton(){return Promise.resolve();}
   getChat(id){return Promise.resolve({id,type:'private',first_name:'Оператор'});}
   async sendMessage(chat,text,options){return this.send('text',chat,text,options);}
-  async sendRichMessage(chat,payload,options){const sent=this.send('rich',chat,payload.markdown||JSON.stringify(payload.blocks),options);effects.at(-1).rich=payload;return sent;}
+  async sendRichMessage(chat,payload,options){
+    if(payload.blocks?.some(b=>['photo','video','audio','document'].includes(b.type))){
+      if(mediaTimeout){mediaTimeout=false;throw Error('EFATAL: media timeout');}
+      if(mediaRejection){mediaRejection=false;const error=Error('Bad Request: cannot fetch media');error.response={body:{error_code:400,description:error.message}};throw error;}
+    }
+    const sent=this.send('rich',chat,payload.markdown||JSON.stringify(payload.blocks),options);effects.at(-1).rich=payload;return sent;}
   async sendPhoto(chat,file,options){return this.send('photo',chat,String(file),options);}
   async sendVideo(chat,file,options){return this.send('video',chat,String(file),options);}
   async sendAudio(chat,file,options){return this.send('audio',chat,String(file),options);}
@@ -71,7 +76,7 @@ test('start menu native buttons navigate and return on the same panel, with an a
   const controls=native.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons);
   assert.ok(controls.some(b=>b.callback_data==='list:unanswered:0'&&b.text.endsWith('· 1')));
   await callback('list:unanswered:0',panel.dashboard_message_id);
-  const list=effects.findLast(e=>e.kind==='edit').text;assert.match(list.rich_message.markdown,/Ожидает в меню/);assert.doesNotMatch(list.rich_message.markdown,/Ответили в меню/);
+  const list=effects.findLast(e=>e.kind==='edit').text;assert.match(JSON.stringify(list.rich_message.blocks),/Ожидает в меню/);assert.doesNotMatch(JSON.stringify(list.rich_message.blocks),/Ответили в меню/);
   for(const action of ['dashboard:show','list:waiting:0','dashboard:show','list:mine:0','dashboard:show','list:closed:0','dashboard:show','system:show','dashboard:show'])await callback(action,panel.dashboard_message_id);
   assert.equal(effects.filter(e=>e.kind==='rich').length,count,'Navigation edits the saved panel rather than sending another');
   assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
@@ -87,7 +92,7 @@ test('new user message replaces the same Rich dialog with a notification, not a 
   await telegram.forwardMessage(db.getTicketById.get('dialog-one'),message);
   const card=active('dialog-one');assert.notEqual(card,old);assert.ok(removed(old));assert.equal(owned('dialog-one').length,1);
   const sent=effects.find(e=>e.kind==='rich'&&e.id===card);assert.equal(sent.options.disable_notification,false);
-  assert.ok(sent.options.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='replyticket:dialog-one'));
+  assert.ok(sent.rich.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons).some(b=>b.callback_data==='replyticket:dialog-one'));assert.deepEqual(sent.options.reply_markup.inline_keyboard,[]);
   assert.equal(db.db.prepare('SELECT COUNT(*) n FROM telegram_support_inbox').get().n,0);
 });
 
@@ -119,9 +124,10 @@ test('Rich header counts every pending reply and refreshes presence/delivery qui
   await reply(active('dialog-one'),'Первый ожидающий ответ',511);
   await reply(active('dialog-one'),'Второй ожидающий ответ',512);
   const first=db.getMessageByTelegramDestination.get('7001',511),second=db.getMessageByTelegramDestination.get('7001',512);
-  const text=()=>{const item=effects.findLast(e=>e.kind==='edit'&&(e.options?.message_id||e.text?.message_id)===active('dialog-one'));return item?.text?.rich_message?.markdown||item?.text||'';};
+  const text=()=>{const item=effects.findLast(e=>e.kind==='edit'&&(e.options?.message_id||e.text?.message_id)===active('dialog-one'));return JSON.stringify(item?.text?.rich_message?.blocks||item?.text||'');};
   await telegram.refreshTicketDialog('dialog-one');assert.match(text(),/🔴 Клиент не в чате/);assert.match(text(),/Ещё не получено клиентом: 2/);
-  assert.match(text(),/\*\*🔴 Клиент не в чате\*\*\n\n_📨 Ещё не получено клиентом: 2_\n\n_Ответы сохранены/,'Rich Markdown needs separate paragraphs, not soft line breaks');
+  const statusBlocks=effects.findLast(e=>e.kind==='edit'&&e.text?.message_id===active('dialog-one')).text.rich_message.blocks;
+  assert.equal(statusBlocks[0].text.text,'🔴 Клиент не в чате');assert.match(statusBlocks[1].text,/Ещё не получено клиентом: 2/);assert.match(statusBlocks[2].text,/Ответы сохранены/);
   assert.equal(first.web_delivered_at,null);assert.equal(second.web_delivered_at,null);await wait(()=>removed(511)&&removed(512));
   const sends=effects.filter(e=>e.kind==='rich').length;customerOnline=true;
   telegram.confirmWebCustomerDelivery('dialog-one',first.id);await telegram.refreshTicketDialog('dialog-one');
@@ -148,9 +154,28 @@ test('incoming attachment stays in Rich history and opens only on demand',async(
   await telegram.forwardMessage(db.getTicketById.get('dialog-one'),source('dialog-one','client-image','Скриншот','image','/uploads/client.jpg'));
   assert.equal(effects.filter(e=>e.kind==='photo'&&e.chat==='7001').length,before);
   await callback('dialogfiles:dialog-one',active('dialog-one'));
-  assert.ok(effects.findLast(e=>e.kind==='markup').markup.inline_keyboard.flat().some(b=>b.callback_data==='dialogfile:client-image'));
-  await callback('dialogfile:client-image',active('dialog-one'));const preview=effects.findLast(e=>e.kind==='photo'&&e.chat==='7001');assert.ok(preview);
+  const files=effects.findLast(e=>e.kind==='edit').text.rich_message.blocks;
+  assert.ok(files.filter(b=>b.type==='buttons').flatMap(b=>b.buttons).some(b=>b.callback_data==='dialogfile:client-image'));
+  await telegram.refreshTicketDialog('dialog-one');assert.equal(state('dialog-one').view,'files:0');
+  assert.match(JSON.stringify(effects.findLast(e=>e.kind==='edit').text.rich_message.blocks),/Вложения/);
+  await callback('dialogfile:client-image',active('dialog-one'));const preview=effects.findLast(e=>e.kind==='rich'&&e.rich?.blocks?.some(b=>b.type==='photo'));assert.ok(preview);
+  assert.equal(preview.rich.blocks.find(b=>b.type==='photo').photo.media,'https://support.test/uploads/client.jpg');
+  await callback('dialogreply:client-image',preview.id);const prompt=effects.findLast(e=>e.options?.reply_markup?.force_reply);
+  const target=db.db.prepare("SELECT source_message_id FROM telegram_operator_dialog_messages WHERE message_id=? AND kind='prompt'").get(prompt.id);assert.equal(target.source_message_id,'client-image');
   await callback('dialoghide:dialog-one',preview.id);assert.ok(removed(preview.id));assert.equal(owned('dialog-one').length,1);
+  await callback('ticketmain:dialog-one',active('dialog-one'));assert.equal(state('dialog-one').view,'dialog');
+});
+
+test('Rich media rejection preserves buttons globally; an ambiguous timeout never resends the file',async()=>{
+ const card=active('dialog-one');mediaRejection=true;
+ await callback('dialogfile:client-image',card);
+ const fallback=effects.findLast(e=>e.kind==='photo');assert.ok(fallback);
+ assert.ok(fallback.options.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='dialogreply:client-image'));
+ assert.equal(telegram.status().richBlocksAvailable,true);
+ const count=effects.filter(e=>['photo','file'].includes(e.kind)).length;
+ mediaTimeout=true;await callback('dialogfile:client-image',card);
+ assert.equal(effects.filter(e=>['photo','file'].includes(e.kind)).length,count);
+ assert.equal(telegram.status().richBlocksAvailable,true);
 });
 
 test('unanswered reminder recreates the card with sound and no separate reminder message',async()=>{
@@ -221,6 +246,33 @@ test('closed and reassigned card replies never reach a different customer',async
   assert.equal(db.getMessages.all('retry-dialog').length,before);
   db.db.prepare("UPDATE tickets SET status='closed' WHERE id='retry-dialog'").run();await reply(id,'Закрытый клиент',507);
   assert.equal(db.getMessages.all('retry-dialog').length,before);
+});
+
+test('automatic refresh preserves active list, native controls and panel ID; clear confirmation pauses it',async()=>{
+ const panel=db.getTelegramOperatorDashboard.get('7001'),id=panel.dashboard_message_id;
+ const created=effects.filter(e=>e.kind==='rich').length;
+ await callback('list:waiting:0',id);
+ fresh('live-list-ticket');source('live-list-ticket','live-list-question','Новый вопрос в открытом списке');
+ db.db.prepare('UPDATE telegram_operator_panel_views SET next_refresh=0 WHERE operator_id=?').run('7001');
+ await telegram.refreshOperatorPanels();
+ const list=effects.findLast(e=>e.kind==='edit'&&e.text?.message_id===id).text.rich_message.blocks;
+ assert.match(JSON.stringify(list),/Новый вопрос в открытом списке/);
+ assert.ok(list.filter(b=>b.type==='buttons').flatMap(b=>b.buttons).some(b=>b.callback_data==='claim:live-list-ticket:0'));
+ assert.equal(db.db.prepare('SELECT view FROM telegram_operator_panel_views WHERE operator_id=?').get('7001').view,'list:waiting');
+ const edits=effects.filter(e=>e.kind==='edit').length;
+ db.db.prepare('UPDATE telegram_operator_panel_views SET next_refresh=0 WHERE operator_id=?').run('7001');
+ await telegram.refreshOperatorPanels();assert.equal(effects.filter(e=>e.kind==='edit').length,edits,'unchanged list is not edited');
+ await callback('system:show',id);
+ const system=effects.findLast(e=>e.kind==='edit').text.rich_message.blocks;
+ for(const label of ['CPU','Память','Диск','Без перезагрузки','Очередь'])assert.match(JSON.stringify(system),new RegExp(label));
+ assert.ok(!system.filter(b=>b.type==='buttons').flatMap(b=>b.buttons).some(b=>b.callback_data?.includes('refresh')));
+ await callback('dashboard:clear',id);const confirm=effects.filter(e=>e.kind==='edit').length;
+ db.db.prepare('UPDATE telegram_operator_panel_views SET next_refresh=0 WHERE operator_id=?').run('7001');
+ await telegram.refreshOperatorPanels();assert.equal(effects.filter(e=>e.kind==='edit').length,confirm);
+ await callback('system:show',id);assert.equal(db.db.prepare('SELECT pause_until FROM telegram_operator_panel_views WHERE operator_id=?').get('7001').pause_until,0);
+ assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,id);
+ assert.equal(effects.filter(e=>e.kind==='rich').length,created);
+ db.closeTicket.run('live-list-ticket');await callback('dashboard:show',id);
 });
 
 test('native menu transport failure retries without downgrading Rich or replacing the panel',async()=>{
