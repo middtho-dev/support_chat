@@ -12,6 +12,7 @@ const db = require('./database');
 const {createSupportInbox}=require('./telegram-support-inbox');
 const {createSupportDialogs}=require('./telegram-support-dialogs');
 const {supportDeliveryStatus}=require('./support-delivery-status');
+const {buildAdminMenu}=require('./telegram-admin-menu');
 const SINGLE_DIALOG=process.env.TELEGRAM_OPERATOR_LAYOUT!=='topics';
 const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
 const push = require('./push');
@@ -145,6 +146,7 @@ let reminderRunning = false;
 let connected = false;
 let threadedModeEnabled = false;
 let richMessagesAvailable = true;
+let richBlocksAvailable = true;
 let richDraftsAvailable = true;
 let botUsername = '';
 let pollingLease = null;
@@ -292,6 +294,7 @@ function isTransientTelegramNetworkError(error) {
     /telegram file download failed: (429|5\d\d)/.test(details) ||
     details.includes('http timeout') ||
     details.includes('network error') ||
+    details.includes('network timeout') ||
     details.includes('network request failed') ||
     details.includes('socket hang up') ||
     details.includes('econnreset') ||
@@ -545,59 +548,35 @@ function operatorCanControlTicket(ticket, operatorId, query) {
   );
 }
 
-function dashboardKeyboard(counts = {}) {
-  const rows = [[
-    { text: `🔔 Новые · ${Number(counts.waiting || 0)}`, callback_data: 'list:waiting:0' },
-    { text: `🔵 Мои · ${Number(counts.mine || 0)}`, callback_data: 'list:mine:0' }
-  ], [
-    { text: `✅ Закрытые · ${Number(counts.closed || 0)}`, callback_data: 'list:closed:0' },
-    { text: '🔄 Обновить', callback_data: 'dashboard:refresh' }
-  ], [
-    { text: '⚙️ Система и настройки', callback_data: 'system:show' }
-  ]];
-  rows.push([{ text: '🧹 Очистить чат', callback_data: 'dashboard:clear' }]);
-  const webAppUrl = adminWebAppUrl();
-  if (webAppUrl) rows.push([{ text: '🖥 Админка', web_app: { url: webAppUrl } }]);
-  return { inline_keyboard: rows };
+
+function unansweredTickets(operator,{page=0,countOnly=false}={}) {
+  const where=`t.status='open' AND t.assigned_operator_id=? AND
+    (SELECT CASE WHEN m.message_type='close_prompt' THEN 'support' ELSE m.sender END
+     FROM messages m WHERE m.ticket_id=t.id AND (m.sender!='system' OR m.message_type='close_prompt') AND COALESCE(m.is_auto,0)=0
+     ORDER BY m.created_at DESC,m.rowid DESC LIMIT 1)='user'`;
+  if(countOnly)return db.db.prepare('SELECT COUNT(*) n FROM tickets t WHERE '+where).get(operator.telegram_user_id).n;
+  return db.db.prepare(`SELECT t.*,
+    (SELECT content FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_msg,
+    (SELECT message_type FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_msg_type,
+    (SELECT file_name FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_file_name,
+    (SELECT created_at FROM messages WHERE ticket_id=t.id ORDER BY created_at DESC,rowid DESC LIMIT 1) last_activity
+    FROM tickets t WHERE ${where} ORDER BY last_activity ASC,t.id LIMIT ? OFFSET ?`)
+    .all(operator.telegram_user_id,TICKET_LIST_PAGE_SIZE,Math.max(0,page)*TICKET_LIST_PAGE_SIZE);
 }
 
 function dashboardCounts(operator) {
-  return db.db.prepare(`
+  const counts=db.db.prepare(`
     SELECT
       SUM(CASE WHEN status = 'open' AND assigned_operator_id IS NULL THEN 1 ELSE 0 END) AS waiting,
       SUM(CASE WHEN status = 'open' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS mine,
       SUM(CASE WHEN status = 'closed' AND assigned_operator_id = ? THEN 1 ELSE 0 END) AS closed
     FROM tickets
   `).get(operator.telegram_user_id, operator.telegram_user_id);
+  return {...counts,unanswered:unansweredTickets(operator,{countOnly:true})};
 }
 
 function dashboardModel(operator) {
-  const counts = dashboardCounts(operator);
-  const markdown = [
-    '## 🛟 Панель оператора',
-    `**${markdownEscape(operator.display_name)}**`,
-    '',
-    `- 🔔 Новые без оператора: **${Number(counts.waiting || 0)}**`,
-    `- 🔵 Мои открытые: **${Number(counts.mine || 0)}**`,
-    `- ✅ Мои закрытые: **${Number(counts.closed || 0)}**`,
-    '',
-    (SINGLE_DIALOG||threadedModeEnabled)
-      ? 'Выберите раздел кнопками ниже.'
-      : '⚠️ Включите **Threaded Mode** у бота через @BotFather.'
-  ].join('\n');
-  const fallback = [
-    '🛟 Панель оператора',
-    operator.display_name,
-    '',
-    `🔔 Новые без оператора: ${Number(counts.waiting || 0)}`,
-    `🔵 Мои открытые: ${Number(counts.mine || 0)}`,
-    `✅ Мои закрытые: ${Number(counts.closed || 0)}`,
-    '',
-    (SINGLE_DIALOG||threadedModeEnabled)
-      ? 'Выберите раздел кнопками ниже.'
-      : '⚠️ Включите Threaded Mode через @BotFather.'
-  ].join('\n');
-  return { markdown, fallback, replyMarkup: dashboardKeyboard(counts) };
+  return buildAdminMenu({name:operator.display_name,counts:dashboardCounts(operator),webAppUrl:adminWebAppUrl()});
 }
 
 function compactDuration(seconds) {
@@ -680,6 +659,7 @@ function controlCenterModel() {
     { text: '🔄 Обновить', callback_data: 'system:refresh' },
     { text: '↩️ Панель', callback_data: 'dashboard:show' }
   ]];
+  rows.push([{text:'🧹 Очистить чат',callback_data:'dashboard:clear',style:'danger'}]);
   const webAppUrl = adminWebAppUrl();
   if (webAppUrl) rows.push([{ text: '🖥 Центр управления', web_app: { url: webAppUrl } }]);
   return { markdown: lines.join('\n'), fallback, replyMarkup: { inline_keyboard: rows } };
@@ -687,6 +667,7 @@ function controlCenterModel() {
 
 function ticketListQuery(operator, view, page) {
   const offset = Math.max(0, page) * TICKET_LIST_PAGE_SIZE;
+  if(view==='unanswered')return {total:unansweredTickets(operator,{countOnly:true}),tickets:unansweredTickets(operator,{page})};
   if (view === 'waiting') {
     return {
       total: Number(db.countOpenUnassignedTickets.get()?.count || 0),
@@ -714,6 +695,7 @@ function ticketListQuery(operator, view, page) {
 }
 
 function listTitle(view) {
+  if(view==='unanswered')return '⏳ Ждут вашего ответа';
   if (view === 'waiting') return '🔔 Новые тикеты';
   if (view === 'closed') return '✅ Закрытые тикеты';
   return '🔵 Мои открытые';
@@ -735,7 +717,7 @@ function listTicketButton(ticket, view, page) {
     return tgButton(`🙋 Взять · ${name}`, `claim:${ticket.id}:${page}`, 'primary');
   }
   if (view === 'closed') return null;
-  return tgButton(`↗️ Поднять тему · ${name}`, `focus:${ticket.id}:${page}`, 'primary');
+  return tgButton(`${SINGLE_DIALOG?'💬 Открыть диалог':'↗️ Поднять тему'} · ${name}`, `focus:${ticket.id}:${page}`, 'primary');
 }
 
 function ticketListKeyboard(tickets, view, page, total) {
@@ -790,7 +772,7 @@ function ticketListModel(operator, view, requestedPage = 0) {
         ''
       );
     });
-    if (view === 'mine') {
+    if (view === 'mine'&&!SINGLE_DIALOG) {
       lines.push('_Кнопка «Поднять тему» переместит её наверх списка тем Telegram._');
       fallback.push('Кнопка «Поднять тему» переместит её наверх списка тем Telegram.');
     }
@@ -809,7 +791,7 @@ async function editPanel(message, model) {
   return editRichOrDisable(
     String(message.chat.id),
     message.message_id,
-    model.markdown,
+    model.rich||model.markdown,
     model.replyMarkup,
     model.fallback
   );
@@ -832,7 +814,7 @@ async function updateOperatorDashboard(operator, model) {
     const updated = await editRichOrDisable(
       dashboard.dashboard_chat_id,
       dashboard.dashboard_message_id,
-      model.markdown,
+      model.rich||model.markdown,
       model.replyMarkup,
       model.fallback
     );
@@ -850,8 +832,8 @@ async function updateOperatorDashboard(operator, model) {
 
   const sent = await sendRichOrText(
     operatorId,
-    model.markdown,
-    { reply_markup: model.replyMarkup },
+    model.rich||model.markdown,
+    { reply_markup: model.replyMarkup,disable_notification:true },
     model.fallback
   );
   if (sent?.message_id) {
@@ -1250,13 +1232,20 @@ async function moveTicketTranscriptBelowMedia(ticket, thread) {
   return true;
 }
 
+function rejectedRichBlocks(error) {
+  return Number(error?.response?.body?.error_code)===400&&/rich|block|button|parse|unsupported/i.test(tgError(error));
+}
+
 async function sendRichOrText(chatId, markdown, options, fallbackText) {
   if (!tgEnabled()) return null;
-  if (richMessagesAvailable && typeof bot.sendRichMessage === 'function') {
+  const native=typeof markdown==='object'&&!!markdown?.blocks;
+  if (richMessagesAvailable && (!native||richBlocksAvailable) && typeof bot.sendRichMessage === 'function') {
     try {
-      return await bot.sendRichMessage(chatId, { markdown }, options);
+      return await bot.sendRichMessage(chatId,native?markdown:{markdown},native?{...options,reply_markup:{inline_keyboard:[]}}:options);
     } catch (error) {
       const description = tgError(error).toLowerCase();
+      if(native&&rejectedRichBlocks(error)){richBlocksAvailable=false;return bot.sendMessage(chatId,fallbackText,options);}
+      if(native&&(!error?.response?.body||isTransientTelegramNetworkError(error)))throw error;
       if (description.includes('method not found') || description.includes('rich')) {
         richMessagesAvailable = false;
         console.warn('[TG private] Rich message unavailable, using text fallback:', tgError(error));
@@ -1272,13 +1261,14 @@ async function sendRichOrText(chatId, markdown, options, fallbackText) {
 }
 
 async function editRichOrDisable(chatId, messageId, markdown, replyMarkup, fallbackText) {
+  const native=typeof markdown==='object'&&!!markdown?.blocks;
   try {
-    if (richMessagesAvailable) {
+    if (richMessagesAvailable&&(!native||richBlocksAvailable)) {
       return await bot.editMessageText({
         chat_id: chatId,
         message_id: messageId,
-        rich_message: { markdown },
-        reply_markup: replyMarkup
+        rich_message:native?markdown:{markdown},
+        reply_markup:native?{inline_keyboard:[]}:replyMarkup
       });
     }
     return await bot.editMessageText(fallbackText, {
@@ -1288,6 +1278,11 @@ async function editRichOrDisable(chatId, messageId, markdown, replyMarkup, fallb
     });
   } catch (error) {
     if (tgError(error).toLowerCase().includes('message is not modified')) return true;
+    if(native&&rejectedRichBlocks(error)){
+      richBlocksAvailable=false;
+      return bot.editMessageText(fallbackText,{chat_id:chatId,message_id:messageId,reply_markup:replyMarkup});
+    }
+    if(native&&(!error?.response?.body||isTransientTelegramNetworkError(error)))throw error;
     try {
       await bot.editMessageReplyMarkup(replyMarkup, { chat_id: chatId, message_id: messageId });
     } catch {}
@@ -1510,6 +1505,12 @@ async function configureBot(instance = bot) {
     }
   }
   console.log(`[TG private] Connected as @${botUsername || 'bot'}; threaded=${threadedModeEnabled}`);
+  for(const operator of db.getActiveTelegramOperators.all()) {
+    if(!isAuthorized(operator.telegram_user_id))continue;
+    const panel=db.getTelegramOperatorDashboard.get(operator.telegram_user_id);
+    if(panel?.dashboard_message_id)await updateOperatorDashboard(operator,dashboardModel(operator)).catch(()=>{});
+  }
+
 }
 
 function registerOperator(from) {
@@ -2811,6 +2812,7 @@ async function handleCallbackQuery(query) {
       const model=dashboardModel(operator);
       const report=`Удалено сообщений: ${result.removed}. Не удалось удалить: ${result.failed}. Старые и неизвестные боту сообщения могли остаться.`;
       model.markdown+='\n\n'+report;model.fallback+='\n\n'+report;
+      if(model.rich)model.rich.blocks.push({type:'paragraph',text:report});
       await editPanel(query.message,model);return;
     }
     if (data === 'dashboard:refresh' || data === 'dashboard:show' || data === 'queue:refresh') {
@@ -2829,7 +2831,7 @@ async function handleCallbackQuery(query) {
       await editPanel(query.message, ticketListModel(operator, 'waiting', 0));
       return;
     }
-    const listMatch = data.match(/^list:(waiting|mine|closed):(\d+)$/);
+    const listMatch = data.match(/^list:(waiting|mine|unanswered|closed):(\d+)$/);
     if (listMatch) {
       await answer();
       await editPanel(
@@ -4271,6 +4273,7 @@ function status(now = new Date()) {
     botUsername: botUsername || null,
     threadedModeEnabled,
     richMessagesAvailable,
+    richBlocksAvailable,
     videoForward: videoRouter.status(),
     transport: webhookInbox?.status() || {mode:webhookUrl?'webhook':'polling'},
     polling: {

@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'support-dialogs-'));
 process.env.DB_PATH=path.join(root,'support.db');process.env.UPLOADS_DIR=path.join(root,'uploads');
 process.env.TELEGRAM_BOT_TOKEN='fake-token';process.env.TELEGRAM_ADMIN_IDS='7001';
 process.env.TELEGRAM_OPERATOR_LAYOUT='dialog';process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS='1';process.env.PUBLIC_URL='https://support.test';
-let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false;
+let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false,nativeNetworkFailures=0,nativeValidationFailure=false;
 const effects=[],emits=[];
 class FakeBot {
   constructor(){this.handlers={};bot=this;}
@@ -14,13 +14,16 @@ class FakeBot {
   setMyCommands(){return Promise.resolve();} setChatMenuButton(){return Promise.resolve();}
   getChat(id){return Promise.resolve({id,type:'private',first_name:'Оператор'});}
   async sendMessage(chat,text,options){return this.send('text',chat,text,options);}
-  async sendRichMessage(chat,payload,options){return this.send('rich',chat,payload.markdown,options);}
+  async sendRichMessage(chat,payload,options){const sent=this.send('rich',chat,payload.markdown||JSON.stringify(payload.blocks),options);effects.at(-1).rich=payload;return sent;}
   async sendPhoto(chat,file,options){return this.send('photo',chat,String(file),options);}
   async sendVideo(chat,file,options){return this.send('video',chat,String(file),options);}
   async sendAudio(chat,file,options){return this.send('audio',chat,String(file),options);}
   async sendDocument(chat,file,options){return this.send('file',chat,String(file),options);}
   send(kind,chat,text,options){if(sendFailures){sendFailures--;throw Error('EFATAL: unavailable');}const id=++next;effects.push({kind,chat:String(chat),text,options,id});return {message_id:id};}
-  async editMessageText(text,options){effects.push({kind:'edit',text,options});return {};}
+  async editMessageText(text,options){
+    if(text?.rich_message?.blocks&&nativeNetworkFailures){nativeNetworkFailures--;throw Error('EFATAL: rich network timeout');}
+    if(text?.rich_message?.blocks&&nativeValidationFailure){const error=new Error('Unsupported rich block buttons');error.response={body:{error_code:400,description:'Unsupported rich block buttons'}};throw error;}
+    effects.push({kind:'edit',text,options});return {};}
   async editMessageReplyMarkup(markup,options){effects.push({kind:'markup',markup,options});return {};}
   async deleteMessage(chat,id){if(deleteFailures.has(Number(id)))throw Error('EFATAL: deletion unavailable');effects.push({kind:'delete',chat:String(chat),id:Number(id)});}
   async deleteForumTopic(chat,id){effects.push({kind:'deleteTopic',chat:String(chat),id});}
@@ -53,6 +56,28 @@ test('default dialog works without Threaded Mode and creates no topics or pin no
   assert.equal(telegram.status().operatorLayout,'dialog');assert.equal(telegram.status().threadedModeEnabled,false);
   assert.equal(db.db.prepare('SELECT COUNT(*) n FROM telegram_ticket_threads').get().n,0);
   assert.equal(owned(ticket.id).length,1);assert.equal(effects.find(e=>e.id===id&&e.kind==='rich').options.message_thread_id,undefined);
+});
+
+test('start menu native buttons navigate and return on the same panel, with an accurate unanswered filter',async()=>{
+  const panel=db.getTelegramOperatorDashboard.get('7001'),initial=effects.find(e=>e.id===panel.dashboard_message_id&&e.kind==='rich');
+  assert.ok(initial.rich.blocks.some(b=>b.type==='buttons'));assert.equal(initial.options.reply_markup.inline_keyboard.length,0);
+  const make=(id,name,assigned,last)=>{db.createTicket.run(id,name,'session-'+id);if(assigned)db.assignTicketIfUnassigned.run(assigned,id);if(last)db.saveMessage.run(id+'-msg',id,last,name,'Тест','text',null,null,null,null,null);};
+  make('menu-new','Новое меню',null,'user');make('menu-pending','Ожидает в меню','7001','user');make('menu-answered','Ответили в меню','7001','support');
+  const count=effects.filter(e=>e.kind==='rich').length;
+  await callback('dashboard:refresh',panel.dashboard_message_id);
+  const native=effects.findLast(e=>e.kind==='edit'&&e.text?.rich_message?.blocks).text.rich_message;
+  const controls=native.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons);
+  assert.ok(controls.some(b=>b.callback_data==='list:unanswered:0'&&b.text.endsWith('· 1')));
+  await callback('list:unanswered:0',panel.dashboard_message_id);
+  const list=effects.findLast(e=>e.kind==='edit').text;assert.match(list.rich_message.markdown,/Ожидает в меню/);assert.doesNotMatch(list.rich_message.markdown,/Ответили в меню/);
+  for(const action of ['dashboard:show','list:waiting:0','dashboard:show','list:mine:0','dashboard:show','list:closed:0','dashboard:show','system:show','dashboard:show'])await callback(action,panel.dashboard_message_id);
+  assert.equal(effects.filter(e=>e.kind==='rich').length,count,'Navigation edits the saved panel rather than sending another');
+  assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
+  await callback('list:waiting:0',panel.dashboard_message_id);await callback('claim:menu-new:0',panel.dashboard_message_id);
+  assert.equal(db.getTicketById.get('menu-new').assigned_operator_id,'7001');await wait(()=>active('menu-new'));
+  await callback('close:menu-new',active('menu-new'));
+  for(const id of ['menu-pending','menu-answered'])db.closeTicket.run(id);
+  await callback('dashboard:show',panel.dashboard_message_id);
 });
 
 test('new user message replaces the same Rich dialog with a notification, not a second inbox',async()=>{
@@ -194,4 +219,22 @@ test('closed and reassigned card replies never reach a different customer',async
   assert.equal(db.getMessages.all('retry-dialog').length,before);
   db.db.prepare("UPDATE tickets SET status='closed' WHERE id='retry-dialog'").run();await reply(id,'Закрытый клиент',507);
   assert.equal(db.getMessages.all('retry-dialog').length,before);
+});
+
+test('native menu transport failure retries without downgrading Rich or replacing the panel',async()=>{
+ const panel=db.getTelegramOperatorDashboard.get('7001'),count=effects.filter(e=>e.kind==='rich').length;
+ nativeNetworkFailures=1;
+ await bot.handlers.message({message_id:610,chat:{id:7001,type:'private'},from:op,text:'/admin'});
+ assert.equal(nativeNetworkFailures,0);assert.equal(telegram.status().richBlocksAvailable,true);
+ assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
+ assert.equal(effects.filter(e=>e.kind==='rich').length,count);assert.equal(removed(panel.dashboard_message_id),false);
+});
+
+test('unsupported native blocks fall back on the same panel without disabling Rich conversations',async()=>{
+ const panel=db.getTelegramOperatorDashboard.get('7001');nativeValidationFailure=true;
+ await callback('dashboard:refresh',panel.dashboard_message_id);
+ const plain=effects.findLast(e=>e.kind==='edit'&&typeof e.text==='string');assert.match(plain.text,/KV9RU/);
+ assert.ok(plain.options.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='list:unanswered:0'));
+ assert.equal(telegram.status().richBlocksAvailable,false);assert.equal(telegram.status().richMessagesAvailable,true);
+ assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
 });

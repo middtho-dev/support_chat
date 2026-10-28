@@ -123,14 +123,16 @@ class FakeBot {
     const sentMessageId = ++messageId;
     rich.push({
       chatId: String(chatId),
-      markdown: payload.markdown,
+      markdown: payload.markdown||'',
+      blocks:payload.blocks,
       options,
       messageId: sentMessageId
     });
     return Promise.resolve({ message_id: sentMessageId });
   }
   sendRichMessageDraft(chatId, draftId, payload, options) {
-    richDrafts.push({ chatId: String(chatId), draftId, markdown: payload.markdown, options });
+    richDrafts.push({ chatId: String(chatId), draftId, markdown: payload.markdown||'',
+      blocks:payload.blocks, options });
     return Promise.resolve(true);
   }
   editMessageText(text, options) {
@@ -408,9 +410,7 @@ test('an operator added from settings can use the bot without settings access', 
   const dashboard = db.getTelegramOperatorDashboard.get('7002');
   assert.ok(dashboard.dashboard_message_id);
   const dashboardCard = rich.findLast(item => item.chatId === '7002');
-  assert.ok(dashboardCard.options?.reply_markup?.inline_keyboard?.flat().some(button =>
-    button.callback_data === 'system:show'
-  ));
+  assert.ok(dashboardCard.blocks?.filter(block=>block.type==='buttons').flatMap(block=>block.buttons).some(button=>button.callback_data==='system:show'));
   await fakeBot.handlers.callback_query({
     id: 'operator-system-query',
     from: { id: 7002, first_name: 'Новый', last_name: 'оператор' },
