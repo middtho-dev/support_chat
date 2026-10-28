@@ -15,6 +15,9 @@ const { createFrpProxy } = require('./frp-proxy');
 const { createVoiceProxy } = require('./voice-proxy');
 const { createVideoProxy } = require('./video-proxy');
 const uuidv4 = () => crypto.randomUUID();
+const {createCustomerPresence}=require('./customer-presence');
+const customerPresence=createCustomerPresence({onChange:ticketId=>{telegram.refreshTicketDialog?.(ticketId).catch(()=>{});}});
+setInterval(()=>customerPresence.sweep(),10000).unref();
 
 const app = express();
 const server = http.createServer(app);
@@ -52,6 +55,7 @@ io.engine.on('connection_error', error => {
 });
 
 telegram.init(io, {
+  isCustomerInChat:ticketId=>customerPresence.online(ticketId),
   scheduleWelcomeMessages,
   scheduleOperatorWaitMessage,
   cancelOperatorWait,
@@ -486,6 +490,15 @@ app.post('/api/session/resume', (req, res) => {
   const messages = db.getMessagesRecent.all(ticket.id, PAGE);
   const cfg = loadSettings();
   res.json({ ticket, messages, hasMore: total > PAGE, settings: cfg, online: isWithinWorkHours(cfg) });
+});
+
+app.post('/api/session/presence', (req,res) => {
+  const {sessionToken,ticketId,clientId,visible}=req.body||{};
+  if(typeof sessionToken!=='string'||typeof ticketId!=='string')return res.status(400).json({error:'Missing params'});
+  const ticket=db.getTicketBySessionAny.get(sessionToken);
+  if(!ticket||ticket.id!==ticketId)return res.status(403).json({error:'Forbidden'});
+  if(typeof visible!=='boolean'||!customerPresence.report(ticketId,clientId,visible&&ticket.status==='open'))return res.status(400).json({error:'Invalid presence'});
+  res.json({ok:true});
 });
 
 app.post('/api/session/messages-seen', (req, res) => {

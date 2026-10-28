@@ -22,6 +22,19 @@ const ebt=$('ebt'),ep=$('ep');
 const tst=$('tst'),sdwn=$('sdwn');
 const newbtn=$('newbtn');
 
+// A per-tab heartbeat distinguishes a visible chat from a background connection.
+const presenceClientId=crypto.randomUUID();
+function reportCustomerPresence(visible=document.visibilityState==='visible'){
+  if(!S.tid||!S.token)return;
+  fetch('/api/session/presence',{
+    method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,
+    body:JSON.stringify({ticketId:S.tid,sessionToken:S.token,clientId:presenceClientId,visible:!!visible&&!S.closed&&$('cs').classList.contains('on')})
+  }).catch(()=>{});
+}
+window.addEventListener('pagehide',()=>reportCustomerPresence(false));
+window.addEventListener('pageshow',()=>reportCustomerPresence());
+setInterval(()=>reportCustomerPresence(),15000);
+
 /* ── SOCKET ── */
 const socket=io({
   autoConnect:false,
@@ -118,6 +131,7 @@ async function init(){
 
   // Refresh messages when tab becomes visible again
   document.addEventListener('visibilitychange',()=>{
+    reportCustomerPresence();
     if(document.visibilityState==='visible'&&S.tid)refreshMessages();
     if(document.visibilityState==='visible'&&socket.connected)setConnStatus('on');
   });
@@ -239,7 +253,7 @@ sb.addEventListener('click',async()=>{
 });
 
 function showLogin(){$('ls').classList.add('on');$('cs').classList.remove('on');scheduleViewportSync();}
-function showChat(){ni.blur();$('ls').classList.remove('on');$('cs').classList.add('on');scheduleViewportSync();tryRequestNotifications();setConnStatus('connecting');}
+function showChat(){ni.blur();$('ls').classList.remove('on');$('cs').classList.add('on');scheduleViewportSync();tryRequestNotifications();setConnStatus('connecting');reportCustomerPresence();}
 
 /* ── CLOSE ── */
 hcl.addEventListener('click',()=>{
@@ -254,7 +268,7 @@ hcl.addEventListener('click',()=>{
     }catch{showToast('Ошибка — попробуйте снова','err');}
   });
 });
-function markClosed(){S.closed=true;ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';saveMsgCache();}
+function markClosed(){S.closed=true;reportCustomerPresence(false);ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';saveMsgCache();}
 
 
 /* ── NEW CHAT ── */

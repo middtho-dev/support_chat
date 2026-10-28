@@ -4,7 +4,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'support-dialogs-'));
 process.env.DB_PATH=path.join(root,'support.db');process.env.UPLOADS_DIR=path.join(root,'uploads');
 process.env.TELEGRAM_BOT_TOKEN='fake-token';process.env.TELEGRAM_ADMIN_IDS='7001';
 process.env.TELEGRAM_OPERATOR_LAYOUT='dialog';process.env.TELEGRAM_FILE_DOWNLOAD_ATTEMPTS='1';process.env.PUBLIC_URL='https://support.test';
-let next=100,bot,sendFailures=0,deleteFailures=new Set();
+let next=100,bot,sendFailures=0,deleteFailures=new Set(),customerOnline=false;
 const effects=[],emits=[];
 class FakeBot {
   constructor(){this.handlers={};bot=this;}
@@ -33,7 +33,7 @@ class FakeBot {
 require.cache[require.resolve('node-telegram-bot-api')]={exports:{TelegramBot:FakeBot}};
 const db=require('../src/database'),{saveSettings}=require('../src/settings'),telegram=require('../src/telegram-private');
 const originalFetch=global.fetch;global.fetch=async url=>String(url).startsWith('https://fixture-files.test/')?new Response(Buffer.from('image'),{headers:{'content-type':'image/jpeg'}}):originalFetch(url);
-telegram.init({to:room=>({emit:(event,payload)=>emits.push({room,event,payload})})});saveSettings({workStartHour:0,workEndHour:24});
+telegram.init({to:room=>({emit:(event,payload)=>emits.push({room,event,payload})})},{isCustomerInChat:()=>customerOnline});saveSettings({workStartHour:0,workEndHour:24});
 const op={id:7001,first_name:'Оператор'};
 const wait=async predicate=>{for(let i=0;i<200;i++){if(predicate())return;await new Promise(r=>setTimeout(r,10));}assert.ok(predicate(),'Timed out');};
 const state=id=>db.db.prepare('SELECT * FROM telegram_operator_dialogs WHERE ticket_id=? AND operator_id=?').get(id,'7001');
@@ -76,14 +76,36 @@ test('button uses one temporary Reply prompt; answer is plain and card remains a
   await callback('replyticket:dialog-one',active('dialog-one'));const newer=effects.findLast(e=>e.options?.reply_markup?.force_reply);assert.ok(removed(prompt.id));
   await reply(newer.id,'Ответ без цитирования',501);
   const message=db.getMessageByTelegramDestination.get('7001',501);assert.ok(message);assert.equal(message.ticket_id,'dialog-one');assert.equal(message.reply_to_id,null);
-  assert.equal(removed(501),false);const card=active('dialog-one');
+  await wait(()=>removed(501));assert.equal(db.getMessageById.get(message.id).web_delivered_at,null);const card=active('dialog-one');
   telegram.confirmWebCustomerDelivery('dialog-one',message.id);await telegram.processDeliveryQueue();
   await wait(()=>removed(501));assert.ok(removed(newer.id));assert.equal(removed(card),false);assert.equal(owned('dialog-one').length,1);
+});
+
+test('late receipt updates the card without removing the next prompt or the canonical dialog',async()=>{
+  const message=db.getMessageByTelegramDestination.get('7001',501);
+  await callback('replyticket:dialog-one',active('dialog-one'));const prompt=effects.findLast(e=>e.options?.reply_markup?.force_reply);
+  const card=active('dialog-one');telegram.confirmWebCustomerDelivery('dialog-one',message.id);await telegram.processDeliveryQueue();
+  assert.equal(removed(prompt.id),false);assert.equal(removed(card),false);
+});
+
+test('Rich header counts every pending reply and refreshes presence/delivery quietly',async()=>{
+  await reply(active('dialog-one'),'Первый ожидающий ответ',511);
+  await reply(active('dialog-one'),'Второй ожидающий ответ',512);
+  const first=db.getMessageByTelegramDestination.get('7001',511),second=db.getMessageByTelegramDestination.get('7001',512);
+  const text=()=>{const item=effects.findLast(e=>e.kind==='edit'&&(e.options?.message_id||e.text?.message_id)===active('dialog-one'));return item?.text?.rich_message?.markdown||item?.text||'';};
+  await telegram.refreshTicketDialog('dialog-one');assert.match(text(),/🔴 Клиент не в чате/);assert.match(text(),/Ещё не получено клиентом: 2/);
+  assert.equal(first.web_delivered_at,null);assert.equal(second.web_delivered_at,null);await wait(()=>removed(511)&&removed(512));
+  const sends=effects.filter(e=>e.kind==='rich').length;customerOnline=true;
+  telegram.confirmWebCustomerDelivery('dialog-one',first.id);await telegram.refreshTicketDialog('dialog-one');
+  assert.match(text(),/🟢 Клиент в чате/);assert.match(text(),/Ещё не получено клиентом: 1/);
+  telegram.confirmWebCustomerDelivery('dialog-one',second.id);await telegram.refreshTicketDialog('dialog-one');assert.match(text(),/Все ответы получены клиентом/);
+  assert.equal(effects.filter(e=>e.kind==='rich').length,sends,'Presence/receipts edit silently, without new cards');customerOnline=false;
 });
 
 test('direct Reply to card supports photos, documents and album continuation without quotes',async()=>{
   await reply(active('dialog-one'),null,502,{photo:[{file_id:'first',file_size:5}],media_group_id:'photos'});
   const first=db.getMessageByTelegramDestination.get('7001',502);assert.equal(first.message_type,'image');assert.equal(first.reply_to_id,null);
+  await wait(()=>removed(502));assert.equal(db.getMessageById.get(first.id).web_delivered_at,null);
   telegram.confirmWebCustomerDelivery('dialog-one',first.id);await telegram.processDeliveryQueue();
   await bot.handlers.message({message_id:503,chat:{id:7001,type:'private'},from:op,photo:[{file_id:'second',file_size:5}],media_group_id:'photos'});
   const second=db.getMessageByTelegramDestination.get('7001',503);assert.equal(second.ticket_id,'dialog-one');
@@ -135,7 +157,8 @@ test('legacy topics and duplicate notifications migrate into a single card',asyn
   const ticket=fresh('legacy-migration');db.assignTicketIfUnassigned.run('7001',ticket.id);
   db.saveTelegramThread.run(ticket.id,'7001','7001',900,901);db.saveTelegramNotification.run(ticket.id,'7001','7001',902,'open');
   await telegram.forwardMessage(db.getTicketById.get(ticket.id),source(ticket.id,'legacy-source'));
-  await telegram.processDeliveryQueue();await wait(()=>effects.some(e=>e.kind==='deleteTopic'&&e.id===900));
+  for(let i=0;i<200&&!effects.some(e=>e.kind==='deleteTopic'&&e.id===900);i++){await telegram.processDeliveryQueue();await new Promise(r=>setTimeout(r,20));}
+  assert.ok(effects.some(e=>e.kind==='deleteTopic'&&e.id===900));
   assert.ok(removed(901));assert.ok(removed(902));assert.equal(owned(ticket.id).length,1);assert.equal(db.getTelegramThreadForTicket.get(ticket.id),undefined);
 });
 

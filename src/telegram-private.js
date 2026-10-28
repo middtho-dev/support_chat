@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const db = require('./database');
 const {createSupportInbox}=require('./telegram-support-inbox');
 const {createSupportDialogs}=require('./telegram-support-dialogs');
+const {supportDeliveryStatus}=require('./support-delivery-status');
 const SINGLE_DIALOG=process.env.TELEGRAM_OPERATOR_LAYOUT!=='topics';
 const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
 const push = require('./push');
@@ -3156,6 +3157,12 @@ async function forwardOperatorMessage(msg, ticket, thread, operator, {inboxTarge
       if(SINGLE_DIALOG)supportDialogs.remember(msg.chat.id,msg.message_id,ticket.id,operator.telegram_user_id,'response',inboxTarget.message_id,id,msg.media_group_id?String(msg.media_group_id):null);
       else supportInbox.remember(msg.chat.id,msg.message_id,inboxTarget.message_id,operator.telegram_user_id,msg.media_group_id?String(msg.media_group_id):null,id);
     }
+    if(SINGLE_DIALOG){
+      // Persistence, not the customer's receipt, gates operator-chat cleanup.
+      supportDialogs.answered(db.getMessageById.get(id));
+      scheduleDeliveryQueue(0);
+      supportDialogs.cleanup(ticket.id).catch(()=>{});
+    }
     const message = {
       id,
       ticket_id: ticket.id,
@@ -3356,11 +3363,14 @@ function customerDeliveryChatId(ticket, message) {
 }
 
 function queueOperatorMessageCleanup(message) {
-  const inboxCleanup=SINGLE_DIALOG?supportDialogs.answered(message):supportInbox.answered(message);
-  if(inboxCleanup){
-    if(SINGLE_DIALOG){const ticket=db.getTicketById.get(message.ticket_id);if(ticket)supportDialogs.sync(ticket,String(message.telegram_chat_id)).catch(()=>{});}
-    scheduleDeliveryQueue(0);return true;
+  if(SINGLE_DIALOG){
+    const queued=supportDialogs.answered(message);
+    if(message?.ticket_id)refreshTicketDialog(message.ticket_id).catch(()=>{});
+    if(queued)scheduleDeliveryQueue(0);
+    return queued;
   }
+  const inboxCleanup=supportInbox.answered(message);
+  if(inboxCleanup){scheduleDeliveryQueue(0);return true;}
   if (message?.message_type !== 'text' || !message?.ticket_id ||
       !message?.telegram_chat_id || !message?.telegram_message_id) return false;
   db.enqueueOperatorMessageCleanup.run(
@@ -3469,15 +3479,21 @@ function deliverCustomerReply(ticket, message) {
 
 function operatorDialogModel(ticket) {
   const content=ticketTranscriptModel(ticket);
-  const latest=db.db.prepare("SELECT * FROM messages WHERE ticket_id=? AND sender!='system' AND COALESCE(is_auto,0)=0 ORDER BY created_at DESC,rowid DESC LIMIT 1").get(ticket.id);
-  let label='Ожидается сообщение клиента';
-  if(latest?.sender==='user')label='🔔 Ждёт вашего ответа';
-  else if(latest?.sender==='support') {
-    const delivered=ticket.source==='telegram'?latest.telegram_customer_message_id:latest.web_delivered_at;
-    const failed=ticket.source==='telegram'?latest.telegram_customer_last_error:null;
-    label=delivered?'Ответ доставлен':failed?'⚠️ Доставка ответа повторяется':'Ответ доставляется…';
-  }
-  return {markdown:`_${label}_\n\n${content.markdown}`,fallback:label+'\n\n'+content.fallback};
+  const latest=db.db.prepare("SELECT sender FROM messages WHERE ticket_id=? AND sender!='system' AND COALESCE(is_auto,0)=0 ORDER BY created_at DESC,rowid DESC LIMIT 1").get(ticket.id);
+  const counts=db.db.prepare(`SELECT COUNT(*) total,
+    COALESCE(SUM(CASE WHEN CASE WHEN ?='telegram' THEN telegram_customer_message_id IS NULL ELSE web_delivered_at IS NULL END THEN 1 ELSE 0 END),0) pending,
+    COALESCE(SUM(CASE WHEN telegram_customer_message_id IS NULL AND telegram_customer_last_error IS NOT NULL THEN 1 ELSE 0 END),0) failed
+    FROM messages WHERE ticket_id=? AND sender='support' AND COALESCE(is_auto,0)=0`).get(ticket.source,ticket.id);
+  const label=supportDeliveryStatus({source:ticket.source,online:!!lifecycle.isCustomerInChat?.(ticket.id),
+    pending:counts.pending,total:counts.total,failed:ticket.source==='telegram'?counts.failed:0,waitingForOperator:latest?.sender==='user'});
+  return {markdown:label.split('\n').map(line=>'_'+markdownEscape(line)+'_').join('\n')+'\n\n'+content.markdown,fallback:label+'\n\n'+content.fallback};
+}
+
+async function refreshTicketDialog(ticketId) {
+  if(!SINGLE_DIALOG||!tgEnabled())return;
+  const ticket=db.getTicketById.get(ticketId);if(!ticket||ticket.status!=='open')return;
+  const rows=db.db.prepare('SELECT operator_id FROM telegram_operator_dialogs WHERE ticket_id=? AND message_id IS NOT NULL').all(ticketId);
+  for(const row of rows)await supportDialogs.sync(ticket,row.operator_id);
 }
 
 const supportDialogs=createSupportDialogs({
@@ -4406,6 +4422,7 @@ module.exports = {
   sendCustomerControl,
   sendCustomerClosePrompt,
   refreshOpenTicketTranscripts,
+  refreshTicketDialog,
   clearTicketReminders,
   notifyTicketClosed,
   autoCloseTicket,
