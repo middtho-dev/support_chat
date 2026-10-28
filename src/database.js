@@ -48,6 +48,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tickets_created   ON tickets(created_at);
 `);
 
+require('./customer-close-requests').installCloseRequests(db);
+
 // Migration: add reply_to_id column if not exists
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN is_auto INTEGER DEFAULT 0`); } catch {}
