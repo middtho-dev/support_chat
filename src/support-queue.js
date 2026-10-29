@@ -17,7 +17,7 @@ function createSupportQueue({database, authorize, service, settings}) {
     WHERE m.sender!='system' AND COALESCE(m.is_auto,0)=0 AND m.telegram_message_id IS NULL
     UNION ALL
     SELECT 'customer',m.id,t.id,t.user_name,m.content,m.message_type,m.created_at,m.telegram_customer_attempts,m.telegram_customer_last_error,m.telegram_customer_next_retry_at,
-      CASE WHEN t.status='open' AND t.telegram_customer_chat_id IS NOT NULL THEN 1 ELSE 0 END,
+      CASE WHEN (t.status='open' OR (COALESCE(m.is_auto,0)=0 AND EXISTS (SELECT 1 FROM ticket_closure_delivery c WHERE c.ticket_id=t.id AND c.state='pending') AND NOT EXISTS (SELECT 1 FROM tickets newer WHERE newer.source='telegram' AND newer.telegram_customer_id=t.telegram_customer_id AND newer.status='open' AND newer.id!=t.id))) AND t.telegram_customer_chat_id IS NOT NULL THEN 1 ELSE 0 END,
       CASE WHEN t.status!='open' THEN 'Обращение закрыто' ELSE 'Не задан чат клиента' END
     FROM messages m JOIN tickets t ON t.id=m.ticket_id
     WHERE m.sender='support' AND t.source='telegram' AND m.telegram_customer_message_id IS NULL

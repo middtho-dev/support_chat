@@ -18,6 +18,7 @@ const {createLivePanels}=require('./telegram-live-panels');
 const {createServerMetrics}=require('./server-metrics');
 const {createCustomerCloseRequests}=require('./customer-close-requests');
 const closeRequests=createCustomerCloseRequests(db.db);
+const closureDelivery=require('./ticket-closures').createTicketClosures(db.db);
 const closePromptOperations=new Map();
 const SINGLE_DIALOG=process.env.TELEGRAM_OPERATOR_LAYOUT!=='topics';
 const { cleanupExpired, permanentDeletionError } = require('./telegram-cleanup');
@@ -487,7 +488,7 @@ function ticketKeyboard(ticket, state = 'open', { menu = false } = {}) {
     const files=db.getMessages.all(ticket.id).filter(m=>m.file_url);
     if(files.length)rows.push([tgButton(`Вложения · ${files.length}`,`dialogfiles:${ticket.id}`)]);
     if(state==='unassigned'&&!sharedTickets())rows.push([tgButton('Взять обращение',`take:${ticket.id}`,'primary')]);
-    rows.push([tgButton(closeRequests.pending(ticket.id)?'⏳ Ожидаем завершения клиентом':'Закрыть обращение',`close:${ticket.id}`)]);
+    rows.push([tgButton(closeRequests.pending(ticket.id)?'⏳ Ожидаем завершения клиентом':settings.telegramCloseButtonText,`close:${ticket.id}`,settings.telegramCloseButtonStyle)]);
     const url=adminWebAppUrl(ticket.id);
     if(url)rows.push([{text:'Вся история',web_app:{url}}]);
     return {inline_keyboard:rows};
@@ -1615,7 +1616,7 @@ function customerKeyboard(ticket) {
   if (ticket?.status === 'open') {
     rows.push([{
       text: settings.telegramCustomerCloseButtonText,
-      callback_data: 'customer:close'
+      callback_data: 'customer:close:'+ticket.id
     }]);
   } else {
     rows.push([{
@@ -1654,7 +1655,7 @@ function customerControlModel(ticket, reason = '', { showClosePrompt = false } =
   if (showClosePrompt) {
     const prompt = customerClosePromptText(ticket, reason);
     return richPanel({blocks:[heading('Всё решено?',3),...prompt.split('\n\n').map(paragraph)],rows:[[
-      {text:settings.telegramCustomerCloseButtonText,callback_data:'customer:close'},
+      {text:settings.telegramCustomerCloseButtonText,callback_data:'customer:close:'+ticket.id},
       {text:'Продолжить',callback_data:'customer:continue:'+ticket.id}
     ]],markdown:prompt,fallback:prompt});
   }
@@ -1691,7 +1692,8 @@ function customerClosePromptText(ticket, reason = '') {
   const minutes=pending?Math.max(0,Math.ceil((pending.deadline-Date.now())/60000)):5;
   const delay=minutes?`через ${minutes} мин.`:'в ближайшее время';
   const continuation=ticket.source==='telegram'?'нажмите «Продолжить» или отправьте сообщение':'отправьте сообщение в чат';
-  return body+`\n\nЕсли всё решено, закройте обращение. Если нужна помощь, ${continuation}.\n\nЕсли вы больше ничего не напишете, обращение автоматически закроется ${pending?delay:'через 5 минут'}.`;
+  const help=/продолж|помощ|напиш/i.test(body)?'':`\n\nЕсли нужна помощь, ${continuation}.`;
+  return body+help+`\n\nЕсли вы больше ничего не напишете, обращение автоматически закроется ${pending?delay:'через 5 минут'}.`;
 }
 
 async function pinCustomerControl(chatId, messageId, { repin = false } = {}) {
@@ -2032,7 +2034,8 @@ async function processCustomerCloseRequests(){
   return closeRequests.process(async ticket=>{
     lifecycle.cancelOperatorWait?.(ticket.id);
     const content='Обращение автоматически закрыто: после предложения завершить диалог в течение 5 минут не поступило новых сообщений.';
-    const id=uuidv4();db.saveMessage.run(id,ticket.id,'system',cfg().supportName,content,'text',null,null,null,null,null);
+    const id='closure:'+closeRequests.get(ticket.id).prompt_id;
+    if(!db.getMessageById.get(id))db.saveMessage.run(id,ticket.id,'system',cfg().supportName,content,'text',null,null,null,null,null);
     io?.to(`ticket:${ticket.id}`).emit('message',db.getMessageById.get(id));
     io?.to(`ticket:${ticket.id}`).emit('ticket_closed',{by:'inactivity'});
     io?.to('admin').emit('admin_ticket_status',{ticketId:ticket.id,status:'closed'});
@@ -2141,6 +2144,7 @@ function customerRateLimited(customerId) {
 
 async function closeCustomerTicket(msg) {
   const ticket = db.getOpenTicketByTelegramCustomer.get(String(msg.from.id));
+  if(msg.controlCallback&&(!ticket||msg.expectedTicketId&&msg.expectedTicketId!==ticket.id||Number(ticket.telegram_customer_control_message_id)!==Number(msg.message_id)))return;
   if (!ticket) {
     await deleteTelegramMessage(msg.chat.id, msg.message_id);
     const latest = db.getLatestTicketByTelegramCustomer.get(String(msg.from.id));
@@ -2889,7 +2893,8 @@ async function handleCallbackQuery(query) {
     if (!cfg().telegramCustomerEnabled) return;
     try {
       if(action.startsWith('customer:continue:'))return continueCustomerCloseRequest(query);
-      if (action === 'customer:close') return closeCustomerTicket({
+      if (action === 'customer:close'||action.startsWith('customer:close:')) return closeCustomerTicket({
+        expectedTicketId:action.startsWith('customer:close:')?action.slice('customer:close:'.length):null,controlCallback:true,
         from: query.from,
         chat: query.message.chat,
         message_id: query.message.message_id
@@ -3550,10 +3555,11 @@ async function deliverCustomerReplyNow(ticket, message, chatId) {
   const fresh = db.getTicketById.get(ticket?.id || message?.ticket_id);
   if (!tgEnabled() || !settings.telegramCustomerEnabled ||
       !settings.telegramCustomerDeliverReplies || fresh?.source !== 'telegram' ||
-      fresh?.status !== 'open' || closingCustomerTickets.has(fresh.id) ||
+      (fresh?.status !== 'open'&&!closureDelivery.pending(fresh?.id)) || closingCustomerTickets.has(fresh.id) ||
       message?.sender !== 'support') {
     return null;
   }
+  if(fresh.status==='closed'){const active=db.getOpenTicketByTelegramCustomer.get(String(fresh.telegram_customer_id));if(active&&active.id!==fresh.id)return null;}
   const saved = db.getMessageById.get(message.id) || message;
   if(db.deliveryHeld.get('customer',String(saved.id)))return null;
   if (saved.telegram_customer_message_id || customerDeliveryMessages.has(saved.id)) {
@@ -3570,7 +3576,7 @@ async function deliverCustomerReplyNow(ticket, message, chatId) {
     if (!sent?.message_id) throw new Error('Telegram did not confirm customer delivery');
     db.updateTelegramCustomerDelivery.run(sent.message_id, saved.id);
     const current = db.getTicketById.get(fresh.id);
-    if (current?.status !== 'open' || closingCustomerTickets.has(fresh.id)) {
+    if ((current?.status !== 'open'&&!closureDelivery.pending(fresh.id)) || closingCustomerTickets.has(fresh.id)) {
       await deleteTelegramMessage(
         String(fresh.telegram_customer_chat_id),
         sent.message_id
@@ -3965,6 +3971,7 @@ async function processDeliveryQueue() {
       }
     }
     if (shuttingDown) return;
+    await processTicketClosures();
     if(SINGLE_DIALOG)await supportDialogs.retry();
     else {await supportInbox.retry();await supportInbox.cleanup();}
     const messages = db.getPendingPrivateTelegramMessages.all(20);
@@ -4077,49 +4084,38 @@ async function replayUnsentMessages(ticket, limit = 30) {
   }
 }
 
-async function closeTicketFromTelegram(ticket) {
-  const startedAt = Date.now();
-  const settings = cfg();
-  const thread = db.getTelegramThreadForTicket.get(ticket.id);
-  db.closeTicket.run(ticket.id);
-  lifecycle.cancelOperatorWait?.(ticket.id);
-  clearTicketReminders(ticket.id).catch(error => {
-    console.warn('[TG private] clear closed reminders:', tgError(error));
-  });
-  const fresh = db.getTicketById.get(ticket.id);
-  io?.to(`ticket:${ticket.id}`).emit('ticket_closed', { by: 'support' });
-  io?.to('admin').emit('admin_ticket_status', { ticketId: ticket.id, status: 'closed' });
-  io?.to('admin').emit('admin_tickets', db.getTicketsForAdmin.all());
-  if (thread&&!SINGLE_DIALOG) {
-    await Promise.allSettled([
-      setTopicStatus(thread, fresh, settings.telegramClosedEmoji),
-      publishTicketTranscript(fresh, thread)
-    ]);
-    if (settings.telegramCloseTopicOnClose) {
-      await bot.closeForumTopic(thread.chat_id, thread.thread_id).catch(() => {});
-    }
-  }
-  if (fresh?.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    await showClosedCustomerLauncher(
-      fresh,
-      settings.telegramCustomerClosedBySupportText
-    ).catch(() => {});
-  }
-  db.closeTelegramThreadsForTicket.run(ticket.id);
-  const operator = fresh.assigned_operator_id
-    ? db.getTelegramOperator.get(String(fresh.assigned_operator_id))
-    : null;
-  if(SINGLE_DIALOG)await updateAssignmentNotifications(fresh,operator);
-  else updateAssignmentNotifications(fresh, operator).catch(error => {
-    console.warn('[TG private] close notification update:', tgError(error));
-  });
-  if (settings.telegramCleanupClosedTopics && settings.telegramCleanupClosedHours === 0) {
-    scheduleCleanupOldTopics();
-  }
-  observeLatency('closeMs', startedAt);
+async function closeTicketFromTelegram(ticket){
+  const startedAt=Date.now();db.closeTicket.run(ticket.id);lifecycle.cancelOperatorWait?.(ticket.id);
+  io?.to(`ticket:${ticket.id}`).emit('ticket_closed',{by:'support'});
+  io?.to('admin').emit('admin_ticket_status',{ticketId:ticket.id,status:'closed'});
+  io?.to('admin').emit('admin_tickets',db.getTicketsForAdmin.all());
+  await notifyTicketClosed(db.getTicketById.get(ticket.id));observeLatency('closeMs',startedAt);
 }
 
-async function notifyTicketClosed(ticket, {
+async function processTicketClosures(options={}){
+  if(shuttingDown)return 0;
+  return closureDelivery.process(async row=>{
+    const ticket=db.getTicketById.get(row.ticket_id);if(!ticket||ticket.status!=='closed')return 'superseded';
+    if(SINGLE_DIALOG)await supportDialogs.close(ticket);
+    if(ticket.source==='telegram'){
+      if(!tgEnabled())return false;
+      const current=db.getOpenTicketByTelegramCustomer.get(String(ticket.telegram_customer_id));
+      if(current&&current.id!==ticket.id)return 'superseded';
+      const pending=db.db.prepare("SELECT COUNT(*) n FROM messages WHERE ticket_id=? AND sender='support' AND COALESCE(is_auto,0)=0 AND telegram_customer_message_id IS NULL").get(ticket.id).n;
+      if(pending)return false;
+    }
+    await applyTicketClosed(ticket,{customerReason:row.reason,extraMessageIds:JSON.parse(row.extra_ids)});
+    return true;
+  },options);
+}
+async function notifyTicketClosed(ticket,{customerReason=cfg().telegramCustomerClosedBySupportText,extraMessageIds=[]}={}){
+  closureDelivery.enqueue(ticket,customerReason,extraMessageIds);
+  if(SINGLE_DIALOG)await supportDialogs.close(ticket);
+  scheduleDeliveryQueue(0);
+  return processTicketClosures({ticketId:ticket.id});
+}
+
+async function applyTicketClosed(ticket, {
   customerReason = cfg().telegramCustomerClosedBySupportText,
   extraMessageIds = []
 } = {}) {
@@ -4131,7 +4127,7 @@ async function notifyTicketClosed(ticket, {
   if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
     await showClosedCustomerLauncher(fresh, customerReason, {
       extraMessageIds
-    }).catch(() => {});
+    });
   }
   if (thread&&!SINGLE_DIALOG) {
     await setTopicStatus(thread, fresh, cfg().telegramClosedEmoji).catch(() => {});
@@ -4145,34 +4141,12 @@ async function notifyTicketClosed(ticket, {
     ? db.getTelegramOperator.get(String(fresh.assigned_operator_id))
     : null;
   await updateAssignmentNotifications(fresh, operator);
+  if(cfg().telegramCleanupClosedTopics&&cfg().telegramCleanupClosedHours===0)scheduleCleanupOldTopics();
 }
 
-async function autoCloseTicket(ticket, extra = {}) {
-  const thread = db.getTelegramThreadForTicket.get(ticket.id);
-  const fresh = db.getTicketById.get(ticket.id) || ticket;
+async function autoCloseTicket(ticket,extra={}){
   lifecycle.cancelOperatorWait?.(ticket.id);
-  clearTicketReminders(ticket.id).catch(error => {
-    console.warn('[TG private] clear auto-close reminders:', tgError(error));
-  });
-  if (fresh.source === 'telegram' && fresh.telegram_customer_chat_id) {
-    const reason = formatTemplate(
-      cfg().telegramCustomerClosedBySystemText,
-      extra
-    );
-    await showClosedCustomerLauncher(fresh, reason).catch(() => {});
-  }
-  if (thread&&!SINGLE_DIALOG) {
-    await setTopicStatus(thread, fresh, cfg().telegramClosedEmoji).catch(() => {});
-    await publishTicketTranscript(fresh, thread).catch(() => {});
-    if (cfg().telegramCloseTopicOnClose) {
-      await bot.closeForumTopic(thread.chat_id, thread.thread_id).catch(() => {});
-    }
-  }
-  db.closeTelegramThreadsForTicket.run(ticket.id);
-  const operator = fresh.assigned_operator_id
-    ? db.getTelegramOperator.get(String(fresh.assigned_operator_id))
-    : null;
-  await updateAssignmentNotifications(fresh, operator);
+  return notifyTicketClosed(ticket,{customerReason:formatTemplate(cfg().telegramCustomerClosedBySystemText,extra)});
 }
 
 async function warnInactivity(ticket, extra = {}) {
@@ -4477,6 +4451,7 @@ function status(now = new Date()) {
     operatorLayout:SINGLE_DIALOG?'dialog':'topics',
     sharedTickets:!!sharedTickets(),
     dialogs:SINGLE_DIALOG?supportDialogs.diagnostics():null,
+    closures:closureDelivery.diagnostics(),
     configured: !!TOKEN,
     operatorAccessConfigured: ADMIN_IDS.size > 0 || db.getActiveTelegramOperators.all().length > 0,
     enabled: !!cfg().telegramEnabled,

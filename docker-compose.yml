@@ -3,6 +3,14 @@ services:
     build: .
     container_name: support-chat
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 192
     stop_grace_period: 15s
     network_mode: host
     env_file:
@@ -15,6 +23,7 @@ services:
       - DB_PATH=/app/data/support.db
       - UPLOADS_DIR=/app/public/uploads
       - BACKUP_DIR=/app/backups
+      - WORKSPACE_BACKUP_STATUS_PATH=/run/kv9ru/backup-status.json
       - VAPID_STORE=/app/data/vapid.json
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_MODE=${TELEGRAM_MODE:-private}
@@ -33,6 +42,12 @@ services:
       - support-data:/app/data
       - support-uploads:/app/public/uploads
       - support-backups:/app/backups
+      - type: bind
+        source: /var/lib/kv9ru
+        target: /run/kv9ru
+        read_only: true
+        bind:
+          create_host_path: false
 
 volumes:
   support-data:

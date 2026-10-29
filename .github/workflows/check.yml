@@ -43,3 +43,62 @@ jobs:
           npm ci
           npm run check
           npm test
+
+      - name: Python module and backup tests
+        run: |
+          python3 -m unittest discover -s tools/lampac -p 'test_*.py'
+          python3 -m unittest discover -s tools/firmware -p 'test_*.py'
+          python3 scripts/test_workspace_backup.py
+
+      - name: Check all deployment scripts
+        run: bash -n setup.sh update.sh scripts/install-workspace-backup.sh
+
+  interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Install isolated browser tooling
+        run: |
+          npm install --prefix "$RUNNER_TEMP/kv9-browser" playwright@1.64.1
+          "$RUNNER_TEMP/kv9-browser/node_modules/.bin/playwright" install --with-deps chromium webkit
+      - name: Desktop, phone and client flows
+        env:
+          TELEGRAM_BOT_TOKEN: ''
+          TELEGRAM_ADMIN_IDS: ''
+          ADMIN_TOKEN: audit-local-only-token
+          HOST: 127.0.0.1
+          PORT: '13841'
+          FRP_SERVICE_URL: http://127.0.0.1:1
+          VOICE_SERVICE_URL: http://127.0.0.1:1
+          VIDEO_SERVICE_URL: http://127.0.0.1:1
+          FIRMWARE_SERVICE_URL: http://127.0.0.1:1
+          LAMPAC_SERVICE_URL: http://127.0.0.1:1
+          AUDIT_URL: http://127.0.0.1:13841/
+          AUDIT_ENGINES: chromium,webkit
+        run: |
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/kv9-browser/node_modules/playwright"
+          export AUDIT_CHROMIUM_PATH="$(node -e 'console.log(require(process.env.PLAYWRIGHT_MODULE).chromium.executablePath())')"
+          export DB_PATH="$RUNNER_TEMP/audit.db" UPLOADS_DIR="$RUNNER_TEMP/uploads" BACKUP_DIR="$RUNNER_TEMP/backups" VAPID_STORE="$RUNNER_TEMP/vapid.json"
+          node -e "require('./src/settings').saveSettings({offhoursEnabled:false,welcomeEnabled:false,backupEnabled:false,telegramEnabled:false})"
+          node src/server.js > "$RUNNER_TEMP/audit-server.log" 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" || true' EXIT
+          for attempt in {1..30}; do curl -fsS "${AUDIT_URL}health" >/dev/null && break; sleep 1; done
+          AUDIT_OUTPUT="$RUNNER_TEMP/ui-workspace" node scripts/audit-mobile-workspace.cjs
+          AUDIT_OUTPUT="$RUNNER_TEMP/ui-client" node scripts/audit-client-chat.cjs
+          AUDIT_OUTPUT="$RUNNER_TEMP/ui-devices" node scripts/audit-lampac-devices.cjs
+          AUDIT_OUTPUT="$RUNNER_TEMP/ui-flows" node scripts/audit-workspace-flows.cjs
+      - name: Upload interface artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-interface
+          path: |
+            ${{ runner.temp }}/ui-*
+            ${{ runner.temp }}/audit-server.log
+          retention-days: 7

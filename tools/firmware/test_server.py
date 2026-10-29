@@ -18,6 +18,7 @@ class WorkerTests(unittest.TestCase):
                 connection.request(method,path,body,headers);response=connection.getresponse();status=response.status;data=json.loads(response.read());connection.close();return status,data
             try:
                 self.assertEqual(request('GET','/',auth=False)[0],401)
+                self.assertEqual(request('GET','/health',auth=False),(200,{'ok':True}))
                 self.assertEqual(request('POST','/images',b'invalid')[0],400)
                 data=test_firmware.FirmwareTests().image()
                 code,item=request('POST','/images',data);self.assertEqual(code,201)

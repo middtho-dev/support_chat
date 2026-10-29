@@ -13,10 +13,14 @@ test('queue separates closed-ticket backlog, enforces permissions and pauses wit
  try{
  assert.equal((await get('','invalid')).status,401);let list=await(await get()).json();assert.deepEqual(list.counts,{pending:3,blocked:2,paused:0});assert.equal(list.rows.find(r=>r.kind==='incoming').content,'Incoming');assert.ok(!list.rows.some(r=>r.ticket_id==='closed'));assert.ok(list.rows.every(r=>r.blocked_reason===null));
  assert.equal((await action('customer','live','pause','operator')).status,403);assert.equal((await action('customer','old','retry')).status,409);
+ require('../src/ticket-closures').createTicketClosures(db).enqueue({id:'closed'},'Closed');
+ const draining=await(await get()).json();assert.ok(draining.rows.some(r=>r.kind==='customer'&&r.id==='old'&&r.eligible));
+ assert.equal((await action('customer','old','retry')).status,200);
+ db.prepare("UPDATE ticket_closure_delivery SET state='superseded' WHERE ticket_id='closed'").run();
  busy=true;assert.equal((await action('customer','live','pause')).status,409);busy=false;
  assert.equal((await action('customer','live','pause')).status,200);assert.equal(store.getPendingTelegramCustomerReplies.all(20).length,0);assert.equal(db.prepare('SELECT content FROM messages WHERE id=?').get('live').content,'Reply');assert.equal(store.getNextTelegramCustomerReply.get('open'),undefined);
  list=await(await get('?state=paused')).json();assert.equal(list.counts.paused,1);assert.equal(list.rows[0].id,'live');
- assert.equal((await action('customer','live','retry')).status,200);assert.equal(store.getPendingTelegramCustomerReplies.all(20).length,1);assert.equal(wakes,1);
+ assert.equal((await action('customer','live','retry')).status,200);assert.equal(store.getPendingTelegramCustomerReplies.all(20).length,1);assert.equal(wakes,2);
  assert.equal((await action('operator','live','pause')).status,200);assert.equal(store.getPendingPrivateTelegramMessages.all(20).length,0);assert.equal(store.getPendingTelegramMessages.all(20).some(r=>r.id==='live'),false);
  assert.equal((await action('incoming','42:10','pause')).status,200);assert.equal(store.getPendingTelegramIncomingMessages.all(20).length,0);assert.ok(store.getTelegramIncomingMessage.get('42',10));
  assert.equal((await action('incoming','42:10','retry')).status,200);assert.equal(store.getPendingTelegramIncomingMessages.all(20).length,1);

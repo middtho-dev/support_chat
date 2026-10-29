@@ -35,3 +35,8 @@ test('slow polls never overlap and leaving overview aborts pending request',asyn
 test('late responses from a previous session cannot repopulate logged-out overview',async()=>{
  let complete;const h=setup(()=>new Promise(r=>complete=r));h.shell.render(state('old',false));h.shell.reset();h.shell.render(state(null,false));complete(response({version:'private-old'}));await settle();assert.doesNotMatch(h.text(),/private-old/);assert.equal(h.home.innerHTML,'');
 });
+
+test('intentionally disabled modules do not count as service failures',async()=>{
+ const h=setup(async url=>response(url==='/api/admin/health'?{telegram:{configured:true,enabled:false},maintenance:{healthy:true}}:{config:{enabled:false},running:true,healthy:true,devices:[],clients:[],torrents:[]}));
+ h.shell.render(state());await settle();assert.equal(h.node('overview-issues').textContent,0);assert.match(h.text(),/Выключен/);
+});

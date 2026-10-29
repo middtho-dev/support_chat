@@ -108,6 +108,7 @@ function createMaintenance({
 
   function publicStatus() {
     const config = currentConfig();
+    const workspaceBackup=require('./workspace-backup-status').workspaceBackupStatus();
     const lastBackupMs = state.lastBackupAt ? Date.parse(state.lastBackupAt) : 0;
     const overdueMs = config.backupIntervalHours * 60 * 60 * 1000 * 1.5;
     const backupOverdue = config.backupEnabled &&
@@ -122,10 +123,11 @@ function createMaintenance({
     return {
       ...state,
       config,
+      workspaceBackup,
       backupOverdue,
       diskLevel,
       healthy: (!config.diskMonitoringEnabled || diskLevel !== 'critical') &&
-        (!config.backupEnabled || (!state.lastBackupError && !backupOverdue))
+        (workspaceBackup.healthy || (config.backupEnabled && !state.lastBackupError && !backupOverdue))
     };
   }
 
@@ -133,6 +135,7 @@ function createMaintenance({
     const status = publicStatus();
     return {
       healthy: status.healthy,
+      workspaceBackup:status.workspaceBackup,
       backupOverdue: status.backupOverdue,
       diskLevel: status.diskLevel,
       disk: status.disk ? {
