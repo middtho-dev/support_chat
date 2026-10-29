@@ -69,6 +69,8 @@ if command -v caddy >/dev/null 2>&1 && [ -n "${PUBLIC_URL:-}" ]; then
   log "Конфигурация Caddy пересоздана, Caddy запущен"
 fi
 
+bash "$SCRIPT_DIR/scripts/install-workspace-backup.sh"
+
 info "Проверяю docker-compose.yml и .env..."
 docker compose config >/dev/null
 log "Конфигурация Docker Compose корректна"
@@ -80,7 +82,7 @@ if [ -z "${PUBLIC_URL:-}" ] && [ -z "${TELEGRAM_WEBAPP_URL:-}" ]; then
   warn "PUBLIC_URL/TELEGRAM_WEBAPP_URL не заданы — Telegram Mini App для админки не будет настроен"
 fi
 if [ "${TELEGRAM_MODE:-private}" = "private" ]; then
-  warn "Проверьте Threaded Mode в @BotFather и выполните /start от каждого ID из TELEGRAM_ADMIN_IDS"
+  warn "Выполните /start от каждого ID из TELEGRAM_ADMIN_IDS; темы нужны только для режима topics"
 fi
 
 PREVIOUS_CONTAINER_ID="$(docker compose ps -q support-chat 2>/dev/null || true)"

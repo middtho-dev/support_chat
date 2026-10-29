@@ -197,6 +197,8 @@ info "5/5 Сборка и запуск приложения..."
 
 cd "$SCRIPT_DIR"
 
+bash "$SCRIPT_DIR/scripts/install-workspace-backup.sh"
+
 APP_VERSION="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo setup)" \
   docker compose build --pull --no-cache support-chat
 APP_VERSION="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo setup)" \
@@ -229,7 +231,7 @@ echo ""
 echo -e "  🌐  ${GREEN}https://${DOMAIN}${NC}"
 echo -e "  🌍  IPv4: ${GREEN}${SERVER_IP}${NC}"
 echo -e "  🔒  Сертификат Let's Encrypt автоматически"
-echo -e "  🤖  Включите Threaded Mode у бота через @BotFather"
+echo -e "  🤖  Основной режим поддержки — личные Rich-диалоги без тем"
 echo -e "  👤  Каждый оператор должен открыть бота и нажать /start"
 echo ""
 echo "  Проверка портов:"

@@ -741,12 +741,12 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   assert.equal(ticket.assigned_operator_id, '7001');
   const control = rich.find(item =>
     item.chatId === customerId &&
-    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close:'+ticket.id
   );
   assert.match(control.markdown, new RegExp(`#${ticket.id.slice(0, 8)}`));
   assert.equal(
     control.options.reply_markup.inline_keyboard[0][0].callback_data,
-    'customer:close'
+    'customer:close:'+ticket.id
   );
   assert.equal(ticket.telegram_customer_control_message_id, control.messageId);
   assert.ok(pins.some(item =>
@@ -921,10 +921,14 @@ test('Telegram customer creates a ticket and receives the support reply', async 
   });
   const newTicketByButton = db.getOpenTicketByTelegramCustomer.get(customerId);
   assert.ok(newTicketByButton, 'customer:new creates a new open ticket');
+  for(const data of ['customer:close','customer:close:'+ticket.id]){
+    await fakeBot.handlers.callback_query({id:'stale-close-'+data,from:{id:Number(customerId),first_name:'Клиент'},message:{message_id:activeControlMessageId,chat:{id:Number(customerId),type:'private'}},data});
+    assert.equal(db.getTicketById.get(newTicketByButton.id).status,'open','old ticket controls must never close a new ticket');
+  }
   assert.ok(rich.some(item =>
     item.chatId === customerId &&
     item.messageId === newTicketByButton.telegram_customer_control_message_id &&
-    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close'
+    item.options?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data === 'customer:close:'+newTicketByButton.id
   ));
 });
 
@@ -999,7 +1003,7 @@ test('/start immediately creates a ticket and replaces the command with a Rich c
   assert.match(control.markdown, /Тикет .* создан/);
   assert.equal(
     control.options.reply_markup.inline_keyboard[0][0].callback_data,
-    'customer:close'
+    'customer:close:'+ticket.id
   );
 
   db.closeTicket.run(ticket.id);

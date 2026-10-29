@@ -13,8 +13,7 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop:
-      - NET_RAW
-      - NET_BIND_SERVICE
+      - ALL
     logging:
       options:
         max-size: "5m"

@@ -46,3 +46,14 @@ test('two processors atomically close a request once',async()=>{
   assert.equal(notifications,1);
  }finally{f.sql.close();}
 });
+
+test('failed finalization resumes after restart without reopening or closing a new ticket',async()=>{
+ const f=fixture();try{
+  let requests=f.manager();requests.arm('one','proposal',0);f.advance(CLOSE_DELAY_MS);
+  await assert.rejects(requests.process(async()=>{throw Error('notification offline');}),/offline/);
+  assert.equal(requests.get('one').state,'closing');assert.equal(f.sql.prepare("SELECT status FROM tickets WHERE id='one'").get().status,'closed');
+  requests=f.manager();assert.equal(await requests.process(()=>assert.fail('backoff ignored')),0);f.advance(15000);
+  const notified=[];await requests.process(t=>notified.push(t.id));assert.deepEqual(notified,['one']);assert.equal(requests.get('one').state,'closed');
+  assert.equal(f.sql.prepare("SELECT status FROM tickets WHERE id='two'").get().status,'open');
+ }finally{f.sql.close();}
+});

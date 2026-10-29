@@ -159,7 +159,7 @@ async function init(){
     if(cached){
       S.token=sv.t;S.tid=sv.id;S.uname=sv.n;
       showChat();renderMsgs(cached.msgs);scrollBot(false);loadDraft();
-      if(cached.closed){S.closed=true;markClosed();}
+      if(cached.closed){S.closed=true;refreshClosePrompts();markClosed();}
     }
     // 2) Hit the network in background, reconcile when it lands
     try{
@@ -175,7 +175,7 @@ async function init(){
         if(S.hasMore)showLoadOlder();
         if(!cached)loadDraft();
         if(ticket.status==='closed'){
-          S.closed=true;
+          S.closed=true;refreshClosePrompts();
           if(ticket.telegram_topic_deleted){markClosed();}
           else{markClosed();}
         }else if(cached&&cached.closed){
@@ -268,7 +268,7 @@ hcl.addEventListener('click',()=>{
     }catch{showToast('Ошибка — попробуйте снова','err');}
   });
 });
-function markClosed(){S.closed=true;reportCustomerPresence(false);ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';saveMsgCache();}
+function markClosed(){S.closed=true;refreshClosePrompts();reportCustomerPresence(false);ia.style.display='none';cbar.classList.add('on');hcl.style.display='none';saveMsgCache();}
 
 
 /* ── NEW CHAT ── */
@@ -295,7 +295,7 @@ async function loadOlderMessages(){
   const btn=ml.querySelector('.lo-btn');
   if(btn){btn.disabled=true;btn.textContent='Загружаем...';}
   try{
-    const r=await fetch(`/api/tickets/${S.tid}/messages/older`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token,before:S.oldestTs})});
+    const r=await fetch(`/api/tickets/${S.tid}/messages/older`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:S.token,before:S.oldestTs,beforeId:S._msgs[0]?.id})});
     if(!r.ok)throw 0;
     const{messages,hasMore}=await r.json();
     if(!messages.length){S.hasMore=false;hideLoadOlder();return;}
@@ -370,6 +370,7 @@ function mergeIncomingMessages(messages,{notify=false}={}){
     S._msgs=[...all.values()].sort(compareMessages);
     _doRender();
   }
+  refreshClosePrompts();
   saveMsgCache();
   scrollBot(false);
   if(notify)fresh.filter(m=>m.sender==='support').forEach(m=>{hideSupportTyping();playNotifSound();showBrowserNotif(m);});
@@ -377,14 +378,28 @@ function mergeIncomingMessages(messages,{notify=false}={}){
 }
 function renderEmpty(){const d=document.createElement('div');d.className='emp';d.innerHTML=`<svg width="58" height="58" viewBox="0 0 58 58" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M29 6C16.3 6 6 15.3 6 27c0 6.3 2.9 12 7.6 16L12 52l9.5-2.8A23.5 23.5 0 0029 52c12.7 0 23-9.3 23-21S41.7 6 29 6Z"/><circle cx="20" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="29" cy="28" r="2" fill="currentColor" stroke="none"/><circle cx="38" cy="28" r="2" fill="currentColor" stroke="none"/></svg><p>Напишите ваш первый вопрос — ответим быстро</p>`;ml.appendChild(d)}
 function renderSys(txt){ml.querySelector('.emp')?.remove();const d=document.createElement('div');d.className='sysmsg';d.innerHTML=`<span>${esc(txt)}</span>`;ml.appendChild(d)}
+function closePromptState(msg){
+  if(S.closed)return 'closed';
+  const index=S._msgs.findIndex(m=>m.id===msg.id);
+  return index>=0&&S._msgs.slice(index+1).some(m=>m.sender==='user'||m.message_type==='close_prompt')?'cancelled':'pending';
+}
+function fillClosePrompt(card,msg){
+  const state=closePromptState(msg);card.dataset.state=state;
+  if(state!=='pending'){
+    card.innerHTML=`<div class="close-prompt-text">${state==='closed'?'Обращение закрыто.':'Автоматическое закрытие отменено. Диалог продолжается.'}</div>`;return;
+  }
+  card.innerHTML=`<div class="close-prompt-text">${linkify(msg.content||'')}</div><button type="button">✅ Закрыть обращение</button>`;
+  card.querySelector('button').addEventListener('click',()=>closeFromPrompt(card));
+}
+function refreshClosePrompts(){
+  ml.querySelectorAll('.close-prompt[data-msg-id]').forEach(card=>{
+    const msg=S._msgs.find(m=>m.id===card.dataset.msgId);
+    if(msg&&card.dataset.state!==closePromptState(msg))fillClosePrompt(card,msg);
+  });
+}
 function renderClosePrompt(msg){
-  ml.querySelector('.emp')?.remove();
-  const d=document.createElement('section');
-  d.className='close-prompt';
-  if(msg.id)d.dataset.msgId=msg.id;
-  d.innerHTML=`<div class="close-prompt-text">${linkify(msg.content||'')}</div><button type="button">✅ Закрыть обращение</button>`;
-  d.querySelector('button').addEventListener('click',()=>closeFromPrompt(d));
-  ml.appendChild(d);
+  ml.querySelector('.emp')?.remove();const card=document.createElement('section');
+  card.className='close-prompt';if(msg.id)card.dataset.msgId=msg.id;fillClosePrompt(card,msg);ml.appendChild(card);
 }
 async function closeFromPrompt(card){
   if(S.closed||!S.tid||!S.token)return;

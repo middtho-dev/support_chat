@@ -10,6 +10,7 @@ const db = require('./database');
 const telegram = require('./telegram');
 const push = require('./push');
 const { loadSettings, saveSettings, isWithinWorkHours } = require('./settings');
+const {operatorView,protectedChange}=require('./operator-access');
 const { createMaintenance } = require('./maintenance');
 const { createFrpProxy } = require('./frp-proxy');
 const { createVoiceProxy } = require('./voice-proxy');
@@ -529,13 +530,16 @@ app.get('/api/tickets/:ticketId/messages', (req, res) => {
 });
 
 app.post('/api/tickets/:ticketId/messages/older', (req, res) => {
-  const { sessionToken, before } = req.body;
+  const { sessionToken, before,beforeId } = req.body;
   if (!sessionToken || !before) return res.status(400).json({ error: 'Missing params' });
   const ticket = db.getTicketBySessionAny.get(sessionToken);
   if (!ticket || ticket.id !== req.params.ticketId) return res.status(403).json({ error: 'Forbidden' });
   const LIMIT = 50;
-  const messages = db.getMessagesBefore.all(ticket.id, before, LIMIT);
-  res.json({ messages, hasMore: messages.length === LIMIT });
+  const cursor=beforeId?db.db.prepare('SELECT rowid sequence,created_at FROM messages WHERE id=? AND ticket_id=?').get(String(beforeId),ticket.id):null;
+  if(beforeId&&!cursor)return res.status(400).json({error:'Invalid history cursor'});
+  const timestamp=cursor?.created_at||before;
+  const rows=db.getMessagesBefore.all(ticket.id,timestamp,timestamp,cursor?.sequence||0,LIMIT+1);
+  res.json({messages:rows.slice(-LIMIT),hasMore:rows.length>LIMIT});
 });
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
@@ -954,7 +958,8 @@ io.on('connection', (socket) => {
     if (!socketCanManageSettings(socket)) return socket.emit('admin_settings_forbidden');
     socket.emit('admin_settings', {
       ...loadSettings(),
-      telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
+      telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null,
+      telegramOperatorLayout:telegram.status?.().operatorLayout||null
     });
   });
 
@@ -966,7 +971,8 @@ io.on('connection', (socket) => {
       const cfg = saveSettings(payload);
       const visibleCfg = {
         ...cfg,
-        telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null
+        telegramMode: typeof telegram.status === 'function' ? telegram.status()?.mode : null,
+        telegramOperatorLayout:telegram.status?.().operatorLayout||null
       };
       emitToSettingsManagers('admin_settings_updated', visibleCfg, socket.id);
       if(previousSettings.telegramSharedTickets!==cfg.telegramSharedTickets){
@@ -1018,14 +1024,7 @@ io.on('connection', (socket) => {
     if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для управления операторами' });
     ack?.({
       ok: true,
-      operators: db.listTelegramOperators.all().map(operator => ({
-        telegramUserId: operator.telegram_user_id,
-        displayName: operator.display_name,
-        username: operator.username || '',
-        active: !!operator.active,
-        canManageSettings: !!operator.can_manage_settings,
-        lastSeenAt: operator.last_seen_at || null
-      }))
+      operators: db.listTelegramOperators.all().map(operator=>operatorView(operator,TELEGRAM_ADMIN_IDS))
     });
   });
 
@@ -1034,6 +1033,7 @@ io.on('connection', (socket) => {
     if (!socketCanManageSettings(socket)) return ack?.({ error: 'Недостаточно прав для управления операторами' });
     const operator = normalizeManagedOperator(payload);
     if (operator.error) return ack?.({ error: operator.error });
+    if(protectedChange(operator,TELEGRAM_ADMIN_IDS))return ack?.({error:'Права владельца заданы на сервере и не отключаются из Workspace'});
     try {
       db.saveManagedTelegramOperator.run(
         operator.telegramUserId,
@@ -1046,14 +1046,7 @@ io.on('connection', (socket) => {
       emitToSettingsManagers('admin_operators_updated');
       ack?.({
         ok: true,
-        operator: {
-          telegramUserId: saved.telegram_user_id,
-          displayName: saved.display_name,
-          username: saved.username || '',
-          active: !!saved.active,
-          canManageSettings: !!saved.can_manage_settings,
-          lastSeenAt: saved.last_seen_at || null
-        }
+        operator:operatorView(saved,TELEGRAM_ADMIN_IDS)
       });
     } catch (error) {
       console.error('[Operators] save:', error);

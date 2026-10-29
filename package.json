@@ -4,23 +4,23 @@
   "description": "Support chat with Telegram integration",
   "main": "src/server.js",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check public/js/design-motion.js && node --check tools/voice/editor/index.js && node --check tools/voice/editor/format.js && node --check tools/voice/editor/config.js && node --check tools/voice/server.js && node --check tools/voice/worker.js && node --check public/js/admin-editor.js && node --check src/editor-proxy.js && node --check src/telegram-video-router.js && node --check tools/video/progress.js && node --check tools/video/server.js && node --check tools/video/worker.js && node --check tools/video/config.js && node --check tools/video/store.js && node --check tools/video/download.js && node --check src/video-proxy.js && node --check public/js/admin-video.js && node --check tools/voice/rich.js && node --check tools/voice/progressive.js && node --check tools/voice/transcript-stream.js && node --check src/firmware-proxy.js && node --check tools/frp/public/firmware.js && node --check src/telegram-chat-cleanup.js && node --check src/support-queue.js && node --check public/js/admin-support-queue.js && node --check tools/frp/public/app.js && node --check tools/lampac/ambient.js && node --check tools/lampac/ui-controls.js && node --check tools/lampac/announcements.js && node --check tools/lampac/playback-client.js && node --check tools/lampac/device-client.js && node --check public/js/admin-lampac-advanced.js && node --check src/lampac-proxy.js && node --check public/js/admin-lampac.js && node --check src/deployment.js && node --check public/js/storage.js && node --check public/js/admin-navigation.js && node --check public/js/admin-shell.js && node --check src/admin-guard.js && node --check src/voice-proxy.js && node --check public/js/admin-voice.js && node --check src/frp-proxy.js && node --check public/js/admin-frp.js && node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/maintenance.js && node --check src/telegram.js && node --check src/telegram-lease.js && node --check src/customer-presence.js && node --check src/customer-close-requests.js && node --check src/telegram-admin-menu.js && node --check src/telegram-rich-ui.js && node --check src/telegram-live-panels.js && node --check src/server-metrics.js && node --check src/support-delivery-status.js && node --check src/telegram-support-dialogs.js && node --check src/telegram-support-inbox.js && node --check src/telegram-private.js && node --check src/telegram-legacy.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js && node --check public/js/admin-enhance.js",
-    "test": "node --test --test-concurrency=1 test"
+    "check": "node --check public/js/design-motion.js && node --check tools/voice/editor/index.js && node --check tools/voice/editor/format.js && node --check tools/voice/editor/config.js && node --check tools/voice/server.js && node --check tools/voice/worker.js && node --check public/js/admin-editor.js && node --check src/editor-proxy.js && node --check src/telegram-video-router.js && node --check tools/video/progress.js && node --check tools/video/server.js && node --check tools/video/worker.js && node --check tools/video/config.js && node --check tools/video/store.js && node --check tools/video/download.js && node --check src/video-proxy.js && node --check public/js/admin-video.js && node --check tools/voice/rich.js && node --check tools/voice/progressive.js && node --check tools/voice/transcript-stream.js && node --check src/firmware-proxy.js && node --check tools/frp/public/firmware.js && node --check src/telegram-chat-cleanup.js && node --check src/support-queue.js && node --check public/js/admin-support-queue.js && node --check tools/frp/public/app.js && node --check tools/lampac/ambient.js && node --check tools/lampac/ui-controls.js && node --check tools/lampac/announcements.js && node --check tools/lampac/playback-client.js && node --check tools/lampac/device-client.js && node --check public/js/admin-lampac-advanced.js && node --check src/lampac-proxy.js && node --check public/js/admin-lampac.js && node --check src/deployment.js && node --check public/js/storage.js && node --check public/js/admin-navigation.js && node --check public/js/admin-shell.js && node --check src/admin-guard.js && node --check src/voice-proxy.js && node --check public/js/admin-voice.js && node --check src/frp-proxy.js && node --check public/js/admin-frp.js && node --check src/server.js && node --check src/database.js && node --check src/settings.js && node --check src/maintenance.js && node --check src/telegram.js && node --check src/telegram-lease.js && node --check src/customer-presence.js && node --check src/customer-close-requests.js && node --check src/telegram-admin-menu.js && node --check src/telegram-rich-ui.js && node --check src/telegram-live-panels.js && node --check src/server-metrics.js && node --check src/support-delivery-status.js && node --check src/telegram-support-dialogs.js && node --check src/telegram-support-inbox.js && node --check src/telegram-private.js && node --check src/telegram-legacy.js && node --check src/push.js && node --check public/js/app.js && node --check public/js/admin.js && node --check public/js/admin-enhance.js && node --check src/ticket-closures.js && node --check src/workspace-backup-status.js && node --check src/operator-access.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.3",
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.5",
-    "express": "^4.18.2",
-    "multer": "^2.2.0",
+    "express": "^4.22.3",
+    "multer": "^2.5.0",
     "node-telegram-bot-api": "^1.2.0",
-    "socket.io": "^4.7.2",
+    "socket.io": "^4.8.4",
     "web-push": "^3.6.7"
   },
   "overrides": {
-    "qs": "^6.16.0"
+    "qs": "^6.17.1"
   }
 }

@@ -211,7 +211,7 @@ inline-клавиатура с теми же действиями.
    ```
 
 3. `TELEGRAM_GROUP_ID` можно удалить: в private-режиме он не используется.
-4. Включите Threaded Mode у бота.
+4. Используйте личные Rich-диалоги (режим `dialog`). Threaded Mode нужен только при явно выбранном откате `topics`.
 5. Выполните `sudo bash update.sh`.
 6. Каждый оператор один раз отправляет боту `/start`.
 7. Проверьте публичный `/health`: он должен вернуть только `ok` и версию.
@@ -312,3 +312,7 @@ src/
 
 Независимый сервис и раздел «Аудио» в общей админке и Mini App.
 Установка, ключи, подключение бизнес-бота и настройки: [tools/voice/README.md](tools/voice/README.md).
+
+## Проверенное резервирование всего Workspace
+
+Node.js 24 LTS используется поддержкой, FRP, Voice и Video. Правила общего оформления: [docs/design-system.md](docs/design-system.md); восстановление всех модулей: [docs/workspace-backup.md](docs/workspace-backup.md).

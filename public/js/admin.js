@@ -551,11 +551,11 @@ function renderChatHeader() {
   const btn = $('cv-toggle');
   btn.disabled = legacyDeleted || t.status !== 'open';
   btn.className = t.status === 'open' ? 'danger' : 'okbtn';
-  btn.textContent = t.status === 'open' ? 'Закрыть' : (legacyDeleted ? 'Тема удалена' : 'Тикет закрыт');
+  btn.textContent = t.status === 'open' ? 'Закрыть сразу' : (legacyDeleted ? 'Тема удалена' : 'Тикет закрыт');
   const mobileBtn = $('mobile-ticket-toggle');
   mobileBtn.disabled = legacyDeleted || t.status !== 'open';
   mobileBtn.className = `mobile-ticket-toggle ${t.status === 'open' ? 'danger' : 'okbtn'}`;
-  mobileBtn.textContent = t.status === 'open' ? 'Закрыть' : (legacyDeleted ? 'Недоступно' : 'Закрыт');
+  mobileBtn.textContent = t.status === 'open' ? 'Закрыть сразу' : (legacyDeleted ? 'Недоступно' : 'Закрыт');
   // Ticket updates must not replace an active draft or file upload.
   if ($('composer').dataset.ticket === t.id && $('composer').dataset.status === t.status && $('composer').childElementCount) return;
   $('composer').dataset.ticket = t.id;
@@ -675,14 +675,14 @@ function settingCard(category, title, description, content, accent = 'blue', key
 function operatorSettingsCard() {
   const rows = S.operators.length
     ? S.operators.map(operator => `<div class="operator-row" data-operator-id="${esc(operator.telegramUserId)}">
-        <div class="operator-row-head"><b>${esc(operator.displayName)}</b><span>${operator.active ? 'Активен' : 'Отключён'} · ID ${esc(operator.telegramUserId)}</span></div>
+        <div class="operator-row-head"><b>${esc(operator.displayName)}</b><span>${operator.protected?'Владелец · права заданы на сервере':operator.active ? 'Активен' : 'Отключён'} · ID ${esc(operator.telegramUserId)}</span></div>
         <div class="operator-row-fields">
           <input data-operator-name value="${esc(operator.displayName)}" aria-label="Имя оператора">
           <input data-operator-username value="${esc(operator.username || '')}" placeholder="username (необязательно)" aria-label="Username Telegram">
         </div>
         <div class="operator-row-access">
-          <label><input data-operator-active type="checkbox" ${operator.active ? 'checked' : ''}> Принимает тикеты</label>
-          <label><input data-operator-settings type="checkbox" ${operator.canManageSettings ? 'checked' : ''}> Может менять настройки</label>
+          <label><input data-operator-active type="checkbox" ${operator.active ? 'checked' : ''} ${operator.protected?'disabled':''}> Принимает тикеты</label>
+          <label><input data-operator-settings type="checkbox" ${operator.canManageSettings ? 'checked' : ''} ${operator.protected?'disabled':''}> Может менять настройки</label>
           <button type="button" class="ghost" data-operator-save>Сохранить</button>
         </div>
       </div>`).join('')
@@ -745,6 +745,7 @@ function applyRichPreset(name) {
 }
 
 function settingsCards(s, topicModeControl) {
+  const dialogMode=s.telegramMode==='private'&&s.telegramOperatorLayout!=='topics';
   return [
     operatorSettingsCard(),
     settingCard(
@@ -840,31 +841,32 @@ function settingsCards(s, topicModeControl) {
       check('set-tg-shared-tickets','Совместная работа: каждый оператор может отвечать в любое обращение',s.telegramSharedTickets ?? false) +
       check('set-tg-auto-assign','Автоназначение единственному оператору, когда совместная работа выключена',s.telegramAutoAssignSingleOperator ?? true) +
       check('set-tg-forward-user','Пересылать сообщения клиента оператору',s.telegramForwardUserMessages) +
-      check('set-tg-forward-admin','Показывать ответы из админки в теме',s.telegramForwardAdminMessages) +
+      check('set-tg-forward-admin',dialogMode?'Показывать ответы из админки в карточке':'Показывать ответы из админки в теме',s.telegramForwardAdminMessages) +
       check('set-tg-forward-operator','Принимать ответы оператора из Telegram',s.telegramForwardOperatorMessages) +
       check('set-tg-reminders','Напоминать со звуком, пока оператор не ответил',s.telegramUnansweredReminderEnabled ?? true) +
       input('set-tg-reminder-first','Первое напоминание через, минут',s.telegramUnansweredReminderMinutes ?? 3,'number','min="1" max="1440"') +
       input('set-tg-reminder-repeat','Повторять напоминание каждые, минут',s.telegramUnansweredRepeatMinutes ?? 5,'number','min="1" max="1440"') +
       check('set-tg-delete-renames','Удалять сервисные сообщения Telegram',s.telegramDeleteRenameNotices) +
+      (dialogMode?'<div class="settings-note">После закрытия карточки обращения очищаются сразу. Telegram может запрещать удаление старых сообщений.</div>':
       check('set-tg-pin','Закреплять rich-карточку тикета',s.telegramPinNewTicketMessage) +
       check('set-tg-close-topic','Закрывать приватную тему вместе с тикетом',s.telegramCloseTopicOnClose) +
       check('set-tg-cleanup','Удалять старые закрытые темы',s.telegramCleanupClosedTopics) +
-      input('set-tg-cleanup-hours','Удалять закрытые темы через, часов (0 — сразу)',s.telegramCleanupClosedHours ?? 24,'number','min="0" max="720"'),
+      input('set-tg-cleanup-hours','Удалять закрытые темы через, часов (0 — сразу)',s.telegramCleanupClosedHours ?? 24,'number','min="0" max="720"')),
       'blue',
       'оператор очередь тема напоминание'
     ),
     settingCard(
       'telegram',
-      'Темы и статусы Telegram',
+      dialogMode?'Действия в Telegram':'Темы и статусы Telegram',
       'Названия, статусы и внешний вид действий в Telegram.',
-      input('set-topic-template','Шаблон названия темы',s.telegramTopicNameTemplate || '{emoji} {name} • {date}') +
+      (dialogMode?'':input('set-topic-template','Шаблон названия темы',s.telegramTopicNameTemplate || '{emoji} {name} • {date}') +
       input('set-emoji-new','Эмодзи нового тикета',s.telegramNewEmoji || '❗') +
       input('set-emoji-open','Эмодзи в работе',s.telegramOpenEmoji || '🔵') +
       input('set-emoji-wait','Эмодзи ждёт ответа',s.telegramWaitEmoji || '🔔') +
-      input('set-emoji-closed','Эмодзи закрыто',s.telegramClosedEmoji || '🗑️') +
+      input('set-emoji-closed','Эмодзи закрыто',s.telegramClosedEmoji || '🗑️')) +
       input('set-close-btn','Текст кнопки закрытия',s.telegramCloseButtonText || '🗑️ Закрыть тикет') +
       select('set-close-btn-style','Цвет кнопки закрытия',s.telegramCloseButtonStyle || 'danger',[{value:'danger',label:'Красная'},{value:'success',label:'Зелёная'},{value:'primary',label:'Синяя'},{value:'',label:'Стандартная'}]) +
-      input('set-close-btn-emoji-id','ID анимированного emoji закрытия',s.telegramCloseButtonEmojiId || ''),
+      (dialogMode?'':input('set-close-btn-emoji-id','ID анимированного emoji закрытия',s.telegramCloseButtonEmojiId || '')),
       'violet',
       'название темы emoji кнопка цвет'
     ),
@@ -873,13 +875,13 @@ function settingsCards(s, topicModeControl) {
       'Оформление диалогов Telegram',
       'Конструктор единого сообщения с историей тикета. После сохранения открытые тикеты перерисуются автоматически. Цвета и произвольные px Telegram не позволяет задавать ботам, остальные поддерживаемые стили доступны ниже.',
       richSettingsSection('Быстрый старт', 'Выберите основу и сразу посмотрите результат.', richPresetControls() + '<div class="settings-note">Шаблоны: {name}, {shortId}, {status}, {total}, {shown}, {hidden}. В подписях доступны {name} и {role}.</div>') +
-      richSettingsSection('Появление карточки', 'Нативный эффект Telegram для нового диалога: не влияет на доставку сообщений.',
+      (dialogMode?'':      richSettingsSection('Появление карточки', 'Нативный эффект Telegram для нового диалога: не влияет на доставку сообщений.',
       select('set-tg-rich-entry-effect','Эффект появления',s.telegramRichTranscriptEntryEffect || 'off',[
         {value:'off',label:'Сразу, без эффекта (рекомендуется)'}, {value:'draft',label:'Мягкое появление текста'}
       ]) +
       input('set-tg-rich-entry-effect-delay','Скорость эффекта, мс',s.telegramRichTranscriptEntryEffectDelayMs ?? 180,'number','min="0" max="1200" step="20"') +
       input('set-tg-rich-entry-effect-text','Текст в момент появления',s.telegramRichTranscriptEntryEffectText || 'Собираем диалог…') +
-      '<div class="settings-note">Эффект работает только там, где Telegram поддерживает Rich-черновики. При отсутствии поддержки карточка сразу отправляется обычным надёжным способом.</div>', false) +
+      '<div class="settings-note">Эффект работает только там, где Telegram поддерживает Rich-черновики. При отсутствии поддержки карточка сразу отправляется обычным надёжным способом.</div>', false)) +
       richSettingsSection('Шапка диалога', 'Название, статус и масштаб верхней части карточки.',
       input('set-tg-rich-title','Заголовок',s.telegramRichTranscriptTitle || '💬 Диалог · {name}') +
       input('set-tg-rich-subtitle','Подзаголовок',s.telegramRichTranscriptSubtitle ?? 'Тикет {shortId} · {status}') +
@@ -918,9 +920,9 @@ function settingsCards(s, topicModeControl) {
       select('set-tg-rich-group-continuation','В продолжении группы показывать',s.telegramRichTranscriptGroupContinuation || 'time',[
         {value:'time',label:'Только время'}, {value:'none',label:'Только текст'}
       ]) +
-      select('set-tg-rich-group-spacing','Отступы внутри группы',s.telegramRichTranscriptGroupSpacing || 'compact',[
+      (dialogMode?'':select('set-tg-rich-group-spacing','Отступы внутри группы',s.telegramRichTranscriptGroupSpacing || 'compact',[
         {value:'compact',label:'Плотно'}, {value:'inherit',label:'Как между всеми репликами'}
-      ]) +
+      ])) +
       input('set-tg-rich-user-label','Подпись клиента ({name} — имя клиента)',s.telegramRichTranscriptUserLabel || '👤 {name}') +
       input('set-tg-rich-operator-label','Подпись оператора',s.telegramRichTranscriptOperatorLabel || '🛟 {name}')) +
       richSettingsSection('Время и разделители', 'Тонкая настройка плотности, отметок времени и вложений.',
@@ -935,15 +937,15 @@ function settingsCards(s, topicModeControl) {
         {value:'dots',label:'Строкой с точками'},
         {value:'line',label:'Тонкой линией'}
       ]) +
-      select('set-tg-rich-density','Плотность диалога',s.telegramRichTranscriptDensity || 'normal',[
+      (dialogMode?'':select('set-tg-rich-density','Плотность диалога',s.telegramRichTranscriptDensity || 'normal',[
         {value:'compact',label:'Плотно'}, {value:'normal',label:'Обычно'}, {value:'airy',label:'Свободно'}
-      ]) +
+      ])) +
       input('set-tg-rich-footer','Нижняя подпись (необязательно)',s.telegramRichTranscriptFooter || '') +
       input('set-tg-rich-empty','Текст пустого диалога',s.telegramRichTranscriptEmptyText || 'Пока нет сообщений'), false),
       'blue',
       'rich диалог история реплики текст автор время цитаты размер шрифт подписи footer оформление'
     ),
-    settingCard(
+    (dialogMode?'':settingCard(
       'telegram',
       'Системные тексты Telegram',
       'Сообщения о закрытии и неактивности.',
@@ -955,7 +957,7 @@ function settingsCards(s, topicModeControl) {
       area('set-tg-topic-deleted','Ошибка удалённой темы в админке (legacy)',s.telegramTopicDeletedAdminText || '',2),
       'amber',
       'текст закрыто открыто неактивность'
-    )
+    ))
   ];
 }
 
@@ -1339,6 +1341,7 @@ function renderMaintenance() {
     return;
   }
   const diskClass = !m.config?.diskMonitoringEnabled ? '' : m.diskLevel === 'critical' ? 'critical' : m.diskLevel === 'warning' ? 'warning' : 'ok';
+  const wb=m.workspaceBackup||{};
   const backupClass = !m.config?.backupEnabled ? '' : m.lastBackupError || m.backupOverdue ? 'critical' : m.lastBackupAt ? 'ok' : 'warning';
   const backupLabel = !m.config?.backupEnabled ? 'Выключен' : m.lastBackupError ? 'Ошибка' : m.backupOverdue ? 'Просрочен' : m.lastBackupAt ? 'Готов' : 'Ожидается';
   const tg = S.systemHealth?.telegram;
@@ -1346,7 +1349,7 @@ function renderMaintenance() {
   const tgReminders = tg?.reminders || {};
   const telegramHealthy = !!(tg?.configured && tg?.enabled && tg?.connected &&
     (tg?.mode !== 'private' || tg?.polling?.owner));
-  const telegramBacklog = Number(tgDelivery.pendingIncomingMessages || 0) +
+  const telegramBacklog = Number(tg?.closures?.pending || 0) + Number(tgDelivery.pendingIncomingMessages || 0) +
     Number(tgDelivery.pendingMessages || 0) + Number(tgDelivery.pendingCustomerReplies || 0);
   const telegramClass = !tg?.configured || !tg?.enabled ? 'warning' : telegramHealthy && !telegramBacklog ? 'ok' : 'critical';
   const telegramLabel = !tg?.configured ? 'Не настроен' : !tg?.enabled ? 'Выключен' : telegramHealthy ? 'На связи' : 'Нет связи';
@@ -1369,7 +1372,7 @@ function renderMaintenance() {
   root.innerHTML = `<div class="control-health-block">
     <div class="maintenance-title page-heading"><div><span class="settings-eyebrow">Мониторинг</span><h2>Состояние системы</h2><p>Telegram, realtime, очереди, резервные копии и диск обновляются автоматически.</p></div><button id="maintenance-refresh" class="ghost">Обновить</button></div>
     <div class="maintenance-summary">
-      <div class="health-stat ${backupClass}"><span>Резервная копия</span><b>${backupLabel}</b><small>${esc(fmtStatusDate(m.lastBackupAt))}</small></div>
+      <div class="health-stat ${wb.healthy?'ok':'warning'}"><span>Копия всего Workspace</span><b>${wb.healthy?'Проверена':wb.configured?'Требует внимания':'Не настроена'}</b><small>${esc(fmtStatusDate(wb.lastSuccessAt))}</small></div>
       <div class="health-stat ${diskClass}"><span>Диск</span><b>${m.disk ? `${m.disk.usedPercent}%` : '—'}</b><small>${m.disk ? `${fmtBytes(m.disk.freeBytes)} свободно` : 'нет данных'}</small></div>
       <div class="health-stat"><span>Загрузки</span><b>${Number(m.uploads?.files || 0)}</b><small>${fmtBytes(m.uploads?.bytes)}</small></div>
       <div class="health-stat"><span>Очистка</span><b>${Number(m.lastCleanupRemoved || 0)}</b><small>${esc(fmtStatusDate(m.lastCleanupAt))}</small></div>
@@ -1397,13 +1400,25 @@ function renderMaintenance() {
         <div><dt>Последняя успешная доставка</dt><dd>${esc(fmtStatusDate(tgDelivery.lastSuccessAt))}</dd></div>
         <div><dt>Самое старое входящее</dt><dd>${tgDelivery.oldestIncomingMessageSeconds == null ? '—' : `${Number(tgDelivery.oldestIncomingMessageSeconds)} сек.`}</dd></div>
         <div><dt>Самый старый ответ клиенту</dt><dd>${tgDelivery.oldestCustomerReplySeconds == null ? '—' : `${Number(tgDelivery.oldestCustomerReplySeconds)} сек.`}</dd></div>
+        <div><dt>Ожидают уведомления о закрытии</dt><dd>${Number(tg?.closures?.pending||0)} · с ошибками ${Number(tg?.closures?.failed||0)}</dd></div>
         <div><dt>Threaded Mode</dt><dd>${tg?.threadedModeEnabled ? 'включён' : 'не подтверждён'}</dd></div>
       </dl>
       ${tgDelivery.lastError ? `<div class="health-error">${esc(tgDelivery.lastError)}</div>` : ''}
     </div>
+    <div class="card">
+      <h3>Резервирование всего Workspace</h3>
+      <p class="muted">Ежедневная копия баз, конфигураций и постоянных файлов всех модулей. Хранятся семь проверенных снимков без дублирования одинаковых файлов.</p>
+      <dl class="health-details">
+        <div><dt>Последняя проверенная копия</dt><dd>${esc(fmtStatusDate(wb.lastSuccessAt))}</dd></div>
+        <div><dt>Проверка целостности</dt><dd>${wb.healthy?'Пройдена':wb.overdue?'Копия просрочена':'Требует внимания'}</dd></div>
+        <div><dt>Компонентов / файлов</dt><dd>${(wb.components||[]).length} / ${Number(wb.files||0)}</dd></div>
+        <div><dt>Внешняя копия</dt><dd>${wb.external?'Настроена':'Не настроена · копии на этом сервере'}</dd></div>
+      </dl>
+      ${wb.error?`<div class="health-error">${esc(wb.error)}</div>`:''}
+    </div>
     <div class="grid maintenance-grid">
       <div class="card">
-        <h3>Резервное копирование</h3>
+        <h3>Дополнительные копии поддержки</h3>
         <p class="muted">SQLite-копия проверяется на целостность. Загруженные файлы синхронизируются в отдельное хранилище без повторного копирования неизменённых файлов.</p>
         <dl class="health-details">
           <div><dt>Хранилище</dt><dd>${esc(m.backupDir || '—')}</dd></div>

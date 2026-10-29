@@ -168,3 +168,12 @@ Check authenticated health `telegram.operatorLayout` and `telegram.dialogs` for
 refresh/cleanup queues. Telegram deletion restrictions can leave old messages;
 blocked cleanup is counted separately. Roll back with `TELEGRAM_OPERATOR_LAYOUT=topics`
 and the previous image if needed; never run both layouts as separate bot owners.
+
+## Whole-workspace backups
+
+See [workspace-backup.md](docs/workspace-backup.md). Install the timer before
+Compose starts: its read-only status directory is mounted into support-chat.
+The directory mount preserves live status updates after atomic JSON replacement.
+All Node services use Node.js 24 LTS. JSON logs rotate at 5 MiB; each service
+has explicit CPU, memory and process limits. Firmware exposes only a minimal
+unauthenticated `/health`; management routes still require their service token.

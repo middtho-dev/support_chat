@@ -189,7 +189,7 @@ test('customer Rich proposal offers close and continue, repeat clicks keep the d
  const control=db.getTicketById.get(id).telegram_customer_control_message_id;
  const proposal=effects.find(e=>e.kind==='rich'&&e.id===control);
  const controls=proposal.rich.blocks.filter(b=>b.type==='buttons').flatMap(b=>b.buttons);
- assert.ok(controls.some(b=>b.callback_data==='customer:close'));assert.ok(controls.some(b=>b.callback_data==='customer:continue:'+id));
+ assert.ok(controls.some(b=>b.callback_data==='customer:close:'+id));assert.ok(controls.some(b=>b.callback_data==='customer:continue:'+id));
  assert.match(JSON.stringify(proposal.rich.blocks),/через 5 минут/);assert.deepEqual(proposal.options.reply_markup.inline_keyboard,[]);
  const count=db.getMessages.all(id).filter(m=>m.message_type==='close_prompt').length;
  await callback('close:'+id,card);assert.equal(db.db.prepare('SELECT deadline FROM customer_close_requests WHERE ticket_id=?').get(id).deadline,request.deadline);
@@ -408,4 +408,29 @@ test('unsupported native blocks fall back on the same panel without disabling Ri
  assert.ok(plain.options.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='list:unanswered:0'));
  assert.equal(telegram.status().richBlocksAvailable,false);assert.equal(telegram.status().richMessagesAvailable,true);
  assert.equal(db.getTelegramOperatorDashboard.get('7001').dashboard_message_id,panel.dashboard_message_id);
+});
+
+test('a saved reply drains after closure and a failed closure notification retries from SQLite',async()=>{
+ const id='durable-close-customer',customer='8133';
+ db.createTelegramTicket.run(id,'Клиент повторной доставки','session-'+id,customer,customer,null,null,null,null);
+ source(id,id+'-question');await telegram.createTopic(id);
+ db.saveMessage.run(id+'-answer',id,'support','Оператор','Сохранённый ответ','text',null,null,null,null,null);
+ db.closeTicket.run(id);await telegram.notifyTicketClosed(db.getTicketById.get(id));
+ assert.equal(db.db.prepare('SELECT state FROM ticket_closure_delivery WHERE ticket_id=?').get(id).state,'pending');
+ await telegram.processDeliveryQueue();assert.ok(db.getMessageById.get(id+'-answer').telegram_customer_message_id,'saved reply must drain before final cleanup');
+ db.db.prepare('UPDATE ticket_closure_delivery SET next_retry_at=0 WHERE ticket_id=?').run(id);
+ sendFailures=1;await telegram.processDeliveryQueue();
+ const failed=db.db.prepare('SELECT * FROM ticket_closure_delivery WHERE ticket_id=?').get(id);assert.equal(failed.state,'pending');assert.ok(failed.attempts>=1);
+ db.db.prepare('UPDATE ticket_closure_delivery SET next_retry_at=0 WHERE ticket_id=?').run(id);await telegram.processDeliveryQueue();
+ assert.equal(db.db.prepare('SELECT state FROM ticket_closure_delivery WHERE ticket_id=?').get(id).state,'done');
+ assert.ok(db.getTicketById.get(id).telegram_customer_control_message_id);
+});
+test('a new customer ticket supersedes an old failed closure without touching its controls',async()=>{
+ const customer='8134',old='superseded-close-old',current='superseded-close-new';
+ db.createTelegramTicket.run(old,'Клиент','session-'+old,customer,customer,null,null,null,null);db.closeTicket.run(old);
+ db.createTelegramTicket.run(current,'Клиент','session-'+current,customer,customer,null,null,null,null);await telegram.sendCustomerControl(db.getTicketById.get(current));
+ const control=db.getTicketById.get(current).telegram_customer_control_message_id;
+ await telegram.notifyTicketClosed(db.getTicketById.get(old));
+ assert.equal(db.db.prepare('SELECT state FROM ticket_closure_delivery WHERE ticket_id=?').get(old).state,'superseded');
+ assert.equal(db.getTicketById.get(current).status,'open');assert.equal(db.getTicketById.get(current).telegram_customer_control_message_id,control);assert.equal(removed(control),false);
 });

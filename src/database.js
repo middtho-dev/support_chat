@@ -49,6 +49,7 @@ db.exec(`
 `);
 
 require('./customer-close-requests').installCloseRequests(db);
+require('./ticket-closures').installTicketClosures(db);
 
 // Migration: add reply_to_id column if not exists
 try { db.exec(`ALTER TABLE messages ADD COLUMN reply_to_id TEXT`); } catch {}
@@ -656,18 +657,15 @@ module.exports = {
     ) ORDER BY created_at ASC, sequence ASC
   `),
 
-  // Returns N messages strictly before a timestamp (ASC order) — "load older"
+  // Timestamp + sequence is a stable cursor, including bursts in one second.
   getMessagesBefore: db.prepare(`
     SELECT * FROM (
-      SELECT m.*,
-        r.content      AS reply_to_content,
-        r.sender_name  AS reply_to_sender_name,
-        r.message_type AS reply_to_type,
-        r.file_name    AS reply_to_file_name
-      FROM messages m
-      LEFT JOIN messages r ON r.id = m.reply_to_id
-      WHERE m.ticket_id = ? AND m.created_at < ? ORDER BY m.created_at DESC LIMIT ?
-    ) ORDER BY created_at ASC
+      SELECT m.*,m.rowid AS sequence,r.content AS reply_to_content,r.sender_name AS reply_to_sender_name,
+       r.message_type AS reply_to_type,r.file_name AS reply_to_file_name
+      FROM messages m LEFT JOIN messages r ON r.id=m.reply_to_id
+      WHERE m.ticket_id=? AND (m.created_at<? OR (m.created_at=? AND m.rowid<?))
+      ORDER BY m.created_at DESC,m.rowid DESC LIMIT ?
+    ) ORDER BY created_at ASC,sequence ASC
   `),
 
   countMessages: db.prepare(`SELECT COUNT(*) AS cnt FROM messages WHERE ticket_id = ?`),
@@ -801,7 +799,7 @@ module.exports = {
     JOIN tickets t ON t.id = m.ticket_id
     WHERE m.sender = 'support'
       AND t.source = 'telegram'
-      AND t.status = 'open'
+      AND (t.status='open' OR (COALESCE(m.is_auto,0)=0 AND EXISTS (SELECT 1 FROM ticket_closure_delivery c WHERE c.ticket_id=t.id AND c.state='pending')))
       AND t.telegram_customer_chat_id IS NOT NULL
       AND m.telegram_customer_message_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='customer' AND h.item_id=m.id)
@@ -817,7 +815,7 @@ module.exports = {
     WHERE m.ticket_id = ?
       AND m.sender = 'support'
       AND t.source = 'telegram'
-      AND t.status = 'open'
+      AND (t.status='open' OR (COALESCE(m.is_auto,0)=0 AND EXISTS (SELECT 1 FROM ticket_closure_delivery c WHERE c.ticket_id=t.id AND c.state='pending')))
       AND t.telegram_customer_chat_id IS NOT NULL
       AND m.telegram_customer_message_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM telegram_delivery_holds h WHERE h.kind='customer' AND h.item_id=m.id)

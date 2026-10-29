@@ -2,6 +2,14 @@ services:
   frp-panel:
     build: .
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 128
     network_mode: host
     stop_grace_period: 15s
     env_file: .env
