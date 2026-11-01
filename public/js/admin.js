@@ -464,6 +464,8 @@ function setView(view) {
   if(support){supportNav.innerHTML=[['chat','Обращения'],['support-queue','Очередь доставки'],['templates','Шаблоны'],['support-status','Состояние'],...(S.permissions.canManageSettings?[['support-settings','Настройки']]:[])].map(([id,label])=>`<button class="${S.view===id?'on':''}" data-support-view="${id}" type="button" aria-current="${S.view===id?'page':'false'}">${label}</button>`).join('');supportNav.querySelectorAll('button').forEach(b=>b.onclick=()=>setView(b.dataset.supportView));supportNav.querySelector('.on')?.scrollIntoView({block:'nearest',inline:'nearest'});}
   $('support-queue').classList.toggle('on',S.view==='support-queue');
   if(S.view==='support-queue')window.SupportQueue?.open();else window.SupportQueue?.pause();
+  $('kv9').classList.toggle('on',S.view==='kv9');
+  if(S.view==='kv9')window.Kv9Panel?.open();else window.Kv9Panel?.pause();
   $('home').classList.toggle('on', S.view === 'home');
   document.body.classList.toggle('tool-active', S.view !== 'chat');
   AdminShell.render(S);
