@@ -33,11 +33,14 @@ function createStore(file) {
   return {read,write};
 }
 function createKv9Client({authorize, file=path.join(path.dirname(process.env.DB_PATH||'/app/data/support.db'),'kv9-client.json'), releases=process.env.KV9_RELEASE_ROOT||'/run/kv9-updates'}) {
-  const express=require('express'), admin=express.Router(), store=createStore(file);
+  const express=require('express'), admin=express.Router(), store=createStore(file),notifications=require('./kv9-notifications').createNotifications(file+'.notifications');
   const publicPolicy=(req,res)=>{res.set('Cache-Control','no-store');try{const data=store.read();res.json({schema:1,revision:data.revision,enabled:data.enabled,domains:data.domains,includeSubdomains:true,updatedAt:data.updatedAt});}catch{res.status(503).json({error:'Политика временно недоступна'});}};
   admin.use((req,res,next)=>{const access=authorize(req.get('x-admin-token'));if(!access?.authenticated)return res.status(401).json({error:'Требуется вход'});if(!access.canManageSettings)return res.status(403).json({error:'Нет прав управления'});req.kv9Actor=access.actor||'owner';next();});
-  admin.get('/',(req,res)=>{res.set('Cache-Control','no-store');try{let release=null;try{const envelope=JSON.parse(fs.readFileSync(path.join(releases,'channels/stable.json'),'utf8').replace(/^\uFEFF/,''));const catalog=JSON.parse(Buffer.from(envelope.payload,'base64'));release={version:catalog.version,sequence:catalog.sequence,publishedAt:catalog.publishedAt||catalog.publishedUtc,expiresAt:catalog.expiresAt||catalog.expiresUtc,notes:catalog.notes,files:catalog.files?.length,installer:catalog.installer?.url};}catch{}res.json({policy:store.read(),release});}catch(error){res.status(503).json({error:error.message});}});
+  admin.get('/',(req,res)=>{res.set('Cache-Control','no-store');try{let release=null;try{const envelope=JSON.parse(fs.readFileSync(path.join(releases,'channels/stable.json'),'utf8').replace(/^\uFEFF/,''));const catalog=JSON.parse(Buffer.from(envelope.payload,'base64'));release={version:catalog.version,sequence:catalog.sequence,publishedAt:catalog.publishedAt||catalog.publishedUtc,expiresAt:catalog.expiresAt||catalog.expiresUtc,notes:catalog.notes,files:catalog.files?.length,installer:catalog.installer?.url};}catch{}res.json({policy:store.read(),release,notifications:notifications.read()});}catch(error){res.status(503).json({error:error.message});}});
   admin.put('/policy',express.json({limit:'32kb'}),(req,res)=>{res.set('Cache-Control','no-store');try{res.json({policy:store.write(req.body,req.kv9Actor)});}catch(error){res.status(error.status||400).json({error:error.message});}});
-  return {admin,publicPolicy};
+  admin.post('/notifications',express.json({limit:'16kb'}),(req,res)=>{try{res.json({notification:notifications.publish(req.body,req.kv9Actor)});}catch(error){res.status(error.status||400).json({error:error.message});}});
+  admin.delete('/notifications/:id',(req,res)=>{try{res.json({notification:notifications.cancel(req.params.id,req.kv9Actor)});}catch(error){res.status(error.status||400).json({error:error.message});}});
+  const publicNotifications=(req,res)=>{res.set('Cache-Control','no-store');try{res.json({schema:1,notifications:notifications.publicItems()});}catch{res.status(503).json({error:'Уведомления временно недоступны'});}};
+  return {admin,publicPolicy,publicNotifications};
 }
 module.exports={domain,policy,createStore,createKv9Client};
