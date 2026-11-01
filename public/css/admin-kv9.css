@@ -6,3 +6,5 @@
 #kv9 .kv9-history li:first-child{border-top:0}
 #kv9 .kv9-history small{color:var(--muted)}
 @media(max-width:560px){#kv9 .control-settings-head{flex-wrap:wrap}#kv9 .voice-actions.wk-form-footer{align-items:stretch}#kv9 .voice-actions.wk-form-footer p{flex-basis:100%}}
+
+#kv9 .kv9-message-text{white-space:pre-wrap;overflow-wrap:anywhere}
