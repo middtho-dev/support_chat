@@ -39,6 +39,7 @@ services:
       retries: 3
       start_period: 15s
     volumes:
+      - /srv/kv9-updates:/run/kv9-updates:ro
       - support-data:/app/data
       - support-uploads:/app/public/uploads
       - support-backups:/app/backups

@@ -4,6 +4,7 @@ window.AdminShell = (() => {
   const modules = [
     { id: 'home', label: 'Обзор', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z' },
     { id: 'chat', label: 'Поддержка', description: 'Диалоги с клиентами, сообщения и история обращений.', icon: 'M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z' },
+    { id:'kv9',label:'KV9_',description:'Windows-клиент: подписки, домены и публикации.',manager:true,icon:'M4 3h16v12H4zM8 21h8M12 15v6M8 7l3 3 5-5' },
     { id: 'frp', label: 'FRP', description: 'Удалённый доступ, веб-интерфейсы и управление FRP.', manager: true, icon: 'M3 4h18v12H3zM8 21h8M12 16v5M6 8h2M6 12h4' },
     { id: 'voice', label: 'Голосовые', description: 'Расшифровка голосовых Telegram и оформление текста через OpenAI.', manager: true, icon: 'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8' },
     { id: 'editor', label: 'Редактор', description: 'Оформление исходящих сообщений Telegram Business.', manager: true, icon: 'M12 20h9M4 16l12-12 4 4-12 12H4z' },
