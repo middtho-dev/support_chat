@@ -466,6 +466,8 @@ function setView(view) {
   if(S.view==='support-queue')window.SupportQueue?.open();else window.SupportQueue?.pause();
   $('kv9').classList.toggle('on',S.view==='kv9');
   if(S.view==='kv9')window.Kv9Panel?.open();else window.Kv9Panel?.pause();
+  $('talk').classList.toggle('on',S.view==='talk');
+  if(S.view==='talk')window.TalkPanel?.open();else window.TalkPanel?.pause();
   $('home').classList.toggle('on', S.view === 'home');
   document.body.classList.toggle('tool-active', S.view !== 'chat');
   AdminShell.render(S);
