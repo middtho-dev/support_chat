@@ -423,6 +423,7 @@ app.use('/api/admin/support-queue', require('./support-queue').createSupportQueu
 
 const kv9Client=require('./kv9-client').createKv9Client({authorize:token=>({authenticated:isAdminToken(token),canManageSettings:!!(ADMIN_TOKEN && safeEqualString(token,ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings,actor:getMiniAdminSession(token)?.userId||'owner'})});
 app.use('/api/admin/kv9',kv9Client.admin);
+app.use('/api/admin/talk',require('./talk-proxy').createTalkProxy({authorize:token=>({authenticated:isAdminToken(token),canManageSettings:!!(ADMIN_TOKEN && safeEqualString(token,ADMIN_TOKEN)) || getOperatorAccess(getMiniAdminSession(token)?.userId).canManageSettings,actor:getMiniAdminSession(token)?.userId||'owner'})}));
 app.get('/api/kv9/client-policy',kv9Client.publicPolicy);
 app.get('/api/kv9/notifications',kv9Client.publicNotifications);
 
